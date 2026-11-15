@@ -189,10 +189,12 @@ def check_moves(store, pf, market, state, fx=None):
         title = "%s %s%s %% heute" % (q["symbol"], "+" if chg >= 0 else "−", _fmt(abs(chg)))
         lines = ["%s steht bei %s %s." % ((q.get("name") or q["symbol"],) + tuple(_show(q, q.get("price"), fx)))]
         if val.get("label"):
-            lines.append("Bewertung nach Faustregel: %s. %s" % (val["label"], analytics.move_read(chg, val, q.get("kind"))))
+            pts = val.get("rating") or analytics.rating(val.get("score") or 0)
+            lines.append("Bewertung: %d von 10 Punkten (%s). %s" % (pts, val["label"], analytics.move_read(chg, val, q.get("kind"))))
         verdict = ((ai.get(key) or {}).get("claude") or {}).get("verdict")
         if verdict:
-            lines.append("KI-Recherche: %s." % verdict)
+            ai_pts = ((ai.get(key) or {}).get("claude") or {}).get("score")
+            lines.append("Recherche: %s%s." % ("%s von 10, " % ai_pts if ai_pts else "", verdict))
         label = ((q.get("flow_read") or {}).get("24") or {}).get("label")
         if label:
             lines.append("Bewegung: %s." % label)

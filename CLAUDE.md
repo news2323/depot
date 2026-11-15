@@ -27,4 +27,6 @@ Aktien- und Krypto-Tracker mit Dashboard im Stil des Börsen-Newsletters (Apple-
 - Broker-Import (Trade Republic, comdirect) ist bewusst noch nicht gebaut: Buchungen haben dafür das Feld `source`.
 - Starke Tagesbewegungen: `update.check_moves` meldet sie per Push mit Bewertung (`analytics.move_read`, dieselben Sätze in `web/views.js` `moveRead` → beide Stellen ändern). Schwellen in `portfolio.settings.move_stock/move_crypto`.
 - Anzeige: Aktien immer in Euro, Krypto in US-Dollar. Daten bleiben in der Handelswährung, umgerechnet wird nur bei der Ausgabe (`web/app.js` `toShow`/`px`, `tracker/update.py` `show_price`). Kurs-Alerts tragen `currency`; ohne das Feld gilt die Handelswährung.
+- Bewertung als Punkte 1 bis 10 (1 = deutlich überbewertet, 10 = deutlich unterbewertet): `analytics.rating` aus dem Score, gespeichert als `valuation.rating`; `web/app.js` `ratingOf` rechnet für alte Daten nach. Stufen und Wörter in `RATING_WORDS`.
+- Dashboard: Listen sind sortierbare Tabellen (`tbl` und `COL` in `web/views.js`), Filter über `S.flt`, Sortierung über `S.sort`, Suche im Kopf.
 - Die Bewertung ist eine Faustregel. Überall „keine Anlageberatung“ stehen lassen.

@@ -83,7 +83,7 @@ an denen ein Nachkauf sinnvoll wäre, jeweils mit Begründung. Das ist eine Eins
 {STYLE}
 Struktur:
 {{"summary": "2–3 Sätze zur Lage des Unternehmens",
- "verdict": "unterbewertet|fair|überbewertet", "confidence": "niedrig|mittel|hoch",
+ "verdict": "unterbewertet|fair|überbewertet", "score": 5, "confidence": "niedrig|mittel|hoch",
  "valuation_reasoning": "3–4 Sätze, warum",
  "last_quarter": {{"period": "z. B. Q3 2026", "date": "YYYY-MM-DD", "revenue": "", "revenue_growth": "", "eps": "", "vs_expectations": "", "guidance": "", "highlights": ["2–4 Punkte"], "source_url": ""}},
  "next_earnings": {{"date": "YYYY-MM-DD", "confirmed": true}},
@@ -91,6 +91,7 @@ Struktur:
  "buy_zones": [{{"price": 0.0, "reason": ""}}],
  "risks": ["2–3 Punkte"], "catalysts": ["2–3 Punkte"],
  "ir_url": "", "sources": [{{"name": "", "url": ""}}]}}
+score ist eine ganze Zahl von 1 bis 10: 1 = deutlich überbewertet, 5 bis 6 = fair, 10 = deutlich unterbewertet.
 Kurse in buy_zones in {q.get('currency') or 'der Handelswährung'}."""
 
 
@@ -121,11 +122,12 @@ Das ist eine Einschätzung, keine Anlageberatung.
 
 {STYLE}
 Struktur:
-{{"summary": "2–3 Sätze", "verdict": "abgekühlt|neutral|überhitzt", "confidence": "niedrig|mittel|hoch",
+{{"summary": "2–3 Sätze", "verdict": "unterbewertet|fair|überbewertet", "score": 5, "confidence": "niedrig|mittel|hoch",
  "valuation_reasoning": "2–3 Sätze", "flow_comment": "2 Sätze zu Spot, Futures, Open Interest und Funding",
  "events": [{{"date": "YYYY-MM-DD", "title": ""}}],
  "buy_zones": [{{"price": 0.0, "reason": ""}}],
  "risks": ["2–3 Punkte"], "catalysts": ["2–3 Punkte"], "sources": [{{"name": "", "url": ""}}]}}
+score ist eine ganze Zahl von 1 bis 10: 1 = deutlich überbewertet, 5 bis 6 = fair, 10 = deutlich unterbewertet.
 Kurse in buy_zones in USD."""
 
 
@@ -213,6 +215,7 @@ def depot_rows(assets, res, market, daily, pos):
                      "gewicht_pct": round(p["value"] / total * 100, 1) if p and p["value"] and p["qty"] > 1e-12 else 0,
                      "gewinn_pct": round(p["pnl_pct"], 1) if p and p["pnl_pct"] is not None and p["qty"] > 1e-12 else None,
                      "kurs": q.get("price"), "waehrung": q.get("currency"),
+                     "punkte_regel_1_bis_10": (d.get("valuation") or {}).get("rating"),
                      "bewertung_regel": (d.get("valuation") or {}).get("label"),
                      "urteil_ki": ((res.get(key) or {}).get("claude") or {}).get("verdict"),
                      "nachkauf_zonen": [x["price"] for x in d.get("levels") or []],

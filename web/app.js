@@ -75,7 +75,7 @@ const store = LOCAL ? {
   },
 };
 
-const S = {tab: 'home', range: '1J', mode: 'wert', flowWin: '24', calFilter: 'alle', pf: null, market: {}, daily: {}, analysis: {}, digest: {}, state: {}, loading: false, err: ''};
+const S = {flt: {}, sort: {}, tab: 'home', range: '1J', mode: 'wert', flowWin: '24', calFilter: 'alle', pf: null, market: {}, daily: {}, analysis: {}, digest: {}, state: {}, loading: false, err: ''};
 const emptyPf = () => ({version: 1, base_currency: 'EUR', transactions: [], watchlist: [], alerts: [], settings: {ntfy_topic: ''}});
 
 async function loadAll() {
@@ -128,6 +128,10 @@ function toShow(key, v, day) {
   return v / ((day != null ? fxAt(curOf(key), day) : null) || fxNow(curOf(key)));
 }
 const px = (key, v, day) => money(toShow(key, v, day), showCur(key));
+// Punkte 1 bis 10 aus der Bewertung (dieselbe Formel in tracker/analytics.py: rating)
+function ratingOf(key) { const v = D(key).valuation; return !v || v.score == null ? null : (v.rating ?? Math.max(1, Math.min(10, Math.floor(6 + 3 * v.score)))); }
+const tierOf = r => r == null ? null : r <= 2 ? 0 : r <= 4 ? 1 : r <= 6 ? 2 : r <= 8 ? 3 : 4;
+const isFund = key => !isCoin(key) && /\b(ETF|ETC|UCITS)\b/i.test(A(key).name || D(key).name || '');
 const nameOf = key => A(key).name || D(key).name || key.split(':')[1];
 function priceAt(key, day) {
   const h = D(key).hist;

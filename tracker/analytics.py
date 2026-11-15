@@ -126,6 +126,23 @@ def dividend_info(divs, price, fund=None):
     return out if (divs or out.get("annual")) else None
 
 
+RATING_WORDS = {
+    "stock": ["deutlich überbewertet", "eher überbewertet", "fair bewertet", "eher unterbewertet", "deutlich unterbewertet"],
+    "price": ["Kurs sehr hoch", "Kurs hoch", "Kurs im Mittelfeld", "Kurs niedrig", "Kurs sehr niedrig"],
+    "crypto": ["stark überhitzt", "überhitzt", "neutral", "abgekühlt", "stark abgekühlt"],
+}
+
+
+def rating(score):
+    """Punkte von 1 (deutlich überbewertet) bis 10 (deutlich unterbewertet). Dieselbe Formel in web/app.js (ratingOf)."""
+    return max(1, min(10, int(math.floor(6 + 3 * score))))
+
+
+def rating_label(points, kind):
+    tier = 0 if points <= 2 else 1 if points <= 4 else 2 if points <= 6 else 3 if points <= 8 else 4
+    return RATING_WORDS[kind][tier]
+
+
 def stock_valuation(price, tech, fund, div):
     """Punkte pro Kennzahl: positiv = günstig, negativ = teuer. Ergebnis mit Begründungen."""
     fund = fund or {}
@@ -196,13 +213,12 @@ def stock_valuation(price, tech, fund, div):
             return None
         add(0, "Kurs im mittleren Bereich der 52-Wochen-Spanne, nahe der 200-Tage-Linie")
     score = sum(pts) / max(len(pts), 3)
+    points = rating(score)
     if fundamental >= 2:
-        label = "eher unterbewertet" if score >= 0.5 else "eher überbewertet" if score <= -0.5 else "fair bewertet"
-        basis = "Kennzahlen und Kurslage"
+        label, basis = rating_label(points, "stock"), "Kennzahlen und Kurslage"
     else:
-        label = "Kurs niedrig" if score >= 0.5 else "Kurs hoch" if score <= -0.5 else "Kurs im Mittelfeld"
-        basis = "nur Kurslage, Kennzahlen fehlen"
-    return {"score": round(score, 2), "label": label, "basis": basis, "reasons": reasons}
+        label, basis = rating_label(points, "price"), "nur Kurslage, Kennzahlen fehlen"
+    return {"score": round(score, 2), "rating": points, "label": label, "basis": basis, "reasons": reasons}
 
 
 def crypto_valuation(price, tech, flow, onchain=None):
@@ -261,16 +277,16 @@ def crypto_valuation(price, tech, flow, onchain=None):
     if not pts:
         add(0, "Kurs im mittleren Bereich der 52-Wochen-Spanne, nahe der 200-Tage-Linie")
     score = sum(pts) / max(len(pts), 3)
-    label = "abgekühlt" if score >= 0.5 else "überhitzt" if score <= -0.5 else "neutral"
-    return {"score": round(score, 2), "label": label, "basis": basis, "reasons": reasons}
+    points = rating(score)
+    return {"score": round(score, 2), "rating": points, "label": rating_label(points, "crypto"), "basis": basis, "reasons": reasons}
 
 
 def move_read(chg, valuation, kind="stock"):
     """Ordnet eine Tagesbewegung nach der Bewertung ein. Dieselben Sätze stehen in web/views.js (moveRead)."""
     if chg is None or not valuation or valuation.get("score") is None:
         return ""
-    sc, up = valuation["score"], chg >= 0
-    cheap, dear = sc >= 0.5, sc <= -0.5
+    points, up = valuation.get("rating") or rating(valuation["score"]), chg >= 0
+    cheap, dear = points >= 7, points <= 4
     if kind == "crypto":
         if up:
             return ("Der Anstieg trifft auf einen schon überhitzten Markt." if dear else
