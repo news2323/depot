@@ -142,7 +142,7 @@ MOVE_DEFAULT = {"stock": 5.0, "crypto": 8.0}   # ab dieser Tagesbewegung in Proz
 
 
 def check_moves(store, pf, market, state):
-    """Meldet starke Tagesbewegungen einmal pro Tag und Richtung, mit Einordnung der Bewertung."""
+    """Meldet starke Tagesbewegungen mit Einordnung der Bewertung: bei jeder vollen Schwelle (5, 10, 15 % ...) einmal."""
     cfg = pf.get("settings") or {}
     st = state.setdefault("moves", {})
     today = datetime.date.today().isoformat()
@@ -153,9 +153,11 @@ def check_moves(store, pf, market, state):
         if chg is None or not lim or q.get("error") or q.get("stale") or abs(chg) < lim:
             continue
         d = 1 if chg >= 0 else -1
-        if (st.get(key) or {}).get("day") == today and st[key].get("dir") == d:
-            continue
-        hits.append((key, q, chg, d))
+        step = int(abs(chg) // lim)     # 1 = erste Schwelle, 2 = doppelte Schwelle usw.
+        old = st.get(key) or {}
+        if old.get("day") == today and old.get("dir") == d and old.get("step", 1) >= step:
+            continue    # je Tag, Richtung und Stufe nur eine Meldung
+        hits.append((key, q, chg, d, step))
     for key in list(st):
         if key not in market:
             del st[key]
@@ -163,8 +165,8 @@ def check_moves(store, pf, market, state):
         return 0
     daily = (store.get("daily.json") or {}).get("assets") or {}
     ai = (store.get("analysis.json") or {}).get("assets") or {}
-    for key, q, chg, d in hits:
-        st[key] = {"day": today, "dir": d, "at": now_iso(), "value": chg}
+    for key, q, chg, d, step in hits:
+        st[key] = {"day": today, "dir": d, "step": step, "at": now_iso(), "value": chg}
         info = daily.get(key) or {}
         val = info.get("valuation") or {}
         title = "%s %s%s %% heute" % (q["symbol"], "+" if chg >= 0 else "−", _fmt(abs(chg)))
