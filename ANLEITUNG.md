@@ -32,7 +32,8 @@ Die Protokolle der Läufe sind deshalb öffentlich einsehbar: Das Programm schre
 ### 2. Zugangsschlüssel erstellen
 GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token:
 - Repository access: nur `depot` und `depot-daten`
-- Permissions: **Contents: Read and write**, **Actions: Read and write**
+- Permissions: **Contents: Read and write**, **Actions: Read and write**, **Workflows: Read and write**
+- Expiration: ein festes Datum wählen (mit „No expiration“ lässt sich das Formular nicht abschicken)
 
 Den Schlüssel einmal kopieren. Er wird an zwei Stellen gebraucht: als Secret (Schritt 3) und in der App (Schritt 5).
 
