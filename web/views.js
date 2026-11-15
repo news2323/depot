@@ -73,7 +73,7 @@ function vHome(c) {
       ${(ap.buy_candidates || []).length ? `<p class="sh">Nachkauf-Kandidaten</p><div class="rows">${ap.buy_candidates.map(b => `<div class="row"><div class="l"><div class="t">${esc(b.symbol)}<span>${esc(b.level)}</span></div><div class="x">${esc(b.reason)}</div></div></div>`).join('')}</div>` : ''}
       ${(ap.risks || []).length ? `<p class="sh">Risiken</p><ul class="dots">${ap.risks.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}`) : ''}
   </div><div class="col">
-    ${card('Heute bewegt', 'Die größten Tagesbewegungen im Depot', movers.length ? `<div class="rows">${movers.map(p => posRow(p, true)).join('')}</div>` : '<p class="empty">Noch keine Kurse.</p>')}
+    ${card('Heute bewegt', 'Die größten Tagesbewegungen und wie die Titel bewertet sind', movers.length ? `<div class="rows">${movers.map(p => posRow(p, true)).join('')}</div>` : '<p class="empty">Noch keine Kurse.</p>')}
     ${card('Aufteilung und Risiko', 'Wie dein Geld verteilt ist', `
       <div class="bar" style="height:14px">${c.held.map((p, i) => `<i style="width:${p.weight}%;background:${p.kind === 'crypto' ? 'var(--c2)' : 'var(--c1)'};opacity:${1 - Math.min(i, 5) * 0.08}" title="${esc(p.symbol)} ${nf(p.weight, 1)} %"></i>`).join('')}</div>
       ${legend([{name: `Aktien ${nf(100 - (c.cryptoShare || 0), 0)} %`, color: 'var(--c1)'}, {name: `Krypto ${nf(c.cryptoShare || 0, 0)} %`, color: 'var(--c2)'}])}
@@ -85,9 +85,20 @@ function vHome(c) {
     ${card('Nächste Termine', '', cal.length ? calList(cal) + `<div class="btnrow"><button class="btn sm ghost" data-act="tab" data-v="cal">Alle Termine</button></div>` : '<p class="empty">Keine Termine bekannt.</p>')}
   </div></div>`;
 }
+// Dieselben Sätze stehen in tracker/analytics.py (move_read).
+function moveRead(key, pct) {
+  const v = D(key).valuation;
+  if (pct == null || !v || v.score == null) return '';
+  const up = pct >= 0, cheap = v.score >= 0.5, dear = v.score <= -0.5, cr = key.startsWith('crypto:');
+  let t;
+  if (cr) t = up ? (dear ? 'Anstieg in schon überhitztem Markt' : cheap ? 'Anstieg aus abgekühlter Lage' : '') : (dear ? 'baut Überhitzung ab, noch nicht günstig' : cheap ? 'Rücksetzer in abgekühlter Lage' : '');
+  else t = up ? (dear ? 'wird noch teurer' : cheap ? 'steigt von niedrigem Niveau, noch Luft' : 'wird etwas teurer') : (dear ? 'fällt von hohem Niveau, noch nicht günstig' : cheap ? 'Rücksetzer bei günstiger Bewertung' : 'wird etwas günstiger');
+  return v.label + (t ? ' · ' + t : '');
+}
 function posRow(p, dayOnly) {
+  const mr = dayOnly ? moveRead(p.key, p.dayPct) : '';
   return `<button class="row" data-act="open" data-key="${esc(p.key)}"><div class="l"><div class="t">${esc(p.symbol)}<span>${esc(p.name)}</span></div>
-    <div class="m num">${dayOnly ? money(p.price, p.cur) + ' · ' + eurS(p.dayEur) : nf(p.qty, p.qty % 1 ? 4 : 0) + ' Stück · Einstand ' + eur(p.cost / p.qty)}</div></div>
+    <div class="m num">${dayOnly ? money(p.price, p.cur) + ' · ' + eurS(p.dayEur) : nf(p.qty, p.qty % 1 ? 4 : 0) + ' Stück · Einstand ' + eur(p.cost / p.qty)}</div>${mr ? `<div class="m">${esc(mr)}</div>` : ''}</div>
     <div class="r"><div class="v num">${dayOnly ? '' : eur(p.value)}</div>${pill(dayOnly ? p.dayPct : p.pnlPct)}</div></button>`;
 }
 function drawCharts() {
@@ -311,6 +322,9 @@ function vSettings() {
   openSheet(sheetTop('Einstellungen') + card('Push aufs Handy', 'Über die kostenlose App ntfy', `<form id="f-ntfy"><div class="f"><label>Geheimer Kanalname</label><input name="topic" value="${esc(s.ntfy_topic || '')}" placeholder="noch keiner" autocomplete="off" autocapitalize="off"></div>
     <p class="hint">In der ntfy-App auf „Thema abonnieren“ tippen und genau diesen Namen eintragen. Wer den Namen kennt, kann die Alerts mitlesen: also zufällig wählen und nicht weitergeben.</p>
     <div class="btnrow"><button class="btn" type="submit">Speichern</button><button class="btn ghost" type="button" data-act="gentopic">Zufälligen Namen erzeugen</button><button class="btn ghost" type="button" data-act="testpush">Test senden</button></div></form>`)
+  + card('Starke Bewegungen', 'Meldung aufs Handy mit Einordnung der Bewertung', `<form id="f-moves"><div class="f2"><div class="f"><label>Aktien ab ± %</label><input name="stock" type="number" min="0" step="0.5" inputmode="decimal" value="${esc(s.move_stock ?? 5)}"></div><div class="f"><label>Krypto ab ± %</label><input name="crypto" type="number" min="0" step="0.5" inputmode="decimal" value="${esc(s.move_crypto ?? 8)}"></div></div>
+    <p class="hint">Bewegt sich ein Titel aus Depot oder Watchlist an einem Tag stärker, kommt einmal eine Meldung: ob er nach Faustregel unter- oder überbewertet ist und wo die nächste Nachkauf-Zone liegt. 0 schaltet die Meldung aus. Keine Anlageberatung.</p>
+    <div class="btnrow"><button class="btn" type="submit">Speichern</button></div></form>`)
   + card('Daten', '', `<div class="rows"><div class="row"><div class="l"><div class="t" style="font-size:15px">Kurse</div><div class="m">${esc(ago(S.market.updated))}</div></div></div>
     <div class="row"><div class="l"><div class="t" style="font-size:15px">Kennzahlen und Verläufe</div><div class="m">${esc(ago(S.daily.updated))}</div></div></div>
     <div class="row"><div class="l"><div class="t" style="font-size:15px">KI-Recherche</div><div class="m">${S.analysis.updated ? esc(ago(S.analysis.updated)) : 'noch nicht gelaufen'}</div></div></div></div>
@@ -374,6 +388,7 @@ document.addEventListener('submit', async ev => {
     if (S.err) { const m = S.err; cfg = null; renderSetup(); return toast(m, 5000); }
     localStorage.setItem('depot_cfg', JSON.stringify(cfg)); return render();
   }
+  if (f.id === 'f-moves') { S.pf.settings = Object.assign({}, S.pf.settings, {move_stock: Math.max(0, parseFloat(d.stock) || 0), move_crypto: Math.max(0, parseFloat(d.crypto) || 0)}); return savePf('Gespeichert'); }
   if (f.id === 'f-ntfy') { S.pf.settings = Object.assign({}, S.pf.settings, {ntfy_topic: d.topic.trim()}); return savePf('Kanal gespeichert'); }
   const kind = d.kind, symbol = cleanSym(kind, d.symbol);
   if (!symbol) return toast('Kürzel fehlt');

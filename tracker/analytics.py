@@ -243,3 +243,24 @@ def crypto_valuation(price, tech, flow):
     score = sum(pts) / max(len(pts), 3)
     label = "abgekühlt" if score >= 0.5 else "überhitzt" if score <= -0.5 else "neutral"
     return {"score": round(score, 2), "label": label, "basis": "Trend, Abstand zum Hoch und Hebel", "reasons": reasons}
+
+
+def move_read(chg, valuation, kind="stock"):
+    """Ordnet eine Tagesbewegung nach der Bewertung ein. Dieselben Sätze stehen in web/views.js (moveRead)."""
+    if chg is None or not valuation or valuation.get("score") is None:
+        return ""
+    sc, up = valuation["score"], chg >= 0
+    cheap, dear = sc >= 0.5, sc <= -0.5
+    if kind == "crypto":
+        if up:
+            return ("Der Anstieg trifft auf einen schon überhitzten Markt." if dear else
+                    "Der Anstieg kommt aus einer abgekühlten Lage." if cheap else "Die Marktlage war neutral.")
+        return ("Der Rückgang baut Überhitzung ab, günstig ist der Coin dadurch noch nicht." if dear else
+                "Rücksetzer in einer schon abgekühlten Lage." if cheap else "Die Marktlage war neutral.")
+    if up:
+        return ("Der Anstieg macht eine schon teure Aktie noch teurer." if dear else
+                "Der Anstieg kommt von niedrigem Bewertungsniveau, laut Kennzahlen ist noch Luft." if cheap else
+                "Die Bewertung war fair, mit dem Anstieg wird die Aktie etwas teurer.")
+    return ("Der Kurs fällt von hohem Bewertungsniveau, günstig ist die Aktie dadurch noch nicht." if dear else
+            "Rücksetzer bei günstiger Bewertung." if cheap else
+            "Die Bewertung war fair, der Rückgang macht die Aktie etwas günstiger.")

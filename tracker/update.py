@@ -57,13 +57,14 @@ def run_fast(store):
         if cur != "EUR":
             fx[cur] = sources.fx_rate(cur) or old_fx.get(cur)
     fired = check_alerts(pf, out, state)
+    moved = check_moves(store, pf, out, state)
     for sym in list(oi_mem):
         if asset_key("crypto", sym) not in assets:
             del oi_mem[sym]
     store.put("market.json", {"updated": now_iso(), "fx": fx, "assets": out, "sources": sources.STATUS})
     store.put("state.json", state)
-    log("Kurse: %d Titel, %d ohne Daten, %d Alerts ausgelöst" % (
-        len(out), sum(1 for q in out.values() if q.get("error")), fired))
+    log("Kurse: %d Titel, %d ohne Daten, %d Alerts ausgelöst, %d Bewegungen gemeldet" % (
+        len(out), sum(1 for q in out.values() if q.get("error")), fired, moved))
 
 
 def _window_change(q, flow, h):
@@ -135,6 +136,54 @@ def check_alerts(pf, market, state):
         if aid not in ids:
             del st[aid]
     return fired
+
+
+MOVE_DEFAULT = {"stock": 5.0, "crypto": 8.0}   # ab dieser Tagesbewegung in Prozent kommt eine Meldung, 0 = aus
+
+
+def check_moves(store, pf, market, state):
+    """Meldet starke Tagesbewegungen einmal pro Tag und Richtung, mit Einordnung der Bewertung."""
+    cfg = pf.get("settings") or {}
+    st = state.setdefault("moves", {})
+    today = datetime.date.today().isoformat()
+    hits = []
+    for key, q in market.items():
+        chg = q.get("change_pct")
+        lim = cfg.get("move_" + q.get("kind", ""), MOVE_DEFAULT.get(q.get("kind"), 0))
+        if chg is None or not lim or q.get("error") or q.get("stale") or abs(chg) < lim:
+            continue
+        d = 1 if chg >= 0 else -1
+        if (st.get(key) or {}).get("day") == today and st[key].get("dir") == d:
+            continue
+        hits.append((key, q, chg, d))
+    for key in list(st):
+        if key not in market:
+            del st[key]
+    if not hits:
+        return 0
+    daily = (store.get("daily.json") or {}).get("assets") or {}
+    ai = (store.get("analysis.json") or {}).get("assets") or {}
+    for key, q, chg, d in hits:
+        st[key] = {"day": today, "dir": d, "at": now_iso(), "value": chg}
+        info = daily.get(key) or {}
+        val = info.get("valuation") or {}
+        title = "%s %s%s %% heute" % (q["symbol"], "+" if chg >= 0 else "−", _fmt(abs(chg)))
+        lines = ["%s steht bei %s %s." % (q.get("name") or q["symbol"], _fmt(q.get("price")), q.get("currency", ""))]
+        if val.get("label"):
+            lines.append("Bewertung nach Faustregel: %s. %s" % (val["label"], analytics.move_read(chg, val, q.get("kind"))))
+        verdict = ((ai.get(key) or {}).get("claude") or {}).get("verdict")
+        if verdict:
+            lines.append("KI-Recherche: %s." % verdict)
+        label = ((q.get("flow_read") or {}).get("24") or {}).get("label")
+        if label:
+            lines.append("Bewegung: %s." % label)
+        below = [x for x in info.get("levels") or [] if q.get("price") and x.get("price") and x["price"] < q["price"]]
+        if below and chg < 0:
+            z = max(below, key=lambda x: x["price"])
+            lines.append("Nächste Nachkauf-Zone: %s %s." % (_fmt(z["price"]), q.get("currency", "")))
+        lines.append("Keine Anlageberatung.")
+        push(pf, title, "\n".join(lines))
+    return len(hits)
 
 
 def push(pf, title, body):

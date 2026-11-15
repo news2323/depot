@@ -67,6 +67,12 @@ Wenn du lokal schon Käufe eingetragen hast: In den Einstellungen „Depot als D
 
 Der Kanalname ist das Passwort. Die Alert-Texte (z. B. „NVDA unter 120 $“) laufen über den ntfy-Server.
 
+## Meldung bei starken Bewegungen
+
+Bewegt sich ein Titel aus Depot oder Watchlist an einem Tag um mehr als 5 % (Aktien) oder 8 % (Krypto), kommt einmal
+pro Tag und Richtung ein Push: wie der Titel nach Faustregel bewertet ist, was die Bewegung dafür bedeutet und wo die
+nächste Nachkauf-Zone liegt. Die Schwellen stehen in den Einstellungen (Zahnrad), 0 schaltet die Meldung aus.
+
 ## Was wann läuft
 
 | Ablauf | Wann | Was |
