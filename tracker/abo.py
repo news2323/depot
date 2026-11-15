@@ -79,6 +79,9 @@ def cmd_plan(store, args):
         d = (daily.get("assets") or {}).get(key) or {}
         if q.get("error") or not q.get("price"):
             continue
+        fund = d.get("fund") or {}
+        if a["kind"] == "stock" and not (fund.get("pe") or fund.get("forward_pe") or fund.get("target_mean")):
+            continue    # ETFs und ETCs haben keine Quartalszahlen: nur Kurslage, keine Recherche
         prompt = (ai.crypto_prompt if a["kind"] == "crypto" else ai.stock_prompt)(a, q, d, today)
         jobs.append({"key": key, "auftrag": prompt})
     print(json.dumps({"heute": today, "titel": jobs[:args.max], "weitere_offen": max(0, len(jobs) - args.max)},
