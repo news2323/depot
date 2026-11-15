@@ -8,7 +8,7 @@ Aktien- und Krypto-Tracker mit Dashboard im Stil des Börsen-Newsletters (Apple-
   - `sources.py` Yahoo (Kurse, Kennzahlen), Binance/OKX/Hyperliquid/Bybit (Spot, Futures, OI, Funding), `classify_flow`
   - `analytics.py` Trend, Nachkauf-Zonen, Dividenden, regelbasierte Bewertung
   - `portfolio.py` Bestände per FIFO in Euro (dieselbe Logik steht noch einmal in `web/app.js` → beide Stellen ändern)
-  - `update.py fast|daily|all`, `ai.py` (Claude + Grok), `digest.py` (Kalender, Newsletter-Kurzfassung)
+  - `update.py fast|daily|all`, `ai.py` (Claude + Grok über API, nur mit Schlüssel), `abo.py` (Recherche über das Claude-Abo: geplante Aufgabe `depot-ki-recherche` in der App, Token aus dem Schlüsselbund), `digest.py` (Kalender, Newsletter-Kurzfassung)
 - `web/` statische App (`index.html`, `app.css`, `app.js` = Daten/Rechnen/Diagramme, `views.js` = Ansichten). Kein Build.
   Auf `localhost` spricht sie mit `server.py`, sonst über die GitHub-API mit dem privaten Daten-Repo.
 - `server.py` lokaler Server (`--data <ordner> --port <n>` für Tests mit Beispieldaten).

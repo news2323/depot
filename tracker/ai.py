@@ -178,7 +178,47 @@ def _age_days(iso):
         return 1e9
 
 
+def due_keys(assets, res, daily, pos, today, refresh_days=None):
+    """Titel, die neu recherchiert werden sollten: Bestand zuerst, dann die ältesten."""
+    days = REFRESH_DAYS if refresh_days is None else refresh_days
+    todo = []
+    for key in assets:
+        old = (res.get(key) or {}).get("claude") or {}
+        age = _age_days(old.get("at"))
+        earn = (daily.get("assets") or {}).get(key, {}).get("earnings_date")
+        fresh_numbers = bool(earn and old.get("at") and old["at"][:10] < earn <= today)
+        if age >= days or fresh_numbers:
+            todo.append((key, age))
+    todo.sort(key=lambda x: (0 if (pos.get(x[0]) or {}).get("qty", 0) > 0 else 1, -x[1]))
+    return [k for k, _ in todo]
+
+
+def depot_rows(assets, res, market, daily, pos):
+    """Zeilen für die Depot-Einschätzung: nur Gewichte in Prozent, keine Beträge. Leer ohne Bestand."""
+    held = [p for p in pos.values() if p["qty"] > 1e-12 and p["value"]]
+    total = sum(p["value"] for p in held)
+    if not held or not total:
+        return []
+    rows = []
+    for key, a in assets.items():
+        p = pos.get(key)
+        d = (daily.get("assets") or {}).get(key) or {}
+        q = (market.get("assets") or {}).get(key) or {}
+        rows.append({"symbol": a["symbol"], "art": "Krypto" if a["kind"] == "crypto" else "Aktie",
+                     "gewicht_pct": round(p["value"] / total * 100, 1) if p and p["value"] and p["qty"] > 1e-12 else 0,
+                     "gewinn_pct": round(p["pnl_pct"], 1) if p and p["pnl_pct"] is not None and p["qty"] > 1e-12 else None,
+                     "kurs": q.get("price"), "waehrung": q.get("currency"),
+                     "bewertung_regel": (d.get("valuation") or {}).get("label"),
+                     "urteil_ki": ((res.get(key) or {}).get("claude") or {}).get("verdict"),
+                     "nachkauf_zonen": [x["price"] for x in d.get("levels") or []],
+                     "sektor": (d.get("fund") or {}).get("sector")})
+    return rows
+
+
 def main():
+    if not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("XAI_API_KEY"):
+        log("KI: keine Schlüssel gesetzt, übersprungen")
+        return
     store = get_store()
     pf = store.get("portfolio.json") or empty_portfolio()
     market = store.get("market.json") or {}
@@ -200,18 +240,9 @@ def main():
         log("Claude: kein Schlüssel gesetzt, übersprungen")
 
     if client:
-        def due(key):
-            old = (res.get(key) or {}).get("claude") or {}
-            age = _age_days(old.get("at"))
-            earn = (daily.get("assets") or {}).get(key, {}).get("earnings_date")
-            fresh_numbers = bool(earn and old.get("at") and old["at"][:10] < earn <= today)
-            return age >= REFRESH_DAYS or fresh_numbers, age
-
-        todo = [(k, due(k)) for k in assets]
-        todo = [(k, x[1]) for k, x in todo if x[0]]
-        todo.sort(key=lambda x: (0 if (pos.get(x[0]) or {}).get("qty", 0) > 0 else 1, -x[1]))
+        todo = due_keys(assets, res, daily, pos, today)
         done = 0
-        for key, _ in todo[:MAX_PER_RUN]:
+        for key in todo[:MAX_PER_RUN]:
             a = assets[key]
             q = (market.get("assets") or {}).get(key) or {}
             d = (daily.get("assets") or {}).get(key) or {}
@@ -230,22 +261,8 @@ def main():
                 done += 1
         log("Claude: %d Titel recherchiert, %d weitere stehen an" % (done, max(0, len(todo) - MAX_PER_RUN)))
 
-        held = [p for p in pos.values() if p["qty"] > 1e-12 and p["value"]]
-        total = sum(p["value"] for p in held)
-        if held and total:
-            rows = []
-            for key, a in assets.items():
-                p = pos.get(key)
-                d = (daily.get("assets") or {}).get(key) or {}
-                q = (market.get("assets") or {}).get(key) or {}
-                rows.append({"symbol": a["symbol"], "art": "Krypto" if a["kind"] == "crypto" else "Aktie",
-                             "gewicht_pct": round(p["value"] / total * 100, 1) if p and p["value"] and p["qty"] > 1e-12 else 0,
-                             "gewinn_pct": round(p["pnl_pct"], 1) if p and p["pnl_pct"] is not None and p["qty"] > 1e-12 else None,
-                             "kurs": q.get("price"), "waehrung": q.get("currency"),
-                             "bewertung_regel": (d.get("valuation") or {}).get("label"),
-                             "urteil_ki": ((res.get(key) or {}).get("claude") or {}).get("verdict"),
-                             "nachkauf_zonen": [x["price"] for x in d.get("levels") or []],
-                             "sektor": (d.get("fund") or {}).get("sector")})
+        rows = depot_rows(assets, res, market, daily, pos)
+        if rows:
             try:
                 out = ask_claude(client, depot_prompt(rows, today), search=False)
             except Exception as e:

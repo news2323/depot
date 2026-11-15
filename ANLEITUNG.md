@@ -43,10 +43,10 @@ Settings → Secrets and variables → Actions → New repository secret:
 |---|---|
 | `DATA_REPO` | `deinname/depot-daten` |
 | `DATA_TOKEN` | der Zugangsschlüssel aus Schritt 2 |
-| `ANTHROPIC_API_KEY` | derselbe Schlüssel wie beim Newsletter (für Claude) |
+| `ANTHROPIC_API_KEY` | nur für Recherche über die API-Abrechnung; weglassen, wenn sie über das Abo läuft |
 | `XAI_API_KEY` | Schlüssel von console.x.ai (für Grok, optional) |
 
-Ohne die beiden KI-Schlüssel läuft alles außer der KI-Recherche.
+Die beiden KI-Schlüssel sind freiwillig. Ohne sie läuft die Recherche über das Claude-Abo (siehe unten).
 
 ### 4. Webseite einschalten
 Im Repo `depot`: Settings → Pages → Source: **GitHub Actions**. Danach unter Actions den Ablauf
@@ -75,10 +75,17 @@ Der Kanalname ist das Passwort. Die Alert-Texte (z. B. „NVDA unter 120 $“) l
 
 GitHub schaltet zeitgesteuerte Abläufe ab, wenn im Repo 60 Tage nichts geändert wurde. Dann unter Actions wieder einschalten.
 
-## Kosten der KI-Recherche
+## KI-Recherche: über das Claude-Abo oder über die API
 
-Jeder Titel wird höchstens alle 7 Tage neu recherchiert, pro Tag höchstens 6 Titel (`REFRESH_DAYS`, `MAX_PER_RUN` in
-`tracker/ai.py`). Dazu kommt täglich eine kurze Depot-Einschätzung und ein Grok-Abruf. Das Modell steht in `CLAUDE_MODEL`.
+**Über das Abo (eingerichtet):** In der Claude-App läuft samstags um 9 Uhr die geplante Aufgabe „Depot: KI-Recherche“.
+Sie recherchiert bis zu 12 fällige Titel (älter als 6 Tage) und die Depot-Einschätzung und schreibt beides ins Daten-Repo.
+Das kostet nichts extra, zählt aber auf das Nutzungslimit des Abos. Der Mac muss an und die App offen sein, sonst läuft
+die Aufgabe beim nächsten Start nach. Den Zugangsschlüssel holt das Skript `tracker/abo.py` aus dem macOS-Schlüsselbund
+(dort liegt er seit dem ersten `git push`). Grenzen stehen in `MAX_TITEL` und `REFRESH_DAYS` in `tracker/abo.py`.
+
+**Über die API (aus):** Mit dem Secret `ANTHROPIC_API_KEY` recherchiert stattdessen der tägliche Lauf auf GitHub
+(`tracker/ai.py`, höchstens 6 Titel pro Tag, Abrechnung nach Verbrauch). Ohne das Secret wird das übersprungen.
+`XAI_API_KEY` schaltet zusätzlich die Stimmung von X über Grok ein, ebenfalls nach Verbrauch.
 
 ## Woher die Daten kommen
 
