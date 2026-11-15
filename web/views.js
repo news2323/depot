@@ -46,7 +46,7 @@ function firedAlerts() {
   return (S.pf.alerts || []).filter(a => st[a.id]).map(a => Object.assign({fired: st[a.id]}, a));
 }
 function alertText(a) {
-  const cur = a.type.startsWith('price') ? ' ' + (CUR[curOf(keyOf(a.kind, a.symbol))] || '') : a.type.startsWith('funding') ? ' %' : ' %';
+  const cur = a.type.startsWith('price') ? ' ' + (CUR[a.currency || curOf(keyOf(a.kind, a.symbol))] || '') : a.type.startsWith('funding') ? ' %' : ' %';
   return `${ALERT_TYPES[a.type].replace(/ \(.*\)/, '')} ${nf(a.value, a.value < 1 ? 4 : 2)}${cur}`;
 }
 function vHome(c) {
@@ -98,7 +98,7 @@ function moveRead(key, pct) {
 function posRow(p, dayOnly) {
   const mr = dayOnly ? moveRead(p.key, p.dayPct) : '';
   return `<button class="row" data-act="open" data-key="${esc(p.key)}"><div class="l"><div class="t">${esc(p.symbol)}<span>${esc(p.name)}</span></div>
-    <div class="m num">${dayOnly ? money(p.price, p.cur) + ' · ' + eurS(p.dayEur) : nf(p.qty, p.qty % 1 ? 4 : 0) + ' Stück · Einstand ' + eur(p.cost / p.qty)}</div>${mr ? `<div class="m">${esc(mr)}</div>` : ''}</div>
+    <div class="m num">${dayOnly ? px(p.key, p.price) + ' · ' + eurS(p.dayEur) : nf(p.qty, p.qty % 1 ? 4 : 0) + ' Stück · Einstand ' + eur(p.cost / p.qty)}</div>${mr ? `<div class="m">${esc(mr)}</div>` : ''}</div>
     <div class="r"><div class="v num">${dayOnly ? '' : eur(p.value)}</div>${pill(dayOnly ? p.dayPct : p.pnlPct)}</div></button>`;
 }
 function drawCharts() {
@@ -127,13 +127,14 @@ function drawCharts() {
     const key = el.dataset.key, h = D(key).hist, c2 = calc();
     if (h && h.d.length > 1) {
       const from = h.d[h.d.length - 1] - RANGES[S.assetRange || '1J'], cur = curOf(key);
-      const pts = h.d.map((x, i) => [x, h.c[i]]).filter(p => p[0] >= from);
+      const pts = h.d.map((x, i) => [x, toShow(key, h.c[i], x)]).filter(p => p[0] >= from);
       const p = c2.pos.find(x => x.key === key), hl = [];
-      if (p && p.qty > 1e-12 && p.avgNative) hl.push({y: p.avgNative, label: 'Dein Einstand ' + money(p.avgNative, cur), color: '#0066cc'});
-      (D(key).levels || []).slice(0, 2).forEach(l => hl.push({y: l.price, label: 'Nachkauf-Zone ' + money(l.price, cur), color: '#1a7f37'}));
-      const mk = c2.txs.filter(t => t.key === key).map(t => ({x: t.day, y: priceAt(key, t.day), color: t.type === 'buy' ? '#1a7f37' : '#d70015',
+      const avg = p && p.qty > 1e-12 ? (showCur(key) === 'EUR' ? p.cost / p.qty : p.avgNative) : null;
+      if (avg) hl.push({y: avg, label: 'Dein Einstand ' + money(avg, showCur(key)), color: '#0066cc'});
+      (D(key).levels || []).slice(0, 2).forEach(l => hl.push({y: toShow(key, l.price), label: 'Nachkauf-Zone ' + px(key, l.price), color: '#1a7f37'}));
+      const mk = c2.txs.filter(t => t.key === key).map(t => ({x: t.day, y: toShow(key, priceAt(key, t.day), t.day), color: t.type === 'buy' ? '#1a7f37' : '#d70015',
         title: `${t.type === 'buy' ? 'Kauf' : 'Verkauf'} ${nf(t.qty, 4)} zu ${money(t.price, t.currency)}`}));
-      lineChart(el, [{name: key.split(':')[1], color: '#1d1d1f', pts}], {fmt: v => money(v, cur), hlines: hl.filter(x => x.y > 0), markers: mk, height: 220, label: 'Kursverlauf'});
+      lineChart(el, [{name: key.split(':')[1], color: '#1d1d1f', pts}], {fmt: v => money(v, showCur(key)), hlines: hl.filter(x => x.y > 0), markers: mk, height: 220, label: 'Kursverlauf'});
     } else el.innerHTML = '<p class="empty">Der Kursverlauf kommt mit der nächsten täglichen Aktualisierung.</p>';
   }
 }
@@ -165,15 +166,15 @@ function vAnalyse(c) {
     <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${ai && ai.verdict ? `<span class="chip ${valClass(ai.verdict)}">Claude: ${esc(ai.verdict)}</span>` : ''}${gr && gr.sentiment ? `<span class="chip ${/bull/.test(gr.sentiment) ? 'good' : /bär/.test(gr.sentiment) ? 'bad' : ''}">X: ${esc(gr.sentiment)}</span>` : ''}</div></div>
     <div class="r">${v ? `<span class="chip ${valClass(v.label)}">${esc(v.label)}</span>` : '<span class="chip">offen</span>'}</div></button>`).join('');
   const lv = keys.map(k => ({k, l: (D(k).levels || [])[0], p: A(k).price})).filter(x => x.l && x.p).sort((a, b) => b.l.dist_pct - a.l.dist_pct);
-  const lvRows = lv.map(({k, l}) => `<button class="row" data-act="open" data-key="${esc(k)}"><div class="l"><div class="t">${esc(k.split(':')[1])}<span>${money(l.price, curOf(k))}</span></div>
-    <div class="m">${esc(l.label)} · aktuell ${money(A(k).price, curOf(k))}</div></div><div class="r"><span class="chip ${l.dist_pct > -5 ? 'good' : ''} num">${nf(l.dist_pct, 1)} % entfernt</span></div></button>`).join('');
+  const lvRows = lv.map(({k, l}) => `<button class="row" data-act="open" data-key="${esc(k)}"><div class="l"><div class="t">${esc(k.split(':')[1])}<span>${px(k, l.price)}</span></div>
+    <div class="m">${esc(l.label)} · aktuell ${px(k, A(k).price)}</div></div><div class="r"><span class="chip ${l.dist_pct > -5 ? 'good' : ''} num">${nf(l.dist_pct, 1)} % entfernt</span></div></button>`).join('');
   const coins = keys.filter(k => k.startsWith('crypto:') && A(k).flow);
   const divs = c.held.filter(p => D(p.key).div && D(p.key).div.annual);
   return `<div class="grid half"><div class="col">
     ${card('Bewertung', 'Von günstig nach teuer. Regelwerk aus KGV, PEG, Analystenzielen und Kurslage', `<div class="rows">${valRows}</div>
       <div class="note">Die Einstufung ist eine Faustregel aus öffentlichen Kennzahlen. Tippe einen Titel an für alle Gründe${S.analysis.updated ? '' : '. Die KI-Recherche (Quartalszahlen, Investor Relations) läuft, sobald die Schlüssel hinterlegt sind'}.</div>`)}
     ${card('Dividenden', `Erwartet pro Jahr: ${eur(c.divYear)} brutto`, divs.length ? `<div class="rows">${divs.map(p => { const d = D(p.key).div; return `<button class="row" data-act="open" data-key="${esc(p.key)}"><div class="l">
-      <div class="t">${esc(p.symbol)}<span>${nf(d.yield_pct, 2)} % Rendite</span></div><div class="m num">${money(d.annual, p.cur)} je Aktie · ${d.per_year || '–'}× jährlich${d.next_ex ? ' · nächster Ex-Tag ' + dateDe(d.next_ex) + (d.next_ex_estimated ? ' (geschätzt)' : '') : ''}</div></div>
+      <div class="t">${esc(p.symbol)}<span>${nf(d.yield_pct, 2)} % Rendite</span></div><div class="m num">${px(p.key, d.annual)} je Aktie · ${d.per_year || '–'}× jährlich${d.next_ex ? ' · nächster Ex-Tag ' + dateDe(d.next_ex) + (d.next_ex_estimated ? ' (geschätzt)' : '') : ''}</div></div>
       <div class="r"><div class="v num">${eur(p.divYear)}</div><span class="muted tiny">pro Jahr</span></div></button>`; }).join('')}</div>` : '<p class="empty">Keine Dividendentitel im Depot.</p>')}
   </div><div class="col">
     ${card('Nachkauf-Zonen', 'Die nächste Unterstützung unter dem aktuellen Kurs', lvRows ? `<div class="rows">${lvRows}</div>` : '<p class="empty">Noch keine Kursverläufe.</p>')}
@@ -205,7 +206,7 @@ function vWatch() {
   return `<div class="grid half"><div class="col">
     ${card('Beobachtet', 'Titel, die du noch nicht hältst', (wl.length ? `<div class="rows">${wl.map(w => { const k = keyOf(w.kind, w.symbol), a = A(k), v = D(k).valuation, l = (D(k).levels || [])[0];
       return `<button class="row" data-act="open" data-key="${esc(k)}"><div class="l"><div class="t">${esc(w.symbol)}<span>${esc(nameOf(k))}</span></div>
-      <div class="m num">${a.price != null ? money(a.price, curOf(k)) : 'Kurs kommt mit der nächsten Aktualisierung'}${l ? ' · Nachkauf-Zone ' + money(l.price, curOf(k)) : ''}</div>
+      <div class="m num">${a.price != null ? px(k, a.price) : 'Kurs kommt mit der nächsten Aktualisierung'}${l ? ' · Nachkauf-Zone ' + px(k, l.price) : ''}</div>
       ${v ? `<div style="margin-top:6px"><span class="chip ${valClass(v.label)}">${esc(v.label)}</span></div>` : ''}</div><div class="r">${pill(a.change_pct)}</div></button>`; }).join('')}</div>` : '<p class="empty">Noch nichts auf der Watchlist.</p>')
       + `<div class="btnrow"><button class="btn" data-act="addwatch">Titel hinzufügen</button></div>`)}
   </div><div class="col">
@@ -227,7 +228,7 @@ function calList(events) {
     return `<div class="day"><div class="badge ${d === today ? 'today' : ''}"><div class="w">${d === today ? 'Heute' : WT[dt.getDay()]}</div><div class="d">${dt.getDate()}</div><div class="mo">${MON_K[dt.getMonth()]}</div></div>
     <div style="min-width:0;flex:1">${by[d].map(e => { const [cls, lab] = CAT[e.category] || ['', e.category];
       return `<div class="ev"><span class="chip ${cls}">${esc(lab)}</span>${e.estimated ? ' <span class="tiny muted">geschätzt</span>' : ''}
-      <div class="ti">${esc(e.title)}${e.expected ? ` <span class="muted">· für dich etwa ${money(e.expected, e.currency)} brutto</span>` : ''}</div></div>`; }).join('')}</div></div>`; }).join('')}</div>`;
+      <div class="ti">${esc(e.title)}${e.expected ? ` <span class="muted">· für dich etwa ${fxNow(e.currency) ? eur(e.expected / fxNow(e.currency)) : money(e.expected, e.currency)} brutto</span>` : ''}</div></div>`; }).join('')}</div></div>`; }).join('')}</div>`;
 }
 function vCal() {
   const all = S.digest.calendar || [], f = S.calFilter;
@@ -247,24 +248,24 @@ function vAsset(key) {
   const watched = (S.pf.watchlist || []).some(w => keyOf(w.kind, w.symbol) === key);
   const ir = safeUrl((ai || {}).ir_url) || safeUrl(f.ir_website) || safeUrl(f.website);
   let h = sheetTop(`${esc(sym)} <span class="muted" style="font-weight:400;font-size:17px">${esc(nameOf(key))}</span>`, [f.sector, f.industry].filter(Boolean).map(esc).join(' · '));
-  h += `<section class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px"><div><span style="font-size:30px;font-weight:700;letter-spacing:-.02em" class="num">${money(a.price, cur)}</span> ${pill(a.change_pct)}</div>${seg('arange', ['3M', '1J', 'Max'], S.assetRange || '1J')}</div>
+  h += `<section class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px"><div><span style="font-size:30px;font-weight:700;letter-spacing:-.02em" class="num">${px(key, a.price)}</span> ${pill(a.change_pct)}</div>${seg('arange', ['3M', '1J', 'Max'], S.assetRange || '1J')}</div>
     <div class="chart" id="ch-asset" data-key="${esc(key)}"></div>
     <div class="tiles">${tile('1 Monat', pctS(t.perf_1m, 1), '', sign(t.perf_1m))}${tile('1 Jahr', pctS(t.perf_1y, 1), '', sign(t.perf_1y))}
-    ${tile('52-Wochen-Spanne', t.low52 ? money(t.low52, cur) + ' – ' + money(t.high52, cur) : '–')}${tile('Abstand zum Hoch', t.from_high != null ? nf(t.from_high, 1) + ' %' : '–')}</div></section>`;
+    ${tile('52-Wochen-Spanne', t.low52 ? px(key, t.low52) + ' – ' + px(key, t.high52) : '–')}${tile('Abstand zum Hoch', t.from_high != null ? nf(t.from_high, 1) + ' %' : '–')}</div></section>`;
   if (p) h += card('Deine Position', '', `<div class="tiles" style="margin:0">${tile('Wert', eur(p.value), nf(p.weight, 1) + ' % vom Depot')}${tile('Gewinn', eurS(p.pnl), pctS(p.pnlPct), sign(p.pnl))}
     ${tile('Stück', nf(p.qty, p.qty % 1 ? 4 : 0), 'Einstand ' + eur(p.cost / p.qty) + ' je Stück')}${tile('Heute', eurS(p.dayEur), '', sign(p.dayEur))}</div>`);
   if (v) h += card('Bewertung', esc(v.basis), `<span class="chip ${valClass(v.label)}" style="font-size:14px;padding:5px 12px">${esc(v.label)}</span>
     <div class="rows" style="margin-top:10px">${(v.reasons || []).map(r => `<div class="row"><div class="l x" style="margin:0">${esc(r.text)}</div><div class="r"><span class="chip ${r.p > 0 ? 'good' : r.p < 0 ? 'bad' : ''}">${r.p > 0 ? 'spricht für günstig' : r.p < 0 ? 'spricht für teuer' : 'neutral'}</span></div></div>`).join('')}</div>`);
   if ((d.levels || []).length || (ai && (ai.buy_zones || []).length)) h += card('Nachkauf-Zonen', 'Kurse, an denen ein Nachkauf naheliegt',
-    `<div class="rows">${(d.levels || []).map(l => `<div class="row"><div class="l"><div class="t num">${money(l.price, cur)}<span>${nf(l.dist_pct, 1)} %</span></div><div class="m">${esc(l.label)}</div></div>
+    `<div class="rows">${(d.levels || []).map(l => `<div class="row"><div class="l"><div class="t num">${px(key, l.price)}<span>${nf(l.dist_pct, 1)} %</span></div><div class="m">${esc(l.label)}</div></div>
       <div class="r"><button class="btn sm ghost" data-act="levelalert" data-key="${esc(key)}" data-v="${l.price}">Alert setzen</button></div></div>`).join('')}
-    ${((ai || {}).buy_zones || []).filter(z => z.price > 0).map(z => `<div class="row"><div class="l"><div class="t num">${money(z.price, cur)}<span>Claude</span></div><div class="x">${esc(z.reason)}</div></div>
+    ${((ai || {}).buy_zones || []).filter(z => z.price > 0).map(z => `<div class="row"><div class="l"><div class="t num">${px(key, z.price)}<span>Claude</span></div><div class="x">${esc(z.reason)}</div></div>
       <div class="r"><button class="btn sm ghost" data-act="levelalert" data-key="${esc(key)}" data-v="${+z.price}">Alert setzen</button></div></div>`).join('')}</div>`);
   if (kind === 'crypto' && a.flow) h += card('Spot oder Futures?', '', flowBlock(key), seg('flowwin', ['4 Std.', '24 Std.'], S.flowWin === '4' ? '4 Std.' : '24 Std.'));
   if (kind === 'stock' && Object.keys(f).length) h += card('Kennzahlen', 'Quelle: Yahoo Finance', `<div class="tiles" style="margin:0">${tile('KGV', nf(f.pe, 1), f.forward_pe ? 'erwartet ' + nf(f.forward_pe, 1) : '')}${tile('PEG', nf(f.peg, 2), 'KGV im Verhältnis zum Wachstum')}
-    ${tile('Analystenziel', money(f.target_mean, cur), f.analysts ? nf(f.analysts, 0) + ' Analysten' : '')}${tile('Gewinnmarge', f.margin != null ? nf(f.margin * 100, 1) + ' %' : '–')}
+    ${tile('Analystenziel', px(key, f.target_mean), f.analysts ? nf(f.analysts, 0) + ' Analysten' : '')}${tile('Gewinnmarge', f.margin != null ? nf(f.margin * 100, 1) + ' %' : '–')}
     ${tile('Umsatzwachstum', f.revenue_growth != null ? pctS(f.revenue_growth * 100, 1) : '–', 'zum Vorjahr')}${tile('Börsenwert', f.market_cap ? big(f.market_cap) + ' ' + (CUR[cur] || cur) : '–')}</div>`);
-  if (dv) h += card('Dividende', '', `<div class="tiles" style="margin:0">${tile('Pro Aktie und Jahr', money(dv.annual, cur), dv.per_year ? dv.per_year + ' Zahlungen' : '')}${tile('Rendite', dv.yield_pct != null ? nf(dv.yield_pct, 2) + ' %' : '–', dv.yield_5y_avg ? '5-Jahres-Schnitt ' + nf(dv.yield_5y_avg, 2) + ' %' : '')}
+  if (dv) h += card('Dividende', '', `<div class="tiles" style="margin:0">${tile('Pro Aktie und Jahr', px(key, dv.annual), dv.per_year ? dv.per_year + ' Zahlungen' : '')}${tile('Rendite', dv.yield_pct != null ? nf(dv.yield_pct, 2) + ' %' : '–', dv.yield_5y_avg ? '5-Jahres-Schnitt ' + nf(dv.yield_5y_avg, 2) + ' %' : '')}
     ${tile('Nächster Ex-Tag', dv.next_ex ? dateDe(dv.next_ex) : '–', dv.next_ex_estimated ? 'geschätzt aus dem Rhythmus' : dv.next_pay ? 'Zahltag ' + dateDe(dv.next_pay) : '')}${tile('Wachstum', dv.growth_pct != null ? pctS(dv.growth_pct, 1) : '–', dv.payout_pct != null ? 'Ausschüttung ' + nf(dv.payout_pct, 0) + ' % vom Gewinn' : '')}</div>
     ${p && p.divYear ? `<div class="note">Bei deinem Bestand sind das etwa <b>${eur(p.divYear)}</b> brutto im Jahr.</div>` : ''}`);
   if (ai) {
@@ -313,7 +314,7 @@ function formAlert(key, value) {
   openSheet(sheetTop('Alert anlegen') + `<section class="card"><form id="f-alert">${symField(k0, s0)}
     <div class="f"><label>Bedingung</label><select name="type">${Object.entries(ALERT_TYPES).map(([v, l]) => opt(v, l, value ? 'price_below' : 'price_above')).join('')}</select></div>
     <div class="f"><label>Schwelle</label><input name="value" required inputmode="decimal" value="${value ?? ''}" placeholder="z. B. 120"></div>
-    <p class="hint">Kurs-Schwellen in der Handelswährung des Titels${key && A(key).price != null ? ` (aktuell ${money(A(key).price, curOf(key))})` : ''}. Funding-Alerts gibt es nur für Coins.</p>
+    <p class="hint">Kurs-Schwellen bei Aktien in Euro, bei Coins in US-Dollar${key && A(key).price != null ? ` (aktuell ${px(key, A(key).price)})` : ''}. Funding-Alerts gibt es nur für Coins.</p>
     <div class="f" style="margin-top:12px"><label>Notiz</label><input name="note" placeholder="z. B. erste Tranche nachkaufen"></div>
     <div class="btnrow"><button class="btn" type="submit">Speichern</button></div></form></section>`);
 }
@@ -366,7 +367,7 @@ document.addEventListener('click', async ev => {
   else if (act === 'watchkey') { const [k, s] = key.split(':'); S.pf.watchlist.push({id: uid(), kind: k, symbol: s, name: nameOf(key)}); await savePf('Auf der Watchlist'); vAsset(key); }
   else if (act === 'unwatch') { S.pf.watchlist = S.pf.watchlist.filter(w => keyOf(w.kind, w.symbol) !== key); closeSheet(); await savePf('Entfernt'); }
   else if (act === 'addalert') formAlert(key);
-  else if (act === 'levelalert') formAlert(key, v);
+  else if (act === 'levelalert') { const x = toShow(key, parseFloat(v)); formAlert(key, isNaN(x) ? v : +x.toFixed(x < 1 ? 4 : 2)); }
   else if (act === 'delalert') { if (confirm('Diesen Alert löschen?')) { S.pf.alerts = S.pf.alerts.filter(a => a.id !== id); await savePf('Alert gelöscht'); } }
   else if (act === 'rearm') { const a = S.pf.alerts.find(x => x.id === id); if (a) { a.id = uid(); await savePf('Alert ist wieder aktiv'); } }
   else if (act === 'gentopic') { const a = new Uint8Array(12); crypto.getRandomValues(a); document.querySelector('#f-ntfy [name=topic]').value = 'depot-' + [...a].map(x => x.toString(36).padStart(2, '0')).join('').slice(0, 20); }
@@ -406,7 +407,9 @@ document.addEventListener('submit', async ev => {
   } else if (f.id === 'f-alert') {
     const value = numIn(d.value); if (isNaN(value)) return toast('Schwelle prüfen');
     if (d.type.startsWith('funding') && kind !== 'crypto') return toast('Funding-Alerts gibt es nur für Coins');
-    S.pf.alerts.push({id: uid(), kind, symbol, type: d.type, value, note: d.note.trim(), created: new Date().toISOString()});
+    const al = {id: uid(), kind, symbol, type: d.type, value, note: d.note.trim(), created: new Date().toISOString()};
+    if (d.type.startsWith('price')) al.currency = kind === 'crypto' ? 'USD' : 'EUR';
+    S.pf.alerts.push(al);
   } else return;
   closeSheet();
   const fresh = !(S.market.assets || {})[keyOf(kind, symbol)] || !(S.daily.assets || {})[keyOf(kind, symbol)];

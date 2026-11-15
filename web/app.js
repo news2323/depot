@@ -120,6 +120,14 @@ const A = key => (S.market.assets || {})[key] || {};
 const D = key => (S.daily.assets || {})[key] || {};
 const AI = key => (S.analysis.assets || {})[key] || {};
 const curOf = key => A(key).currency || D(key).currency || 'USD';
+// Anzeige: Aktien immer in Euro, Krypto in US-Dollar. Die Daten bleiben in der Handelswährung (dieselbe Regel in tracker/update.py: show_price).
+const isCoin = key => String(key).startsWith('crypto:');
+const showCur = key => isCoin(key) ? 'USD' : (curOf(key) === 'EUR' || fxNow(curOf(key)) ? 'EUR' : curOf(key));
+function toShow(key, v, day) {
+  if (v == null || isNaN(v) || isCoin(key) || showCur(key) !== 'EUR' || curOf(key) === 'EUR') return v;
+  return v / ((day != null ? fxAt(curOf(key), day) : null) || fxNow(curOf(key)));
+}
+const px = (key, v, day) => money(toShow(key, v, day), showCur(key));
 const nameOf = key => A(key).name || D(key).name || key.split(':')[1];
 function priceAt(key, day) {
   const h = D(key).hist;

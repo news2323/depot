@@ -56,8 +56,8 @@ def run_fast(store):
     for cur in sorted(currencies | {"USD"}):
         if cur != "EUR":
             fx[cur] = sources.fx_rate(cur) or old_fx.get(cur)
-    fired = check_alerts(pf, out, state)
-    moved = check_moves(store, pf, out, state)
+    fired = check_alerts(pf, out, state, fx)
+    moved = check_moves(store, pf, out, state, fx)
     for sym in list(oi_mem):
         if asset_key("crypto", sym) not in assets:
             del oi_mem[sym]
@@ -79,6 +79,20 @@ ALERT_TEXT = {
 }
 
 
+def show_price(q, value, fx):
+    """Anzeige: Aktien immer in Euro, Krypto in US-Dollar (dieselbe Regel in web/app.js: toShow)."""
+    cur = q.get("currency") or ""
+    if value is None or q.get("kind") == "crypto" or cur == "EUR":
+        return value, cur
+    rate = (fx or {}).get(cur)
+    return (value / rate, "EUR") if rate else (value, cur)
+
+
+def _show(q, value, fx):
+    v, cur = show_price(q, value, fx)
+    return _fmt(v), cur
+
+
 def _fmt(x):
     if x is None:
         return "–"
@@ -86,7 +100,7 @@ def _fmt(x):
     return s.replace(".", ",")
 
 
-def check_alerts(pf, market, state):
+def check_alerts(pf, market, state, fx=None):
     st = state.setdefault("alerts", {})
     today = datetime.date.today().isoformat()
     ids = set()
@@ -99,6 +113,9 @@ def check_alerts(pf, market, state):
         q = market.get(asset_key(al.get("kind"), al.get("symbol"))) or {}
         v, typ = al.get("value"), al.get("type")
         price, chg = q.get("price"), q.get("change_pct")
+        shown, shown_cur = show_price(q, price, fx)
+        if typ and typ.startswith("price") and al.get("currency") == "EUR" and shown_cur == "EUR":
+            price = shown       # Schwelle wurde in Euro eingegeben
         fund = (q.get("flow") or {}).get("funding_avg")
         if v is None or q.get("error") or q.get("stale"):
             continue
@@ -124,9 +141,9 @@ def check_alerts(pf, market, state):
         st[aid] = {"fired": now_iso(), "day": today, "value": actual}
         fired += 1
         name = q.get("name") or al.get("symbol")
-        cur = " " + q.get("currency", "") if typ.startswith("price") else ""
+        cur = " " + (al.get("currency") or q.get("currency", "")) if typ.startswith("price") else ""
         title = "%s %s" % (al.get("symbol"), ALERT_TEXT.get(typ, typ).format(v=_fmt(abs(v) if daily else v) + cur))
-        body = "%s steht bei %s %s" % (name, _fmt(price), q.get("currency", ""))
+        body = "%s steht bei %s %s" % (name, _fmt(shown), shown_cur)
         if chg is not None:
             body += " (%s%s %% heute)" % ("+" if chg >= 0 else "−", _fmt(abs(chg)))
         if al.get("note"):
@@ -141,7 +158,7 @@ def check_alerts(pf, market, state):
 MOVE_DEFAULT = {"stock": 5.0, "crypto": 8.0}   # ab dieser Tagesbewegung in Prozent kommt eine Meldung, 0 = aus
 
 
-def check_moves(store, pf, market, state):
+def check_moves(store, pf, market, state, fx=None):
     """Meldet starke Tagesbewegungen mit Einordnung der Bewertung: bei jeder vollen Schwelle (5, 10, 15 % ...) einmal."""
     cfg = pf.get("settings") or {}
     st = state.setdefault("moves", {})
@@ -170,7 +187,7 @@ def check_moves(store, pf, market, state):
         info = daily.get(key) or {}
         val = info.get("valuation") or {}
         title = "%s %s%s %% heute" % (q["symbol"], "+" if chg >= 0 else "−", _fmt(abs(chg)))
-        lines = ["%s steht bei %s %s." % (q.get("name") or q["symbol"], _fmt(q.get("price")), q.get("currency", ""))]
+        lines = ["%s steht bei %s %s." % ((q.get("name") or q["symbol"],) + tuple(_show(q, q.get("price"), fx)))]
         if val.get("label"):
             lines.append("Bewertung nach Faustregel: %s. %s" % (val["label"], analytics.move_read(chg, val, q.get("kind"))))
         verdict = ((ai.get(key) or {}).get("claude") or {}).get("verdict")
@@ -182,7 +199,7 @@ def check_moves(store, pf, market, state):
         below = [x for x in info.get("levels") or [] if q.get("price") and x.get("price") and x["price"] < q["price"]]
         if below and chg < 0:
             z = max(below, key=lambda x: x["price"])
-            lines.append("Nächste Nachkauf-Zone: %s %s." % (_fmt(z["price"]), q.get("currency", "")))
+            lines.append("Nächste Nachkauf-Zone: %s %s." % _show(q, z["price"], fx))
         lines.append("Keine Anlageberatung.")
         push(pf, title, "\n".join(lines))
     return len(hits)
