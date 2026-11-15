@@ -104,6 +104,11 @@ def crypto_prompt(a, q, d, today):
              "Funding je 8 Std. %": flow.get("funding_avg"),
              "200-Tage-Linie": (d.get("tech") or {}).get("sma200"), "Jahreshoch": (d.get("tech") or {}).get("high52"),
              "technische Nachkauf-Zonen": [x["price"] for x in d.get("levels") or []]}
+    oc = d.get("onchain") or {}
+    facts.update({"Marktwert USD": oc.get("mcap"), "voll verwässerter Wert USD": oc.get("fdv"),
+                  "Gebühren 30 Tage USD (DeFi Llama)": oc.get("fees_30d"), "Einnahmen des Protokolls 30 Tage USD": oc.get("rev_30d"),
+                  "davon an Token-Halter 30 Tage USD": oc.get("holders_30d"),
+                  "Einnahmen zum Vormonat %": oc.get("rev_chg"), "Marktwert zu Jahreseinnahmen": oc.get("pe")})
     facts = {k: v for k, v in facts.items() if v not in (None, "", [])}
     return f"""Heute ist {today}. Analysiere den Coin {a['symbol']} ({q.get('name') or ''}) für einen Privatanleger.
 
@@ -111,7 +116,7 @@ Marktdaten von den Börsen (Stand heute): {json.dumps(facts, ensure_ascii=False)
 
 Recherchiere mit der Websuche die wichtigsten Nachrichten der letzten Tage und anstehende Termine
 (Token-Unlocks, Upgrades, Listings, ETF-Entscheidungen). Ordne ein, ob der Markt eher überhitzt, neutral oder abgekühlt ist,
-was die Derivate-Daten (Spot gegen Futures, Open Interest, Funding) bedeuten, und nenne bis zu drei Kurszonen für Nachkäufe.
+was die Derivate-Daten (Spot gegen Futures, Open Interest, Funding) bedeuten, ob der Marktwert zu den Einnahmen des Protokolls passt (falls oben angegeben), und nenne bis zu drei Kurszonen für Nachkäufe.
 Das ist eine Einschätzung, keine Anlageberatung.
 
 {STYLE}

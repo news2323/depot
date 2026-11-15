@@ -205,8 +205,8 @@ def stock_valuation(price, tech, fund, div):
     return {"score": round(score, 2), "label": label, "basis": basis, "reasons": reasons}
 
 
-def crypto_valuation(price, tech, flow):
-    """Für Coins gibt es keine Gewinne: hier zählt Marktlage (Trend, Abstand zum Hoch, Hebel)."""
+def crypto_valuation(price, tech, flow, onchain=None):
+    """Marktlage (Trend, Abstand zum Hoch, Hebel). Bei Protokollen mit Einnahmen zählt auch Marktwert zu Einnahmen."""
     if not tech:
         return None
     pts, reasons = [], []
@@ -240,13 +240,29 @@ def crypto_valuation(price, tech, flow):
             add(-1, "Funding %.3f %% je 8 Std.: viele gehebelte Longs" % f)
         elif f < -0.005:
             add(1, "Funding %.3f %% je 8 Std.: Markt ist short positioniert" % f)
+    basis = "Trend, Abstand zum Hoch und Hebel"
+    oc = onchain or {}
+    if oc.get("type") == "protocol" and oc.get("pe"):      # Chains verdienen kaum Gebühren: dort nur anzeigen, nicht werten
+        basis = "Trend, Hebel und Einnahmen des Protokolls"
+        pe = oc["pe"]
+        txt = "Marktwert ist das %.0f-Fache der Jahreseinnahmen" % pe
+        if pe > 100 and (oc.get("ps") or 999) < 25:
+            add(-1, "Das Protokoll behält nur einen kleinen Teil der Gebühren, " + txt[0].lower() + txt[1:])
+        else:
+            add(2 if pe < 10 else 1 if pe < 25 else -2 if pe > 100 else -1 if pe > 50 else 0,
+                txt + (": niedrig" if pe < 25 else ": hoch" if pe > 50 else ": im Mittelfeld"))
+        if oc.get("pe_fdv") and oc["pe_fdv"] > pe * 2:
+            add(-1, "Mit allen noch gesperrten Token wäre es das %.0f-Fache" % oc["pe_fdv"])
+        chg = oc.get("rev_chg")
+        if chg is not None and chg > 25:
+            add(1, "Einnahmen %.0f %% über dem Vormonat" % chg)
+        elif chg is not None and chg < -25:
+            add(-1, "Einnahmen %.0f %% unter dem Vormonat" % -chg)
     if not pts:
-        if not tech:
-            return None
         add(0, "Kurs im mittleren Bereich der 52-Wochen-Spanne, nahe der 200-Tage-Linie")
     score = sum(pts) / max(len(pts), 3)
     label = "abgekühlt" if score >= 0.5 else "überhitzt" if score <= -0.5 else "neutral"
-    return {"score": round(score, 2), "label": label, "basis": "Trend, Abstand zum Hoch und Hebel", "reasons": reasons}
+    return {"score": round(score, 2), "label": label, "basis": basis, "reasons": reasons}
 
 
 def move_read(chg, valuation, kind="stock"):

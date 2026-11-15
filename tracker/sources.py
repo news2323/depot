@@ -476,3 +476,108 @@ def classify_flow(change_pct, flow, hours=24):
         elif fund < -0.005:
             text += " Funding ist negativ: Shorts zahlen, der Markt ist eher short positioniert."
     return {"label": label, "tone": tone, "text": text}
+
+
+# ----------------------------------------------------------------- Protokoll-Umsätze (DeFi Llama)
+LLAMA = "https://api.llama.fi"
+# Coins einer Blockchain: Name der Chain bei DeFi Llama. Alles andere wird über das Token-Kürzel gefunden.
+LLAMA_CHAINS = {"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "AVAX": "Avalanche", "SUI": "Sui", "BNB": "BSC",
+                "TRX": "Tron", "TON": "TON", "NEAR": "Near", "APT": "Aptos", "ARB": "Arbitrum", "OP": "OP Mainnet",
+                "SEI": "Sei", "TIA": "Celestia", "POL": "Polygon", "ADA": "Cardano", "S": "Sonic", "BERA": "Berachain"}
+
+
+def _llama(path):
+    try:
+        r = http_json(LLAMA + path, timeout=90)
+        _mark("DeFi Llama", True)
+        return r
+    except SourceError:
+        _mark("DeFi Llama", False)
+        return None
+
+
+def onchain_revenue(symbols):
+    """Gebühren und Einnahmen je Coin aus DeFi Llama, dazu Marktwert und die Verhältnisse daraus.
+
+    Gebühren = was Nutzer zahlen (wie Umsatz). Einnahmen = was das Protokoll davon behält (wie Gewinn).
+    Halter = was davon an Token-Halter fließt. Hochgerechnet aus den letzten 30 Tagen auf ein Jahr.
+    """
+    symbols = [s.upper() for s in symbols]
+    if not symbols:
+        return {}
+    lite = _llama("/lite/protocols2")
+    if not lite:
+        return {}
+    parents = {}
+    for p in lite.get("parentProtocols") or []:
+        sym = (p.get("symbol") or "").upper()
+        if sym in symbols and sym not in LLAMA_CHAINS and p.get("mcap"):
+            if sym not in parents or p["mcap"] > parents[sym]["mcap"]:
+                parents[sym] = {"id": p["id"], "name": p.get("name"), "mcap": p["mcap"], "gecko": p.get("gecko_id")}
+    singles, chain_cap, gecko = {}, {}, {}
+    for p in lite.get("protocols") or []:
+        sym = (p.get("symbol") or "").upper()
+        if sym not in symbols or not p.get("mcap"):
+            continue
+        if sym in LLAMA_CHAINS:
+            if p["mcap"] > chain_cap.get(sym, 0):
+                chain_cap[sym] = p["mcap"]
+                gecko[sym] = p.get("gecko_id")
+        elif sym not in parents and not p.get("parentProtocol"):
+            if sym not in singles or p["mcap"] > singles[sym]["mcap"]:
+                singles[sym] = {"name": p.get("name"), "mcap": p["mcap"], "gecko": p.get("gecko_id")}
+    tables = {}
+    for field, dtype in (("fees", "dailyFees"), ("rev", "dailyRevenue"), ("holders", "dailyHoldersRevenue")):
+        r = _llama("/overview/fees?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true&dataType=" + dtype)
+        tables[field] = (r or {}).get("protocols") or []
+    out = {}
+    for sym in symbols:
+        if sym in LLAMA_CHAINS:
+            name, mcap, kind = LLAMA_CHAINS[sym], chain_cap.get(sym), "chain"
+            match = lambda x, n=name: x.get("protocolType") == "chain" and x.get("name") == n
+        elif sym in parents:
+            name, mcap, kind = parents[sym]["name"], parents[sym]["mcap"], "protocol"
+            match = lambda x, i=parents[sym]["id"]: x.get("parentProtocol") == i
+        elif sym in singles:
+            name, mcap, kind = singles[sym]["name"], singles[sym]["mcap"], "protocol"
+            match = lambda x, n=name: x.get("name") == n and x.get("protocolType") != "chain"
+        else:
+            continue
+        d = {"name": name, "type": kind, "mcap": mcap}
+        for field, rows in tables.items():
+            hit = [x for x in rows if match(x)]
+            if not hit:
+                continue
+            now30 = sum(x.get("total30d") or 0 for x in hit)
+            prev30 = sum(x.get("total60dto30d") or 0 for x in hit)
+            d[field + "_30d"] = now30
+            d[field + "_1y"] = sum(x.get("total1y") or 0 for x in hit) or None
+            if prev30 > 0:
+                d[field + "_chg"] = (now30 / prev30 - 1) * 100
+        if not d.get("fees_30d") and not d.get("rev_30d"):
+            continue
+        year = 365 / 30.0
+        if mcap:
+            if d.get("fees_30d"):
+                d["ps"] = mcap / (d["fees_30d"] * year)       # Marktwert zu Gebühren (wie KUV)
+            if d.get("rev_30d"):
+                d["pe"] = mcap / (d["rev_30d"] * year)        # Marktwert zu Einnahmen (wie KGV)
+            if d.get("holders_30d"):
+                d["holder_yield"] = d["holders_30d"] * year / mcap * 100
+        d["gecko"] = gecko.get(sym) or (parents.get(sym) or singles.get(sym) or {}).get("gecko")
+        out[sym] = d
+    # Voll verwässerter Wert (alle Token, auch noch gesperrte) von CoinGecko: optional, fehlt bei Sperre einfach
+    ids = sorted({d["gecko"] for d in out.values() if d.get("gecko")})
+    fdv = {}
+    if ids:
+        r = _try("CoinGecko", "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&ids=" + ",".join(ids), timeout=30)
+        for x in r or []:
+            if x.get("fully_diluted_valuation"):
+                fdv[x.get("id")] = x["fully_diluted_valuation"]
+    for d in out.values():
+        v = fdv.get(d.pop("gecko", None))
+        if v:
+            d["fdv"] = v
+            if d.get("rev_30d"):
+                d["pe_fdv"] = v / (d["rev_30d"] * 365 / 30.0)
+    return out

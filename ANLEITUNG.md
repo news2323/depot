@@ -99,7 +99,9 @@ die Aufgabe beim nächsten Start nach. Den Zugangsschlüssel holt das Skript `tr
 - **Aktien:** Yahoo Finance (Kurse, Dividenden, KGV, PEG, Analystenziele, Termine). Die KI ergänzt Quartalszahlen von den Investor-Relations-Seiten.
 - **Krypto:** Velo hat keine frei nutzbare Schnittstelle. Der Tracker holt dieselben Größen direkt von den Börsen:
   Spot-Kaufdruck von Binance, Futures-Kaufdruck von Binance oder OKX, Open Interest und Funding von OKX, Hyperliquid, Bybit und Binance.
-  Jeder Coin verlinkt zu Velo. Von GitHubs Servern (USA) aus sind Binance Futures und Bybit meist gesperrt, dann zählen OKX und Hyperliquid.
+  Jeder Coin verlinkt zu Velo.
+- **Krypto-Einnahmen:** DeFi Llama liefert je Protokoll Gebühren (Umsatz), Einnahmen (was das Protokoll behält) und den Anteil für Token-Halter.
+  Daraus rechnet der Tracker Marktwert zu Gebühren (wie KUV) und Marktwert zu Einnahmen (wie KGV), hochgerechnet aus den letzten 30 Tagen. Von GitHubs Servern (USA) aus sind Binance Futures und Bybit meist gesperrt, dann zählen OKX und Hyperliquid.
 - **Bewertung:** eine Faustregel aus Kennzahlen und Kurslage. Keine Anlageberatung.
 
 ## Später: Depot direkt verbinden

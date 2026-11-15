@@ -227,6 +227,7 @@ def run_daily(store):
     market = (store.get("market.json") or {}).get("assets") or {}
     assets = tracked_assets(pf)
     yf = sources.YahooFundamentals()
+    onchain = sources.onchain_revenue([a["symbol"] for a in assets.values() if a["kind"] == "crypto"])
     out, currencies = {}, {"USD"}
     for key, a in assets.items():
         crypto = a["kind"] == "crypto"
@@ -244,7 +245,10 @@ def run_daily(store):
         if h.get("name"):
             entry["name"] = h["name"]
         if crypto:
-            entry["valuation"] = analytics.crypto_valuation(price, tech, q.get("flow"))
+            oc = onchain.get(a["symbol"])
+            if oc:
+                entry["onchain"] = _round(oc)
+            entry["valuation"] = analytics.crypto_valuation(price, tech, q.get("flow"), oc)
         else:
             fund = yf.get(a["symbol"]) or {}
             div = analytics.dividend_info(h["div"], price, fund)
