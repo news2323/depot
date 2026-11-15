@@ -192,7 +192,9 @@ def stock_valuation(price, tech, fund, div):
         elif tech["range_pos"] > 0.9:
             add(-1, "Nahe am 52-Wochen-Hoch")
     if not pts:
-        return None
+        if not tech:
+            return None
+        add(0, "Kurs im mittleren Bereich der 52-Wochen-Spanne, nahe der 200-Tage-Linie")
     score = sum(pts) / max(len(pts), 3)
     if fundamental >= 2:
         label = "eher unterbewertet" if score >= 0.5 else "eher überbewertet" if score <= -0.5 else "fair bewertet"
@@ -239,7 +241,9 @@ def crypto_valuation(price, tech, flow):
         elif f < -0.005:
             add(1, "Funding %.3f %% je 8 Std.: Markt ist short positioniert" % f)
     if not pts:
-        return None
+        if not tech:
+            return None
+        add(0, "Kurs im mittleren Bereich der 52-Wochen-Spanne, nahe der 200-Tage-Linie")
     score = sum(pts) / max(len(pts), 3)
     label = "abgekühlt" if score >= 0.5 else "überhitzt" if score <= -0.5 else "neutral"
     return {"score": round(score, 2), "label": label, "basis": "Trend, Abstand zum Hoch und Hebel", "reasons": reasons}
