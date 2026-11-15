@@ -56,7 +56,7 @@ const TIER = ['deutlich teuer', 'eher teuer', 'neutral', 'eher günstig', 'deutl
 const TIER_COL = ['#d70015', '#f08c8c', '#c7c7cc', '#7fcf96', '#1a7f37'];
 function score(key, cls = '') {
   const r = ratingOf(key), v = D(key).valuation;
-  if (r == null) return `<span class="score none ${cls}" title="Noch keine Bewertung">–</span>`;
+  if (r == null) return `<span class="score none ${cls}" title="${v ? 'Keine Punkte: hier gibt es keine Kennzahlen zum Bewerten' : 'Noch keine Bewertung'}">–</span>`;
   return `<span class="score t${tierOf(r)} ${cls}" title="${r} von 10 Punkten: ${esc(v.label)}">${r}</span>`;
 }
 const meter = r => r == null ? '' : `<span class="meter t${tierOf(r)}" role="img" aria-label="${r} von 10 Punkten">${Array.from({length: 10}, (_, i) => `<i class="${i < r ? 'on' : ''}"></i>`).join('')}</span>`;
@@ -135,7 +135,7 @@ function vHome(c) {
     ${rated ? card('Bewertung im Depot', `Im Schnitt ${nf(sum / rated, 1)} von 10 Punkten, nach Geld gewichtet`, `
       <div class="bar tall">${tiers.map((v, i) => v ? `<i style="width:${v / rated * 100}%;background:${TIER_COL[i]}" title="${TIER[i]}: ${nf(v / rated * 100, 0)} %"></i>` : '').join('')}</div>
       <div class="tierlist">${tiers.map((v, i) => `<div><i style="background:${TIER_COL[i]}"></i><span>${TIER[i]}</span><b class="num">${nf(v / rated * 100, 0)} %</b></div>`).reverse().join('')}</div>
-      <p class="tiny muted" style="margin:10px 0 0">10 Punkte heißt deutlich unterbewertet, 1 Punkt deutlich überbewertet. Faustregel, keine Anlageberatung.</p>`) : ''}
+      <p class="tiny muted" style="margin:10px 0 0">10 Punkte heißt deutlich unterbewertet, 1 Punkt deutlich überbewertet. ETFs und Coins ohne Einnahmen haben keine Punkte und fehlen hier. Faustregel, keine Anlageberatung.</p>`) : ''}
     ${card('Nächste Termine', '', cal.length ? calList(cal) + `<div class="btnrow"><button class="btn sm ghost" data-act="tab" data-v="cal">Alle Termine</button></div>` : '<p class="empty">Keine Termine bekannt.</p>')}
   </div></div>`;
 }
@@ -231,7 +231,8 @@ function vAnalyse(c) {
     <section class="card"><div class="head"><div><h2>Rangliste</h2><p class="sub">Von günstig nach teuer: 10 Punkte heißt deutlich unterbewertet, 1 deutlich überbewertet</p></div>
       <div class="toolbar end">${flt('scope', ['Alle', 'Depot', 'Watchlist'])}${flt('rank', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div></div>
       ${tbl('rank', [COL.score, COL.name, COL.label, COL.why, COL.ai, COL.day, COL.zone], rows, ['score', -1])}
-      <div class="note">Die Punkte sind eine Faustregel. Bei Aktien zählen KGV, PEG, Analystenziele, Dividendenrendite und Kurslage, bei Coins Trend, Hebel und die Einnahmen des Protokolls, bei ETFs nur die Kurslage.
+      <div class="note">Die Punkte sind eine Faustregel. Bei Aktien zählen Kennzahlen voll (PEG, KGV, freier Geldfluss, Wachstum, Marge), Kursziele und Dividende halb. Bei Coins zählen die Einnahmen des Protokolls.
+      Ein gefallener Kurs allein gibt keine Punkte: Er zählt nur, wenn die Kennzahlen ihn stützen und der Titel nicht deutlich schwächer läuft als der Gesamtmarkt. ETFs, Gold und Coins ohne Einnahmen bekommen deshalb keine Punkte, nur ein Wort zur Kurslage.
       „Recherche“ ist das Urteil aus der KI-Recherche${S.analysis.updated ? '' : ' (läuft wöchentlich, noch nicht gelaufen)'}. Tippe einen Titel an für alle Gründe. Keine Anlageberatung.</div></section>
     ${coins.length ? `<section class="card"><div class="head"><div><h2>Krypto: Spot oder Futures?</h2><p class="sub">Wer die Bewegung getragen hat, dazu Hebel und Einnahmen der Protokolle</p></div>${seg('flowwin', ['4 Std.', '24 Std.'], w === '4' ? '4 Std.' : '24 Std.')}</div>
       ${tbl('flow', fcols, coins, ['chg', -1])}
@@ -311,10 +312,10 @@ function vAsset(key) {
     <div class="tiles">${tile('1 Monat', pctS(t.perf_1m, 1), '', sign(t.perf_1m))}${tile('1 Jahr', pctS(t.perf_1y, 1), '', sign(t.perf_1y))}
     ${tile('52-Wochen-Spanne', t.low52 ? px(key, t.low52) + ' – ' + px(key, t.high52) : '–')}${tile('Abstand zum Hoch', t.from_high != null ? nf(t.from_high, 1) + ' %' : '–')}</div></section>`;
   if (v) { const r = ratingOf(key);
-    h += `<section class="card rate"><div class="ratehead">${score(key, 'big')}<div class="ratemain"><div class="ratelabel">${esc(v.label)}</div><div class="muted small">${r} von 10 Punkten · ${esc(v.basis)}</div>${meter(r)}</div>
+    h += `<section class="card rate"><div class="ratehead">${score(key, 'big')}<div class="ratemain"><div class="ratelabel">${esc(v.label)}</div><div class="muted small">${r == null ? '' : r + ' von 10 Punkten · '}${esc(v.basis)}</div>${meter(r)}</div>
       ${aiChip(ai) ? `<div class="rateai"><div class="tiny muted">Recherche</div>${aiChip(ai)}</div>` : ''}</div>
-      <div class="reasons">${(v.reasons || []).map(x => `<div class="${x.p > 0 ? 'plus' : x.p < 0 ? 'minus' : 'zero'}"><i>${x.p > 0 ? '+' : x.p < 0 ? '−' : '○'}</i><span>${esc(x.text)}</span></div>`).join('')}</div>
-      <p class="tiny muted" style="margin:10px 0 0">Plus spricht für günstig, Minus für teuer. 10 Punkte heißt deutlich unterbewertet, 1 deutlich überbewertet. Faustregel, keine Anlageberatung.</p></section>`; }
+      <div class="reasons">${(v.reasons || []).map(x => `<div class="${x.p > 0 ? 'plus' : x.p < 0 ? 'minus' : 'zero'}"><i>${x.p > 0 ? '+' : x.p < 0 ? '−' : '○'}</i><span>${esc(x.text)}${x.w != null && x.w > 0 && x.w < 1 && x.p ? ` <em>${x.w >= 0.5 ? 'zählt halb' : 'zählt wenig'}</em>` : ''}</span></div>`).join('')}</div>
+      <p class="tiny muted" style="margin:10px 0 0">${r == null ? 'Ohne Kennzahlen gibt es keine Punkte, nur ein Wort zur Kurslage. ' : 'Plus spricht für günstig, Minus für teuer. Kennzahlen zählen voll. Ein gefallener Kurs zählt nur, wenn die Kennzahlen ihn stützen und der Titel nicht deutlich schwächer läuft als der Gesamtmarkt. '}Faustregel, keine Anlageberatung.</p></section>`; }
   if (p) h += card('Deine Position', '', `<div class="tiles" style="margin:0">${tile('Wert', eur(p.value), nf(p.weight, 1) + ' % vom Depot')}${tile('Gewinn', eurS(p.pnl), pctS(p.pnlPct), sign(p.pnl))}
     ${tile('Stück', nf(p.qty, p.qty % 1 ? 4 : 0), 'Einstand ' + eur(p.cost / p.qty) + ' je Stück')}${tile('Heute', eurS(p.dayEur), '', sign(p.dayEur))}</div>`);
   if ((d.levels || []).length || (ai && (ai.buy_zones || []).length)) h += card('Nachkauf-Zonen', 'Kurse, an denen ein Nachkauf naheliegt',

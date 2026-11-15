@@ -143,142 +143,193 @@ def rating_label(points, kind):
     return RATING_WORDS[kind][tier]
 
 
+class _Points:
+    """Sammelt gewichtete Punkte. Gewicht 0 heißt: wird gezeigt, zählt aber nicht."""
+
+    def __init__(self):
+        self.items = []
+
+    def add(self, p, text, w=1.0, group="wert"):
+        self.items.append({"p": p if w > 0 else 0, "w": w, "g": group, "text": text.replace(".", ",")})
+
+    def score(self, groups=None):
+        it = [x for x in self.items if x["w"] > 0 and (groups is None or x["g"] in groups)]
+        if not it:
+            return None
+        return sum(x["p"] * x["w"] for x in it) / max(sum(x["w"] for x in it), 3.0)
+
+    def count(self, groups):
+        return sum(1 for x in self.items if x["g"] in groups and x["w"] > 0)
+
+
+def _price_points(pts, price, tech, backed, rel, market_name, crypto=False):
+    """Kurslage. Ein gefallener Kurs zählt nur, wenn die Kennzahlen ihn stützen und der Titel nicht
+    deutlich schwächer läuft als der Gesamtmarkt. Sonst wird er gezeigt, aber nicht gewertet."""
+    if not tech:
+        return
+    low = []
+    if tech.get("sma200"):
+        r = price / tech["sma200"]
+        if r < (0.85 if crypto else 0.9):
+            low.append("Kurs %.0f %% unter der 200-Tage-Linie" % ((1 - r) * 100))
+        elif r > (1.6 if crypto else 1.25):
+            pts.add(-1, "Kurs %.0f %% über der 200-Tage-Linie" % ((r - 1) * 100), 0.5, "kurs")
+    if tech.get("range_pos") is not None and tech["range_pos"] < 0.2:
+        low.append("nahe am 52-Wochen-Tief")
+    elif tech.get("range_pos") is not None and tech["range_pos"] > 0.92:
+        pts.add(-1, "Nahe am 52-Wochen-Hoch", 0.25, "kurs")
+    if not low:
+        return
+    text = low[0] + (" und " + low[1] if len(low) > 1 else "")
+    limit = -20 if crypto else -15
+    if not backed:
+        pts.add(0, text + ": zählt nicht, weil die Kennzahlen den Rückgang nicht als Chance stützen", 0, "kurs")
+    elif rel is not None and rel < limit:
+        pts.add(0, text + ": zählt nicht, der Titel fiel in 6 Monaten %.0f Punkte stärker als %s" % (-rel, market_name), 0, "kurs")
+    elif rel is not None:
+        pts.add(1, text + ", im Gleichschritt mit %s gefallen" % market_name, 0.5, "kurs")
+    else:
+        pts.add(1, text, 0.25, "kurs")
+
+
 def stock_valuation(price, tech, fund, div):
-    """Punkte pro Kennzahl: positiv = günstig, negativ = teuer. Ergebnis mit Begründungen."""
+    """Kennzahlen zählen voll, Analystenziel und Dividende halb, die Kurslage nur gestützt (siehe _price_points)."""
     fund = fund or {}
-    pts, reasons, fundamental = [], [], 0
-
-    def add(p, text):
-        pts.append(p)
-        reasons.append({"p": p, "text": text.replace(".", ",")})
-
+    pts = _Points()
     peg, pe, fpe = fund.get("peg"), fund.get("pe"), fund.get("forward_pe")
+    # --- Bewertung: was man für Gewinn und Geldfluss zahlt
     if peg and peg > 0:
-        fundamental += 1
-        if peg < 1:
-            add(2, "PEG %.1f: Wachstum ist günstig bewertet" % peg)
-        elif peg < 1.5:
-            add(1, "PEG %.1f: Bewertung passt zum Wachstum" % peg)
-        elif peg > 2.5:
-            add(-2, "PEG %.1f: viel Wachstum eingepreist" % peg)
-        elif peg > 2:
-            add(-1, "PEG %.1f: eher teuer für das Wachstum" % peg)
-        else:
-            add(0, "PEG %.1f: neutral" % peg)
+        pts.add(2 if peg < 1 else 1 if peg < 1.5 else -2 if peg > 2.5 else -1 if peg > 2 else 0,
+                "PEG %.1f: %s" % (peg, "Wachstum ist günstig bewertet" if peg < 1 else "Bewertung passt zum Wachstum" if peg < 1.5
+                                  else "viel Wachstum eingepreist" if peg > 2.5 else "eher teuer für das Wachstum" if peg > 2 else "neutral"))
     if fpe and fpe > 0:
-        fundamental += 1
-        if fpe < 12:
-            add(1, "Erwartetes KGV %.0f: niedrig" % fpe)
-        elif fpe > 35:
-            add(-2, "Erwartetes KGV %.0f: sehr hoch" % fpe)
-        elif fpe > 25:
-            add(-1, "Erwartetes KGV %.0f: hoch" % fpe)
-        else:
-            add(0, "Erwartetes KGV %.0f: im üblichen Rahmen" % fpe)
-        if pe and pe > 0:
-            if fpe < pe * 0.85:
-                add(1, "Gewinne sollen deutlich steigen (KGV %.0f, erwartet %.0f)" % (pe, fpe))
-            elif fpe > pe * 1.05:
-                add(-1, "Gewinne sollen sinken (KGV %.0f, erwartet %.0f)" % (pe, fpe))
+        pts.add(1 if fpe < 12 else -2 if fpe > 35 else -1 if fpe > 25 else 0,
+                "Erwartetes KGV %.0f: %s" % (fpe, "niedrig" if fpe < 12 else "sehr hoch" if fpe > 35 else "hoch" if fpe > 25 else "im üblichen Rahmen"))
     elif pe and pe > 0:
-        fundamental += 1
-        add(1 if pe < 12 else -1 if pe > 30 else 0, "KGV %.0f" % pe)
+        pts.add(1 if pe < 12 else -1 if pe > 30 else 0, "KGV %.0f" % pe)
+    # Bei Titeln, die in anderer Währung bilanzieren als sie notieren (ADRs), passen diese beiden Kennzahlen nicht zusammen
+    same_cur = not fund.get("fin_currency") or not fund.get("quote_currency") or fund["fin_currency"] == fund["quote_currency"]
+    ev = fund.get("ev_ebitda") if same_cur else None
+    if ev and ev > 0:
+        pts.add(1 if ev < 10 else -2 if ev > 40 else -1 if ev > 25 else 0,
+                "Unternehmenswert ist das %.0f-Fache des Betriebsgewinns (EV/EBITDA)" % ev)
+    fcf, cap = fund.get("fcf"), fund.get("market_cap")
+    if fcf is not None and cap and same_cur:
+        y = fcf / cap * 100
+        pts.add(2 if y > 6 else 1 if y > 4 else -2 if y < 0 else -1 if y < 1.5 else 0,
+                ("Freier Geldfluss %.1f %% vom Börsenwert" % y) if y >= 0 else "Freier Geldfluss ist negativ")
+    # --- Qualität und Wachstum
+    if fpe and fpe > 0 and pe and pe > 0:
+        if fpe < pe * 0.85:
+            pts.add(1, "Gewinne sollen deutlich steigen (KGV %.0f, erwartet %.0f)" % (pe, fpe), 1.0, "qual")
+        elif fpe > pe * 1.05:
+            pts.add(-1, "Gewinne sollen sinken (KGV %.0f, erwartet %.0f)" % (pe, fpe), 1.0, "qual")
+    g = fund.get("revenue_growth")
+    if g is not None:
+        g *= 100
+        pts.add(1 if g > 15 else -2 if g < -10 else -1 if g < 0 else 0,
+                "Umsatz %+.0f %% zum Vorjahr" % (round(g) or 0.0), 1.0, "qual")
+    m = fund.get("margin")
+    loss = (m is not None and m < 0) or (fund.get("eps") is not None and fund["eps"] < 0)
+    if loss:
+        pts.add(-2, "Das Unternehmen schreibt Verlust", 1.0, "qual")
+    elif m is not None:
+        pts.add(1 if m > 0.2 else 0, "Gewinnmarge %.0f %%" % (m * 100), 1.0, "qual")
+    roe = fund.get("roe")
+    if roe is not None and not loss and roe > 0.2:
+        pts.add(1, "Eigenkapitalrendite %.0f %%" % (roe * 100), 0.5, "qual")
+    # --- Sicht des Marktes: zählt halb, weil Kursziele dem Kurs oft hinterherlaufen
     tm = fund.get("target_mean")
     if tm and price:
-        fundamental += 1
         up = (tm / price - 1) * 100
         n = int(fund.get("analysts") or 0)
-        txt = "Analystenziel im Mittel %+.0f %% zum Kurs" % up + (" (%d Analysten)" % n if n else "")
-        add(2 if up > 25 else 1 if up > 10 else -2 if up < -5 else -1 if up < 0 else 0, txt)
+        pts.add(2 if up > 25 else 1 if up > 10 else -2 if up < -5 else -1 if up < 0 else 0,
+                "Analystenziel im Mittel %+.0f %% zum Kurs" % up + (" (%d Analysten)" % n if n else ""), 0.5, "markt")
     if div and div.get("yield_pct") and div.get("yield_5y_avg"):
-        fundamental += 1
         y, avg = div["yield_pct"], div["yield_5y_avg"]
         if y > avg * 1.15:
-            add(1, "Dividendenrendite %.1f %% über dem 5-Jahres-Schnitt (%.1f %%)" % (y, avg))
+            pts.add(1, "Dividendenrendite %.1f %% über dem 5-Jahres-Schnitt (%.1f %%)" % (y, avg), 0.5, "markt")
         elif y < avg * 0.8:
-            add(-1, "Dividendenrendite %.1f %% unter dem 5-Jahres-Schnitt (%.1f %%)" % (y, avg))
-    if tech:
-        if tech.get("sma200"):
-            r = price / tech["sma200"]
-            if r < 0.9:
-                add(1, "Kurs %.0f %% unter der 200-Tage-Linie" % ((1 - r) * 100))
-            elif r > 1.25:
-                add(-1, "Kurs %.0f %% über der 200-Tage-Linie" % ((r - 1) * 100))
-        if tech["range_pos"] < 0.25:
-            add(1, "Nahe am 52-Wochen-Tief")
-        elif tech["range_pos"] > 0.9:
-            add(-1, "Nahe am 52-Wochen-Hoch")
-    if not pts:
-        if not tech:
+            pts.add(-1, "Dividendenrendite %.1f %% unter dem 5-Jahres-Schnitt (%.1f %%)" % (y, avg), 0.5, "markt")
+    core = pts.score(("wert", "qual"))
+    has_core = pts.count(("wert", "qual")) >= 2
+    _price_points(pts, price, tech, has_core and core is not None and core > 0, (tech or {}).get("rel_6m"), "der Gesamtmarkt")
+    if not has_core:
+        # ETFs, ETCs und Titel ohne Kennzahlen: keine Punkte, nur die Kurslage als Wort
+        lage = _lage(price, tech)
+        if lage is None:
             return None
-        add(0, "Kurs im mittleren Bereich der 52-Wochen-Spanne, nahe der 200-Tage-Linie")
-    score = sum(pts) / max(len(pts), 3)
+        return {"score": None, "rating": None, "label": rating_label(rating(lage), "price"), "basis": "nur Kurslage, keine Kennzahlen zum Bewerten",
+                "reasons": _plain([x for x in pts.items if x["g"] == "kurs"]) or [{"p": 0, "w": 0, "g": "kurs", "text": "Kurs im mittleren Bereich der 52-Wochen-Spanne"}]}
+    score = pts.score()
+    if loss:
+        score = min(score, -0.2)      # Verlustbringer gelten nie als günstig
     points = rating(score)
-    if fundamental >= 2:
-        label, basis = rating_label(points, "stock"), "Kennzahlen und Kurslage"
-    else:
-        label, basis = rating_label(points, "price"), "nur Kurslage, Kennzahlen fehlen"
-    return {"score": round(score, 2), "rating": points, "label": label, "basis": basis, "reasons": reasons}
+    return {"score": round(score, 2), "rating": points, "label": rating_label(points, "stock"),
+            "basis": "Kennzahlen zählen voll, Kursziele halb, Kurslage nur gestützt", "reasons": pts.items}
+
+
+def _plain(items):
+    """Ohne Kennzahlen: der Hinweis zur Kurslage ohne Bezug auf Kennzahlen."""
+    old = ": zählt nicht, weil die Kennzahlen den Rückgang nicht als Chance stützen"
+    return [dict(x, text=x["text"].replace(old, ": gibt allein keine Punkte")) for x in items]
+
+
+def _lage(price, tech):
+    """Reine Kurslage als Zahl, nur für die Wortwahl bei Titeln ohne Kennzahlen."""
+    if not tech or not price:
+        return None
+    s = 0.0
+    if tech.get("sma200"):
+        r = price / tech["sma200"]
+        s += 0.7 if r < 0.9 else -0.7 if r > 1.25 else 0
+    if tech.get("range_pos") is not None:
+        s += 0.5 if tech["range_pos"] < 0.25 else -0.5 if tech["range_pos"] > 0.9 else 0
+    return s
 
 
 def crypto_valuation(price, tech, flow, onchain=None):
-    """Marktlage (Trend, Abstand zum Hoch, Hebel). Bei Protokollen mit Einnahmen zählt auch Marktwert zu Einnahmen."""
+    """Protokolle mit Einnahmen bekommen Punkte aus Marktwert zu Einnahmen. Coins ohne Einnahmen nur ein Wort zur Marktlage."""
     if not tech:
         return None
-    pts, reasons = [], []
-
-    def add(p, text):
-        pts.append(p)
-        reasons.append({"p": p, "text": text.replace(".", ",")})
-
-    if tech.get("sma200"):
-        r = price / tech["sma200"]
-        if r > 1.6:
-            add(-2, "Kurs %.0f %% über der 200-Tage-Linie" % ((r - 1) * 100))
-        elif r > 1.25:
-            add(-1, "Kurs %.0f %% über der 200-Tage-Linie" % ((r - 1) * 100))
-        elif r < 0.75:
-            add(2, "Kurs %.0f %% unter der 200-Tage-Linie" % ((1 - r) * 100))
-        elif r < 0.95:
-            add(1, "Kurs %.0f %% unter der 200-Tage-Linie" % ((1 - r) * 100))
-    if tech["from_high"] < -50:
-        add(1, "%.0f %% unter dem Jahreshoch" % -tech["from_high"])
-    elif tech["from_high"] > -8:
-        add(-1, "Nahe am Jahreshoch")
-    if tech.get("rsi") is not None:
-        if tech["rsi"] > 75:
-            add(-1, "RSI %.0f: kurzfristig überkauft" % tech["rsi"])
-        elif tech["rsi"] < 28:
-            add(1, "RSI %.0f: kurzfristig überverkauft" % tech["rsi"])
-    f = (flow or {}).get("funding_avg")
-    if f is not None:
-        if f > 0.03:
-            add(-1, "Funding %.3f %% je 8 Std.: viele gehebelte Longs" % f)
-        elif f < -0.005:
-            add(1, "Funding %.3f %% je 8 Std.: Markt ist short positioniert" % f)
-    basis = "Trend, Abstand zum Hoch und Hebel"
+    pts = _Points()
     oc = onchain or {}
-    if oc.get("type") == "protocol" and oc.get("pe"):      # Chains verdienen kaum Gebühren: dort nur anzeigen, nicht werten
-        basis = "Trend, Hebel und Einnahmen des Protokolls"
+    has_rev = oc.get("type") == "protocol" and oc.get("pe")
+    if has_rev:
         pe = oc["pe"]
         txt = "Marktwert ist das %.0f-Fache der Jahreseinnahmen" % pe
         if pe > 100 and (oc.get("ps") or 999) < 25:
-            add(-1, "Das Protokoll behält nur einen kleinen Teil der Gebühren, " + txt[0].lower() + txt[1:])
+            pts.add(-1, "Das Protokoll behält nur einen kleinen Teil der Gebühren, " + txt[0].lower() + txt[1:])
         else:
-            add(2 if pe < 10 else 1 if pe < 25 else -2 if pe > 100 else -1 if pe > 50 else 0,
-                txt + (": niedrig" if pe < 25 else ": hoch" if pe > 50 else ": im Mittelfeld"))
+            pts.add(2 if pe < 10 else 1 if pe < 25 else -2 if pe > 100 else -1 if pe > 50 else 0,
+                    txt + (": niedrig" if pe < 25 else ": hoch" if pe > 50 else ": im Mittelfeld"))
         if oc.get("pe_fdv") and oc["pe_fdv"] > pe * 2:
-            add(-1, "Mit allen noch gesperrten Token wäre es das %.0f-Fache" % oc["pe_fdv"])
+            pts.add(-1, "Mit allen noch gesperrten Token wäre es das %.0f-Fache" % oc["pe_fdv"])
         chg = oc.get("rev_chg")
-        if chg is not None and chg > 25:
-            add(1, "Einnahmen %.0f %% über dem Vormonat" % chg)
-        elif chg is not None and chg < -25:
-            add(-1, "Einnahmen %.0f %% unter dem Vormonat" % -chg)
-    if not pts:
-        add(0, "Kurs im mittleren Bereich der 52-Wochen-Spanne, nahe der 200-Tage-Linie")
-    score = sum(pts) / max(len(pts), 3)
+        if chg is not None and abs(chg) > 25:
+            pts.add(1 if chg > 0 else -1, "Einnahmen %.0f %% %s dem Vormonat" % (abs(chg), "über" if chg > 0 else "unter"), 1.0, "qual")
+        hy = oc.get("holder_yield")
+        if hy is not None:
+            pts.add(1 if hy > 5 else 0, "%.1f %% der Einnahmen pro Jahr fließen an Token-Halter" % hy if hy else "Token-Halter bekommen nichts von den Einnahmen", 1.0, "qual")
+    f = (flow or {}).get("funding_avg")
+    if f is not None:
+        if f > 0.03:
+            pts.add(-1, "Funding %.3f %% je 8 Std.: viele gehebelte Longs" % f, 0.5, "markt")
+        elif f < -0.005:
+            pts.add(1, "Funding %.3f %% je 8 Std.: Markt ist short positioniert" % f, 0.5, "markt")
+    if tech.get("rsi") is not None and tech["rsi"] > 75:
+        pts.add(-1, "RSI %.0f: kurzfristig überkauft" % tech["rsi"], 0.25, "kurs")
+    core = pts.score(("wert", "qual"))
+    _price_points(pts, price, tech, bool(has_rev) and core is not None and core > 0, tech.get("rel_6m"), "Bitcoin", crypto=True)
+    if not has_rev:
+        lage = _lage(price, tech) or 0.0
+        why = ("Blockchains werden nicht über Gebühren bewertet" if oc.get("type") == "chain" else "Keine Einnahmen bekannt, die sich bewerten lassen")
+        return {"score": None, "rating": None, "label": rating_label(rating(lage), "crypto"), "basis": "nur Marktlage, keine Punkte",
+                "reasons": [{"p": 0, "w": 0, "g": "wert", "text": why + ": deshalb keine Punkte"}] + _plain([x for x in pts.items if x["g"] != "wert"])}
+    score = pts.score()
     points = rating(score)
-    return {"score": round(score, 2), "rating": points, "label": rating_label(points, "crypto"), "basis": basis, "reasons": reasons}
+    return {"score": round(score, 2), "rating": points, "label": rating_label(points, "stock"),
+            "basis": "Einnahmen des Protokolls zählen voll, Hebel halb, Kurslage nur gestützt", "reasons": pts.items}
 
 
 def move_read(chg, valuation, kind="stock"):

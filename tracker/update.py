@@ -231,9 +231,15 @@ def run_daily(store):
     yf = sources.YahooFundamentals()
     onchain = sources.onchain_revenue([a["symbol"] for a in assets.values() if a["kind"] == "crypto"])
     out, currencies = {}, {"USD"}
+    # Gesamtmarkt als Maßstab: ein Rückgang zählt nur, wenn der Titel nicht deutlich schwächer läuft als der Markt
+    hist_cache, market_6m = {}, {}
+    for kind, sym in (("stock", "^GSPC"), ("crypto", "BTC")):
+        h = sources.crypto_history(sym) if kind == "crypto" else sources.stock_history(sym)
+        hist_cache[asset_key(kind, sym)] = h
+        market_6m[kind] = _perf_6m(h, kind == "crypto")
     for key, a in assets.items():
         crypto = a["kind"] == "crypto"
-        h = sources.crypto_history(a["symbol"]) if crypto else sources.stock_history(a["symbol"])
+        h = hist_cache.get(key) or (sources.crypto_history(a["symbol"]) if crypto else sources.stock_history(a["symbol"]))
         if not h or len(h["c"]) < 2:
             continue
         currencies.add(h["currency"])
@@ -241,6 +247,9 @@ def run_daily(store):
         price = q.get("price") if not q.get("error") else None
         price = price or h["c"][-1]
         tech = analytics.technicals(h["c"], crypto)
+        own, mkt = _perf_6m(h, crypto), market_6m["crypto" if crypto else "stock"]
+        if tech and own is not None and mkt is not None and a["symbol"] not in ("BTC", "^GSPC"):
+            tech["rel_6m"] = own - mkt
         lows = analytics.swing_lows(h["d"], h["c"])
         entry = {"hist": {"d": h["d"], "c": h["c"]}, "currency": h["currency"], "tech": _round(tech),
                  "levels": analytics.buy_levels(price, tech, lows)}
@@ -270,7 +279,7 @@ def run_daily(store):
         if key in out:
             bench[name] = dict(out[key]["hist"], label=label, currency=out[key]["currency"])
             continue
-        h = sources.crypto_history(sym) if kind == "crypto" else sources.stock_history(sym)
+        h = hist_cache.get(key) or (sources.crypto_history(sym) if kind == "crypto" else sources.stock_history(sym))
         if h:
             bench[name] = {"d": h["d"], "c": h["c"], "label": label, "currency": h["currency"]}
     fx = {}
@@ -281,6 +290,12 @@ def run_daily(store):
                 fx[cur] = h
     store.put("daily.json", {"updated": now_iso(), "assets": out, "bench": bench, "fx": fx, "sources": sources.STATUS})
     log("Tagesdaten: %d von %d Titeln mit Verlauf" % (len(out), len(assets)))
+
+
+def _perf_6m(h, crypto):
+    k = 182 if crypto else 126
+    c = (h or {}).get("c") or []
+    return (c[-1] / c[-1 - k] - 1) * 100 if len(c) > k and c[-1 - k] else None
 
 
 def _round(d):
