@@ -1,0 +1,24 @@
+name: Kurse und Alerts
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # GitHub startet zeitgesteuerte Läufe oft einige Minuten später
+  workflow_dispatch:
+
+concurrency:
+  group: kurse
+  cancel-in-progress: false
+
+jobs:
+  kurse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m tracker.update fast
+        env:
+          DATA_REPO: ${{ secrets.DATA_REPO }}
+          DATA_TOKEN: ${{ secrets.DATA_TOKEN }}

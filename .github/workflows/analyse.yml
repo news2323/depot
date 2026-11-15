@@ -1,0 +1,30 @@
+name: Tagesanalyse
+
+on:
+  schedule:
+    - cron: "30 4 * * *"   # früh morgens, vor dem Newsletter
+  workflow_dispatch:
+
+concurrency:
+  group: analyse
+  cancel-in-progress: false
+
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATA_REPO: ${{ secrets.DATA_REPO }}
+      DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m tracker.update all
+      - run: python -m tracker.ai
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      - run: python -m tracker.digest
