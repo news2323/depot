@@ -9,9 +9,10 @@ const ICON = {
   sync: '<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   logo: '<path d="M4 17l5-5 4 4 7-8"/><path d="M15 8h5v5"/>',
+  insight: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1V16h5v-.1c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z"/>',
 };
 const svg = n => `<svg viewBox="0 0 24 24">${ICON[n]}</svg>`;
-const TABS = [['home', 'Übersicht'], ['depot', 'Positionen'], ['watch', 'Watchlist'], ['cal', 'Termine']];
+const TABS = [['home', 'Übersicht'], ['depot', 'Positionen'], ['watch', 'Watchlist'], ['insight', 'Einblicke'], ['cal', 'Termine']];
 const CAT = {Earnings: ['blue', 'Quartalszahlen'], Makro: ['teal', 'Konjunktur'], Fed: ['purple', 'Notenbank'], IPO: ['pink', 'IPO'], Dividende: ['good', 'Ex-Dividende'], Zahltag: ['good', 'Zahltag'], Krypto: ['warn', 'Krypto'], Event: ['', 'Event']};
 const isMine = e => !e.market;
 const ALERT_TYPES = {price_above: 'Kurs steigt über', price_below: 'Kurs fällt unter', change_above: 'Tagesplus größer als (%)',
@@ -31,7 +32,7 @@ function render() {
   const stale = upd && Date.now() - Date.parse(upd) > 45 * 6e4;
   if (!TABS.some(t => t[0] === S.tab)) S.tab = 'home';
   if (!MODES[S.mode]) S.mode = 'kauf';
-  const view = {home: vHome, depot: vDepot, watch: vWatch, cal: vCal}[S.tab](c);
+  const view = {home: vHome, depot: vDepot, watch: vWatch, insight: vInsight, cal: vCal}[S.tab](c);
   const title = Object.fromEntries(TABS)[S.tab];
   $('#app').innerHTML = `<div class="shell">${sideBar(upd, stale)}
   <main class="main"><div class="inner">
@@ -110,9 +111,15 @@ function tbl(id, cols, rows, def) {
 // Feste Farben je Anlageklasse (Reihenfolge der geprüften Palette), Sektoren und Währungen nach Größe, Rest als „Weitere“.
 const CLASS_ORDER = ['Aktien', 'ETFs', 'Krypto', 'Rohstoffe'];
 function allocation(c, dim) {
-  const by = {};
-  const keyFn = dim === 'Sektor' ? p => sectorOf(p.key) : dim === 'Währung' ? p => (isCoin(p.key) ? 'USD' : curOf(p.key)) : p => assetClass(p.key);
-  c.held.forEach(p => { if (p.value > 0) { const k = keyFn(p); by[k] = (by[k] || 0) + p.value; } });
+  let by = {};
+  if (dim === 'Sektor') { // ETFs nach ihrem Inhalt aufgeteilt, wie im Reiter Einblicke
+    const m = sectorMix(c);
+    Object.entries(m.by).forEach(([s, v]) => { by[SECTOR_DE[s] || s] = v; });
+    Object.entries(m.outside).forEach(([s, v]) => { by[s] = (by[s] || 0) + v; });
+  } else {
+    const keyFn = dim === 'Währung' ? p => (isCoin(p.key) ? 'USD' : curOf(p.key)) : p => assetClass(p.key);
+    c.held.forEach(p => { if (p.value > 0) { const k = keyFn(p); by[k] = (by[k] || 0) + p.value; } });
+  }
   let groups = Object.entries(by).map(([name, v]) => ({name, v}));
   if (dim === 'Anlageklasse') {
     groups.sort((a, b) => CLASS_ORDER.indexOf(a.name) - CLASS_ORDER.indexOf(b.name));
@@ -334,6 +341,116 @@ function vWatch() {
   </div>`;
 }
 
+/* ---------------------------------------------------------------- Einblicke: Sektoren, Analysten, Insider */
+// Daten aus daily.json: sectors (Aktien-ETFs), analyst (Urteile und Änderungen), insider (US-Meldungen nach Form 4). Quelle Yahoo.
+const REC = ['Starker Kauf', 'Kaufen', 'Halten', 'Verkaufen', 'Starker Verkauf'];
+const sumN = n => n ? n.reduce((a, b) => a + b, 0) : 0;
+const recMean = n => sumN(n) ? n.reduce((s, x, i) => s + x * (i + 1), 0) / sumN(n) : null;
+const recWord = m => m == null ? '–' : REC[Math.min(4, Math.max(0, Math.round(m) - 1))];
+const buyShare = n => sumN(n) ? (n[0] + n[1]) / sumN(n) * 100 : null;
+const GRADE_DE = {'Strong Buy': 'Starker Kauf', Buy: 'Kaufen', 'Conviction Buy': 'Kaufen', 'Long-Term Buy': 'Langfristig kaufen', 'Speculative Buy': 'Spekulativ kaufen',
+  Accumulate: 'Aufstocken', Add: 'Aufstocken', Outperform: 'Besser als der Markt', 'Market Outperform': 'Besser als der Markt', 'Sector Outperform': 'Besser als die Branche',
+  Overweight: 'Übergewichten', Positive: 'Positiv', Hold: 'Halten', Neutral: 'Neutral', 'Equal-Weight': 'Marktgewichten', 'Equal Weight': 'Marktgewichten',
+  'Market Perform': 'Wie der Markt', 'Sector Perform': 'Wie die Branche', 'Sector Weight': 'Wie die Branche', 'In-Line': 'Wie der Markt', 'Peer Perform': 'Wie die Vergleichsgruppe',
+  Mixed: 'Gemischt', Underweight: 'Untergewichten', Underperform: 'Schlechter als der Markt', 'Market Underperform': 'Schlechter als der Markt',
+  'Sector Underperform': 'Schlechter als die Branche', Reduce: 'Reduzieren', Negative: 'Negativ', Sell: 'Verkaufen', 'Strong Sell': 'Starker Verkauf'};
+const gradeDe = g => GRADE_DE[g] || g || '–';
+const ACTION_DE = {up: 'hebt auf', down: 'senkt auf', init: 'startet mit', main: 'bleibt bei', reit: 'bleibt bei'};
+const ROLE_DE = {Director: 'Board-Mitglied', Officer: 'Führungskraft', 'Officer and Director': 'Führungskraft und Board', 'Chief Executive Officer': 'Vorstandschef',
+  'Chief Financial Officer': 'Finanzchef', 'Chief Operating Officer': 'Leiter operatives Geschäft', 'Chief Technology Officer': 'Technikchef', President: 'Präsident',
+  'General Counsel': 'Chefjurist', 'Chairman of the Board': 'Board-Vorsitz'};
+const roleDe = r => ROLE_DE[r] || (/Beneficial Owner/i.test(r || '') ? 'Großaktionär (über 10 %)' : r || '–');
+const INS_HINT = 'Verkäufe sind oft lange geplant (Vergütung, Steuern, feste Verkaufspläne) und sagen wenig. Käufe mit eigenem Geld sind seltener und das stärkere Zeichen. Zuteilungen und Optionen sind nicht enthalten. Einzeln melden müssen nur US-Firmen.';
+const an = key => D(key).analyst || {};
+const ins = key => D(key).insider;
+const dShort = d => d ? `${+d.slice(8, 10)}.${+d.slice(5, 7)}.` : '';
+// Beträge und Kurse für die Anzeige gerundet, Aktien in Euro
+const amt = (key, v) => { const x = toShow(key, v); return x == null || isNaN(x) ? '–' : big(x) + ' ' + (CUR[showCur(key)] || showCur(key)); };
+const pxR = (key, v) => { const x = toShow(key, v); return x == null || isNaN(x) ? '–' : nf(x, x >= 100 ? 0 : x >= 10 ? 1 : 2) + ' ' + (CUR[showCur(key)] || showCur(key)); };
+const upside = key => { const t = (D(key).fund || {}).target_mean, p = A(key).price; return t && p ? (t / p - 1) * 100 : null; };
+const recBar = (n, wide) => `<span class="recbar${wide ? ' wide' : ''}" role="img" aria-label="${n.map((x, i) => x + ' ' + REC[i]).join(', ')}">${n.map((x, i) => x ? `<i class="r${i}" style="flex:${x}" title="${REC[i]}: ${x}"></i>` : '').join('')}</span>`;
+function changeText(key, c) {
+  if (!c) return '<span class="ts">–</span>';
+  const pt = c.pt ? (c.pt_prev && Math.abs(c.pt_prev - c.pt) > 1e-9 ? `Ziel ${pxR(key, c.pt_prev)} → ${pxR(key, c.pt)}` : `Ziel ${pxR(key, c.pt)}`) : '';
+  return `<div class="tl"><b>${esc(c.firm)}</b> ${esc(ACTION_DE[c.action] || '')} ${esc(gradeDe(c.to))}</div><div class="ts">${dShort(c.d)}${pt ? ' · ' + pt : ''}</div>`;
+}
+const ACOL = {
+  rec: {id: 'rec', label: 'Urteil', cls: 'c-rec', num: true, sort: r => recMean(an(r.key).now), html: r => { const n = an(r.key).now; return n ? `<div class="recc">${recBar(n)}<span>${recWord(recMean(n))}</span></div>` : '<span class="ts">–</span>'; }},
+  n: {id: 'n', label: 'Analysten', cls: 'r hm', num: true, sort: r => sumN(an(r.key).now) || null, html: r => `<span class="num">${sumN(an(r.key).now) || '–'}</span>`},
+  buy: {id: 'buy', label: 'Kaufurteile', cls: 'r hm', num: true, sort: r => buyShare(an(r.key).now), html: r => { const x = an(r.key); return x.now ? `<div class="num">${nf(buyShare(x.now), 0)} %</div>${x.before ? `<div class="ts num">vor 3 Mon. ${nf(buyShare(x.before), 0)} %</div>` : ''}` : '<span class="ts">–</span>'; }},
+  tgt: {id: 'tgt', label: 'Kursziel', cls: 'r', num: true, sort: r => upside(r.key), html: r => { const t = (D(r.key).fund || {}).target_mean, u = upside(r.key); return t ? `<div class="num">${pxR(r.key, t)}</div>${u != null ? `<div class="ts num">${pctS(u, 0)} zum Kurs</div>` : ''}` : '<span class="ts">–</span>'; }},
+  last: {id: 'last', label: 'Letzte Änderung', cls: 'hm c-last', sort: r => ((an(r.key).changes || [])[0] || {}).d || null, html: r => changeText(r.key, (an(r.key).changes || [])[0])},
+};
+const insAmt = (key, typ) => { const i = ins(key), n = i['n_' + typ + '_6m']; return n ? `<div class="num">${amt(key, i[typ + '_6m'])}</div><div class="ts">${n} ${n === 1 ? 'Meldung' : 'Meldungen'}</div>` : '<span class="ts">–</span>'; };
+const ICOL = {
+  buy: {id: 'ibuy', label: 'Käufe<span class="hm"> 6 Mon.</span>', cls: 'r', num: true, sort: r => ins(r.key).buy_6m, html: r => insAmt(r.key, 'buy')},
+  sell: {id: 'isell', label: 'Verkäufe<span class="hm"> 6 Mon.</span>', cls: 'r', num: true, sort: r => ins(r.key).sell_6m, html: r => insAmt(r.key, 'sell')},
+  last: {id: 'ilast', label: 'Zuletzt', cls: 'r hm', sort: r => ((ins(r.key).rows || [])[0] || {}).d || null, html: r => { const x = (ins(r.key).rows || [])[0];
+    return x ? `<div class="num">${dShort(x.d)}</div><div class="ts">${x.type === 'buy' ? 'Kauf' : 'Verkauf'}</div>` : '<span class="ts">–</span>'; }},
+};
+const insRow = (key, r, sym) => `<${sym ? `button data-act="open" data-key="${esc(key)}"` : 'div'} class="row"><div class="l"><div class="t">${sym ? `<span class="sym" style="margin:0;color:inherit">${esc(key.split(':')[1])}</span>` : ''}<span${sym ? '' : ' style="margin:0;color:var(--ink)"'}>${esc(r.who)}</span></div>
+  <div class="m">${esc(roleDe(r.role))} · ${dateDe(r.d)}${r.shares ? ` · <span class="num">${nf(r.shares, 0)}</span> Aktien` : ''}</div></div>
+  <div class="r"><span class="chip ${r.type === 'buy' ? 'good' : 'bad'}">${r.type === 'buy' ? 'Kauf' : 'Verkauf'}</span><div class="v num" style="margin-top:3px">${amt(key, r.value)}</div></div></${sym ? 'button' : 'div'}>`;
+
+function sectorCard(c) {
+  const m = sectorMix(c), sb = S.daily.sector_bench || {}, names = Object.keys(sb), bn = names.includes(S.secb) ? S.secb : names[0], bw = sb[bn] || {};
+  if (!m.eq) return card('Sektoren', '', '<p class="empty">Noch keine Aktien oder Aktien-ETFs im Depot.</p>', '', 'span12');
+  const rows = [...new Set([...Object.keys(m.by), ...Object.keys(bw)])].map(s => ({s, me: (m.by[s] || 0) / m.eq * 100, ix: bw[s] != null ? bw[s] * 100 : null}))
+    .sort((a, b) => b.me - a.me || (b.ix || 0) - (a.ix || 0));
+  const mx = Math.max(...rows.map(r => Math.max(r.me, r.ix || 0))) || 1, pct = v => v == null ? '–' : nf(v, 1) + ' %';
+  const diff = r => r.ix == null ? '–' : (r.me - r.ix >= 0 ? '+' : '−') + nf(Math.abs(r.me - r.ix), 1);
+  const body = `<div class="secrows"><div class="sechead"><span>Branche</span><span class="hm"></span><span class="r">Du</span><span class="r"><span class="hm">${esc(bn || 'Index')}</span><span class="hd">Index</span></span><span class="r"><span class="hm">Unterschied</span><span class="hd">±</span></span></div>
+    ${rows.map(r => { const parts = (m.parts[r.s] || []).sort((a, b) => b.v - a.v);
+      return `<details><summary title="${esc(SECTOR_DE[r.s] || r.s)}: du ${pct(r.me)}${r.ix != null ? `, ${esc(bn)} ${pct(r.ix)}` : ''}"><span class="nm">${esc(SECTOR_DE[r.s] || r.s)}</span>
+        <span class="sbar"><i style="width:${(r.me / mx * 100).toFixed(1)}%"></i>${r.ix != null ? `<b style="left:${(r.ix / mx * 100).toFixed(1)}%"></b>` : ''}</span>
+        <span class="r num">${pct(r.me)}</span><span class="r num muted">${pct(r.ix)}</span><span class="r num">${diff(r)}<span class="hm"> Pkt.</span></span></summary>
+        ${parts.length ? `<div class="secparts">${parts.slice(0, 10).map(p => `<button data-act="open" data-key="${esc(p.key)}"><span class="sym">${esc(p.key.split(':')[1])}</span><span class="ts">${esc(nameOf(p.key))}${p.via ? ' · über den ETF' : ''}</span><span class="num">${eur(p.v, 0)}</span></button>`).join('')}
+          ${parts.length > 10 ? `<p class="hint">und ${parts.length - 10} weitere</p>` : ''}</div>` : '<p class="hint" style="margin:0 0 10px">In deinem Depot nicht vertreten.</p>'}</details>`; }).join('')}</div>`;
+  const out = Object.entries(m.outside).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${nf(v / m.total * 100, 1)} %`).join(', ');
+  const legend = `<div class="seclegend"><span><i class="me"></i>Dein Depot</span>${bn ? `<span><i class="ix"></i>${esc(bn)}</span>` : ''}</div>`;
+  return card('Sektoren', `Aktien und Aktien-ETFs, zusammen ${nf(m.eq / m.total * 100, 0)} % des Depots. ETFs sind nach ihrem Inhalt aufgeteilt.`,
+    body + `<p class="hint">Zeile antippen zeigt, welche Titel in der Branche stecken. Unterschied in Prozentpunkten.${out ? ' Nicht enthalten: ' + esc(out) + ' des Depots.' : ''}</p>`,
+    `<div class="headr">${legend}${names.length > 1 ? seg('secb', names, bn) : ''}</div>`, 'span12');
+}
+function vInsight(c) {
+  const f = fltOn('ein', 'Depot');
+  const keys = f === 'Depot' ? c.held.filter(p => p.value > 0).map(p => p.key) : (S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol));
+  const stocks = [...new Set(keys)].filter(k => !isCoin(k) && !isFund(k)).map(key => ({key}));
+  const aRows = stocks.filter(r => an(r.key).now || (D(r.key).fund || {}).target_mean), iRows = stocks.filter(r => ins(r.key));
+  const sw = flt('ein', ['Depot', 'Watchlist']);
+  const tot = k => aRows.reduce((s, r) => s + (an(r.key)[k] || 0), 0);
+  const moves = [[tot('up_90d'), 'Hochstufung', 'Hochstufungen'], [tot('down_90d'), 'Abstufung', 'Abstufungen'], [tot('pt_up_90d'), 'erhöhtes Kursziel', 'erhöhte Kursziele'], [tot('pt_down_90d'), 'gesenktes Kursziel', 'gesenkte Kursziele']]
+    .map(([n, one, many]) => `<b>${n}</b> ${n === 1 ? one : many}`).join(', ');
+  const feed = iRows.flatMap(r => (ins(r.key).rows || []).map(x => ({x, key: r.key}))).sort((a, b) => b.x.d.localeCompare(a.x.d)).slice(0, 14);
+  const noData = stocks.filter(r => !ins(r.key)).map(r => r.key.split(':')[1]);
+  return `<div class="g12">${sectorCard(c)}
+    ${card('Was sagen Analysten', 'Urteile und Kursziele für 12 Monate, zusammengetragen von Yahoo Finance. Nur Aktien: ETFs und Krypto haben keine Analysten.',
+      aRows.length ? `<div class="sumline" style="margin-bottom:10px">Letzte 90 Tage: ${moves}</div>${tbl('analyst', [COL.name, ACOL.rec, ACOL.n, ACOL.buy, ACOL.tgt, ACOL.last], aRows, ['rec', 1])}
+      <p class="hint">Analysten liegen oft daneben, und Kursziele folgen meist dem Kurs. Ein hohes Kursziel ist deshalb kein Kaufgrund. Zeile antippen für alle Änderungen. Keine Anlageberatung.</p>` : '<p class="empty">Keine Analystendaten für diese Auswahl.</p>', sw, 'span12')}
+    ${card('Insider je Titel', 'Käufe und Verkäufe von Management, Board und Großaktionären in den letzten 6 Monaten',
+      iRows.length ? tbl('insider', [COL.name, ICOL.buy, ICOL.sell, ICOL.last], iRows, ['ibuy', -1]) + `<p class="hint">${INS_HINT}${noData.length ? ' Ohne Meldungen: ' + esc(noData.join(', ')) + '.' : ''}</p>` : '<p class="empty">Keine Insider-Meldungen für diese Auswahl. Einzeln melden müssen nur US-Firmen.</p>', sw, 'span7')}
+    ${card('Letzte Insider-Meldungen', 'Neueste zuerst, nur Käufe und Verkäufe', feed.length ? `<div class="rows tight">${feed.map(e => insRow(e.key, e.x, true)).join('')}</div>` : '<p class="empty">Keine Meldungen in den letzten 12 Monaten.</p>', '', 'span5')}
+  </div>`;
+}
+function analystDetail(key, f, x) {
+  const n = x.now, t = f.target_mean, u = upside(key);
+  const before = x.before ? ` · vor 3 Monaten ${nf(buyShare(x.before), 0)} %` : '';
+  return card('Analysten', `${sumN(n) ? sumN(n) + ' Urteile' : ''}${f.analysts ? (sumN(n) ? ' · ' : '') + nf(f.analysts, 0) + ' mit Kursziel' : ''} · Quelle: Yahoo Finance`,
+    `${n ? `<div class="recsum"><b>${recWord(recMean(n))}</b><span class="muted small">${nf(buyShare(n), 0)} % raten zum Kauf${before}</span></div>${recBar(n, true)}
+      <div class="reclegend">${n.map((v, i) => `<span><i class="r${i}"></i>${REC[i]} <b class="num">${v}</b></span>`).join('')}</div>` : ''}
+    ${t ? `<div class="tiles" style="margin-top:12px">${tile('Kursziel im Schnitt', pxR(key, t), u != null ? pctS(u, 0) + ' zum Kurs' : '')}${tile('Niedrigstes Ziel', pxR(key, f.target_low))}${tile('Höchstes Ziel', pxR(key, f.target_high))}
+      ${tile('Änderungen, 90 Tage', x.n_90d ? `${x.up_90d || 0} ↑ · ${x.down_90d || 0} ↓` : '–', x.n_90d ? `Ziele: ${x.pt_up_90d || 0} erhöht, ${x.pt_down_90d || 0} gesenkt` : '')}</div>` : ''}
+    ${(x.changes || []).length ? `<p class="sh">Letzte Änderungen</p><div class="rows tight">${x.changes.slice(0, 8).map(c => `<div class="row"><div class="l">${changeText(key, c)}</div></div>`).join('')}</div>` : ''}
+    <p class="hint">↑ Hochstufung, ↓ Abstufung. Analysten liegen oft daneben, Kursziele gelten für 12 Monate. Keine Anlageberatung.</p>`);
+}
+function insiderDetail(key, x) {
+  const n = k => x['n_' + k + '_6m'] || 0;
+  return card('Insider', 'Käufe und Verkäufe von Management, Board und Großaktionären, letzte 12 Monate',
+    `<div class="tiles two" style="margin:0">${tile('Käufe, 6 Monate', n('buy') ? amt(key, x.buy_6m) : '–', n('buy') + (n('buy') === 1 ? ' Meldung' : ' Meldungen'))}${tile('Verkäufe, 6 Monate', n('sell') ? amt(key, x.sell_6m) : '–', n('sell') + (n('sell') === 1 ? ' Meldung' : ' Meldungen'))}</div>
+    ${(x.rows || []).length ? `<div class="rows tight" style="margin-top:8px">${x.rows.map(r => insRow(key, r, false)).join('')}</div>` : '<p class="empty" style="margin-top:10px">Keine Käufe oder Verkäufe, nur Zuteilungen und Optionen.</p>'}
+    <p class="hint">${INS_HINT}</p>`);
+}
+
 /* ---------------------------------------------------------------- Termine */
 function calList(events) {
   const by = {}; events.forEach(e => (by[e.date] = by[e.date] || []).push(e));
@@ -400,6 +517,8 @@ function vAsset(key) {
     ${tile('Umsatzwachstum', f.revenue_growth != null ? pctS(f.revenue_growth * 100, 1) : '–', 'zum Vorjahr')}${tile('Gewinnschätzung', estChg(f) != null ? pctS(estChg(f), 0) : '–', 'Änderung in 3 Monaten' + (f.est_year ? ', für ' + f.est_year : ''))}
     ${tile('Börsenwert', f.market_cap ? big(f.market_cap) + ' ' + (CUR[cur] || cur) : '–')}</div>
     <p class="hint">Die Gewinnschätzung zeigt, ob sich am inneren Wert etwas geändert hat. Fällt der Kurs deutlich stärker als die Schätzung, hat der Markt wohl überreagiert. Nur dann zählt ein niedriger Kurs in den Punkten.</p>`);
+  if (kind === 'stock' && !isFund(key) && ((d.analyst || {}).now || f.target_mean)) h += analystDetail(key, f, d.analyst || {});
+  if (kind === 'stock' && d.insider) h += insiderDetail(key, d.insider);
   if (dv) h += card('Dividende', '', `<div class="tiles" style="margin:0">${tile('Pro Aktie und Jahr', px(key, dv.annual), dv.per_year ? dv.per_year + ' Zahlungen' : '')}${tile('Rendite', dv.yield_pct != null ? nf(dv.yield_pct, 2) + ' %' : '–', dv.yield_5y_avg ? '5-Jahres-Schnitt ' + nf(dv.yield_5y_avg, 2) + ' %' : '')}
     ${tile('Nächster Ex-Tag', dv.next_ex ? dateDe(dv.next_ex) : '–', dv.next_ex_estimated ? 'geschätzt aus dem Rhythmus' : dv.next_pay ? 'Zahltag ' + dateDe(dv.next_pay) : '')}${tile('Wachstum', dv.growth_pct != null ? pctS(dv.growth_pct, 1) : '–', dv.payout_pct != null ? 'Ausschüttung ' + nf(dv.payout_pct, 0) + ' % vom Gewinn' : '')}</div>
     ${p && p.divYear ? `<div class="note">Bei deinem Bestand sind das etwa <b>${eur(p.divYear)}</b> brutto im Jahr.</div>` : ''}`);
@@ -494,6 +613,7 @@ document.addEventListener('click', async ev => {
   else if (act === 'hm') { S.hm = v; render(); }
   else if (act === 'cmp') { S.cmp = v; render(); }
   else if (act === 'alloc') { S.alloc = v; render(); }
+  else if (act === 'secb') { S.secb = v; render(); }
   else if (act === 'theme') { applyTheme(v === 'Hell' ? 'light' : v === 'Dunkel' ? 'dark' : ''); vSettings(); render(); }
   else if (act === 'searchopen') { const t = $('.top'); t.classList.add('searching'); $('#q').focus(); }
   else if (act === 'calf') { S.calFilter = v; render(); }

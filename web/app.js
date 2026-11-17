@@ -427,6 +427,23 @@ const SECTOR_DE = {Technology: 'Technologie', 'Financial Services': 'Finanzen', 
 const isCommodity = key => !isCoin(key) && /\b(ETC|Gold|Commodit|Rohstoff)/i.test(nameOf(key));
 const assetClass = key => isCoin(key) ? 'Krypto' : isCommodity(key) ? 'Rohstoffe' : isFund(key) ? 'ETFs' : 'Aktien';
 const sectorOf = key => isCoin(key) ? 'Krypto' : isCommodity(key) ? 'Rohstoffe' : isFund(key) ? 'Breite ETFs' : SECTOR_DE[(D(key).fund || {}).sector] || (D(key).fund || {}).sector || 'Ohne Angabe';
+// Branchen des Depots in Euro. Aktien-ETFs werden nach ihrem Inhalt aufgeteilt (daily.json → sectors, aus Yahoo topHoldings).
+// Krypto, Rohstoffe und Titel ohne Angabe stehen getrennt in outside.
+function sectorMix(c) {
+  const by = {}, parts = {}, outside = {};
+  let eq = 0, total = 0;
+  c.held.forEach(p => {
+    if (!(p.value > 0)) return;
+    total += p.value;
+    const cls = assetClass(p.key), d = D(p.key);
+    const w = cls === 'Krypto' || cls === 'Rohstoffe' ? null : isFund(p.key) ? d.sectors : (d.fund || {}).sector ? {[d.fund.sector]: 1} : null;
+    const sum = w ? Object.values(w).reduce((a, b) => a + b, 0) : 0;
+    if (!sum) { const k = cls === 'Krypto' || cls === 'Rohstoffe' ? cls : 'Ohne Angabe'; outside[k] = (outside[k] || 0) + p.value; return; }
+    eq += p.value;
+    Object.entries(w).forEach(([s, x]) => { const v = p.value * x / sum; by[s] = (by[s] || 0) + v; (parts[s] = parts[s] || []).push({key: p.key, v, via: isFund(p.key)}); });
+  });
+  return {by, parts, outside, eq, total};
+}
 
 /* ---------------------------------------------------------------- Rückrechnung der heutigen Positionen
    Wie ein Fonds-Factsheet: Was hätten die heutigen Bestände in der Vergangenheit gemacht? Grundlage für

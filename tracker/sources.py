@@ -5,7 +5,9 @@ Jede Funktion gibt bei einem Ausfall None zurück. Welche Quelle geantwortet hat
 """
 import datetime
 import http.cookiejar
+import re
 import statistics
+import time
 import urllib.parse
 import urllib.request
 
@@ -117,11 +119,13 @@ class YahooFundamentals:
     """Kennzahlen über quoteSummary. Yahoo sperrt Rechenzentren gelegentlich aus: dann bleibt alles leer
     und die KI-Recherche liefert die Zahlen."""
 
-    MODULES = "summaryDetail,defaultKeyStatistics,financialData,calendarEvents,assetProfile,earningsTrend"
+    MODULES = ("summaryDetail,defaultKeyStatistics,financialData,calendarEvents,assetProfile,earningsTrend,"
+               "recommendationTrend,upgradeDowngradeHistory,insiderTransactions,topHoldings")
 
     def __init__(self):
         self.crumb = None
         self.dead = False
+        self.extra = {}   # je Symbol: insider, analyst, sectors (aus demselben Abruf)
         jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
@@ -187,7 +191,119 @@ class YahooFundamentals:
             "website": prof.get("website"), "ir_website": prof.get("irWebsite"),
         }
         out.update(_eps_trend(d.get("earningsTrend")))
+        extra = {"insider": _insider(d.get("insiderTransactions")),
+                 "analyst": _analyst(d.get("recommendationTrend"), d.get("upgradeDowngradeHistory")),
+                 "sectors": _sectors(d.get("topHoldings"))}
+        self.extra[symbol] = {k: v for k, v in extra.items() if v}
         return {k: v for k, v in out.items() if v not in (None, "")}
+
+
+def _raw(v):
+    return fnum(v.get("raw")) if isinstance(v, dict) else fnum(v)
+
+
+def _day(ts):
+    return datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+
+
+def _insider(mod, days=365):
+    """Käufe und Verkäufe von Vorständen, Direktoren und Großaktionären (US-Meldungen, Form 4).
+    Zuteilungen, Optionen und Schenkungen sind kein Signal und bleiben weg. Ohne Meldungen (europäische Firmen): None."""
+    tx = (mod or {}).get("transactions") or []
+    if not tx:
+        return None
+    now = time.time()
+    rows = []
+    for t in tx:
+        text = t.get("transactionText") or ""
+        typ = "buy" if text.startswith("Purchase") else "sell" if text.startswith("Sale") else None
+        ts = _raw(t.get("startDate"))
+        if not typ or not ts or ts < now - days * 86400:
+            continue
+        shares, value = _raw(t.get("shares")), _raw(t.get("value"))
+        if not value and shares:
+            m = re.search(r"price ([\d.]+)", text)
+            value = shares * float(m.group(1)) if m else None
+        rows.append({"d": _day(ts), "who": _person(t.get("filerName")), "role": t.get("filerRelation") or "",
+                     "type": typ, "shares": shares, "value": round(value) if value else None})
+    rows.sort(key=lambda r: r["d"], reverse=True)
+    half = _day(now - 182 * 86400)
+    # Käufe sind seltener und aussagekräftiger: sie bleiben in der Liste, Verkäufe füllen bis 12 Zeilen auf
+    buys = [r for r in rows if r["type"] == "buy"][:8]
+    keep = buys + [r for r in rows if r["type"] == "sell"][:12 - len(buys)]
+    out = {"rows": sorted(keep, key=lambda r: r["d"], reverse=True)}
+    for typ in ("buy", "sell"):
+        sel = [r for r in rows if r["type"] == typ and r["d"] >= half]
+        out[typ + "_6m"] = round(sum(r["value"] or 0 for r in sel))
+        out["n_" + typ + "_6m"] = len(sel)
+    return out
+
+
+_FIRM = re.compile(r"\b(INC|LLC|LP|L\.P\.|CORP|CORPORATION|LTD|TRUST|FUND|CAPITAL|PARTNERS|HOLDINGS|GROUP|MANAGEMENT|CO|AG|SA|PLC|FOUNDATION)\b", re.I)
+
+
+def _person(name):
+    """Form 4 nennt Personen als „NACHNAME VORNAME MITTELNAME“. Für die Anzeige: „Vorname M. Nachname“. Firmen bleiben, wie sie sind."""
+    name = " ".join((name or "").split())
+    parts = name.split(" ")
+    if _FIRM.search(name) or not 2 <= len(parts) <= 4:
+        return name.title()
+    last, rest = parts[0], parts[1:]
+    rest = [r + "." if len(r) == 1 else r for r in rest]
+    return " ".join(rest + [last]).title()
+
+
+def _analyst(rt, ud, days=90):
+    """Urteile der Analysten heute und vor drei Monaten (Anzahl je Stufe) und ihre letzten Änderungen."""
+    trend = {t.get("period"): t for t in ((rt or {}).get("trend") or []) if isinstance(t, dict)}
+    cols = ("strongBuy", "buy", "hold", "sell", "strongSell")
+    row = lambda t: [int(t.get(c) or 0) for c in cols] if t else None
+    out = {}
+    now, before = row(trend.get("0m")), row(trend.get("-3m"))
+    if now and sum(now):
+        out["now"] = now
+    if before and sum(before):
+        out["before"] = before
+    cut = time.time() - days * 86400
+    changes = []
+    for h in (ud or {}).get("history") or []:
+        ts = fnum(h.get("epochGradeDate"))
+        if not ts or ts < cut:
+            continue
+        changes.append({"d": _day(ts), "firm": h.get("firm") or "", "action": h.get("action") or "",
+                        "to": h.get("toGrade") or "", "from": h.get("fromGrade") or "",
+                        "pt": fnum(h.get("currentPriceTarget")) or None, "pt_prev": fnum(h.get("priorPriceTarget")) or None,
+                        "pt_action": h.get("priceTargetAction") or ""})
+    changes.sort(key=lambda c: c["d"], reverse=True)
+    if changes:
+        out["changes"] = changes[:10]
+        out["n_90d"] = len(changes)
+        for a in ("up", "down", "init"):
+            out[a + "_90d"] = sum(1 for c in changes if c["action"] == a)
+        out["pt_up_90d"] = sum(1 for c in changes if c["pt_action"] == "Raises")
+        out["pt_down_90d"] = sum(1 for c in changes if c["pt_action"] == "Lowers")
+    return out or None
+
+
+SECTOR_KEYS = {"technology": "Technology", "financial_services": "Financial Services", "healthcare": "Healthcare",
+               "consumer_cyclical": "Consumer Cyclical", "consumer_defensive": "Consumer Defensive",
+               "communication_services": "Communication Services", "industrials": "Industrials", "energy": "Energy",
+               "utilities": "Utilities", "realestate": "Real Estate", "basic_materials": "Basic Materials"}
+
+
+def _sectors(th):
+    """Branchen eines Aktien-ETFs (Anteile 0 bis 1). Rohstoff- und Swap-ETFs (kaum Aktien im Bestand): None."""
+    th = th or {}
+    stock = _raw(th.get("stockPosition"))
+    w = {}
+    for x in th.get("sectorWeightings") or []:
+        for k, v in x.items():
+            val = _raw(v)
+            if val and val > 0 and k in SECTOR_KEYS:
+                w[SECTOR_KEYS[k]] = round(val, 4)
+    if not w or (stock is not None and stock < 0.5):
+        return None
+    return w
 
 
 def _eps_trend(mod):

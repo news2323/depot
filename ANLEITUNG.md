@@ -98,6 +98,8 @@ die Aufgabe beim nächsten Start nach. Den Zugangsschlüssel holt das Skript `tr
 ## Woher die Daten kommen
 
 - **Aktien:** Yahoo Finance (Kurse, Dividenden, KGV, PEG, Analystenziele, Termine). Die KI ergänzt Quartalszahlen von den Investor-Relations-Seiten.
+- **Einblicke:** ebenfalls Yahoo Finance, einmal am Tag: Branchen deiner ETFs, Urteile und Kursziele der Analysten samt Hoch- und Abstufungen,
+  Insider-Käufe und -Verkäufe. Insider melden einzeln nur US-Firmen, für europäische Titel bleibt der Bereich leer.
 - **Krypto:** Velo hat keine frei nutzbare Schnittstelle. Der Tracker holt dieselben Größen direkt von den Börsen:
   Spot-Kaufdruck von Binance, Futures-Kaufdruck von Binance oder OKX, Open Interest und Funding von OKX, Hyperliquid, Bybit und Binance.
   Jeder Coin verlinkt zu Velo.

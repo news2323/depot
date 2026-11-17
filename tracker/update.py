@@ -298,6 +298,7 @@ def run_daily(store):
             entry["div"] = div
             entry["divs"] = [[d, round(x, 4)] for d, x in h["div"]]
             entry["valuation"] = analytics.stock_valuation(price, tech, fund, div)
+            entry.update(yf.extra.get(a["symbol"]) or {})   # insider, analyst, sectors
             if fund.get("earnings_date"):
                 entry["earnings_date"] = analytics.ts_to_iso(fund["earnings_date"])
         out[key] = entry
@@ -313,14 +314,25 @@ def run_daily(store):
         h = hist_cache.get(key) or (sources.crypto_history(sym) if kind == "crypto" else sources.stock_history(sym))
         if h:
             bench[name] = {"d": h["d"], "c": h["c"], "label": label, "currency": h["currency"]}
+    # Branchen der großen Indizes als Vergleich für die Sektoren des Depots (über die ETFs URTH und SPY)
+    sector_bench = {}
+    for name, sym in SECTOR_BENCH:
+        yf.get(sym)
+        w = (yf.extra.get(sym) or {}).get("sectors")
+        if w:
+            sector_bench[name] = w
     fx = {}
     for cur in sorted(currencies):
         if cur != "EUR":
             h = sources.fx_history(cur)
             if h:
                 fx[cur] = h
-    store.put("daily.json", {"updated": now_iso(), "assets": out, "bench": bench, "fx": fx, "sources": sources.STATUS})
+    store.put("daily.json", {"updated": now_iso(), "assets": out, "bench": bench, "sector_bench": sector_bench, "fx": fx,
+                             "sources": sources.STATUS})
     log("Tagesdaten: %d von %d Titeln mit Verlauf" % (len(out), len(assets)))
+
+
+SECTOR_BENCH = (("MSCI World", "URTH"), ("S&P 500", "SPY"))
 
 
 def _perf_6m(h, crypto):
