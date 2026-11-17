@@ -57,15 +57,36 @@ def run_fast(store):
     for cur in sorted(currencies | {"USD"}):
         if cur != "EUR":
             fx[cur] = sources.fx_rate(cur) or old_fx.get(cur)
+    indices = market_strip(out)
     fired = check_alerts(pf, out, state, fx)
     moved = check_moves(store, pf, out, state, fx)
     for sym in list(oi_mem):
         if asset_key("crypto", sym) not in assets:
             del oi_mem[sym]
-    store.put("market.json", {"updated": now_iso(), "fx": fx, "assets": out, "sources": sources.STATUS})
+    store.put("market.json", {"updated": now_iso(), "fx": fx, "assets": out, "indices": indices, "sources": sources.STATUS})
     store.put("state.json", state)
     log("Kurse: %d Titel, %d ohne Daten, %d Alerts ausgelöst, %d Bewegungen gemeldet" % (
         len(out), sum(1 for q in out.values() if q.get("error")), fired, moved))
+
+
+MARKET_STRIP = [("^GSPC", "S&P 500"), ("^NDX", "Nasdaq 100"), ("^GDAXI", "DAX"), ("^STOXX50E", "Euro Stoxx 50"),
+                ("^VIX", "VIX"), ("GC=F", "Gold"), ("BTC", "Bitcoin"), ("EURUSD", "Euro/Dollar")]
+
+
+def market_strip(assets):
+    """Leitindizes für die Kopfleiste des Dashboards. Bitcoin kommt aus den Krypto-Kursen, Euro/Dollar von Yahoo."""
+    out = []
+    for sym, name in MARKET_STRIP:
+        if sym == "BTC":
+            q = assets.get("crypto:BTC") or sources.crypto_quote("BTC")
+        elif sym == "EURUSD":
+            q = sources.stock_quote("EURUSD=X")
+        else:
+            q = sources.stock_quote(sym)
+        if q and q.get("price") is not None and not q.get("error"):
+            out.append({"sym": sym, "name": name, "price": q["price"], "change_pct": q.get("change_pct"),
+                        "currency": q.get("currency") or "", "time": q.get("time")})
+    return out
 
 
 def _window_change(q, flow, h):

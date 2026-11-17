@@ -10,6 +10,8 @@ Aktien- und Krypto-Tracker mit Dashboard im Stil des Börsen-Newsletters (Apple-
   - `portfolio.py` Bestände per FIFO in Euro (dieselbe Logik steht noch einmal in `web/app.js` → beide Stellen ändern)
   - `update.py fast|daily|all`, `ai.py` (Claude + Grok über API, nur mit Schlüssel), `abo.py` (Recherche über das Claude-Abo: geplante Aufgabe `depot-ki-recherche` in der App, Token aus dem Schlüsselbund), `digest.py` (Kalender, Newsletter-Kurzfassung)
 - `web/` statische App (`index.html`, `app.css`, `app.js` = Daten/Rechnen/Diagramme, `views.js` = Ansichten). Kein Build.
+  Layout im Stil eines Fonds-Dashboards (Jakobs Wunsch vom 17.11.2026): Seitenleiste ab 1100 px, sonst Leiste unten; Marktleiste aus `market.json` → `indices` (`update.market_strip`); Detail als Seitenpanel. Hell und dunkel über CSS-Variablen, folgt dem System, umstellbar in den Einstellungen (`applyTheme`, nur `localStorage`). Diagrammfarben aus der geprüften Palette (`--s1`…`--s8`).
+  Übersicht: Wertentwicklung, Diagramm „Heutige Positionen“ und Risiko (Schwankung, größter Rückgang, Beta) rechnen die heutigen Bestände mit alten Kursen zurück (`backcast`, `perfStats` in `app.js`), weil die eingetragenen Kaufdaten kurz zurückreichen. Heatmap (`squarify`), Beitrag heute, Allokation.
   Auf `localhost` spricht sie mit `server.py`, sonst über die GitHub-API mit dem privaten Daten-Repo.
 - `server.py` lokaler Server (`--data <ordner> --port <n>` für Tests mit Beispieldaten).
 - `.github/workflows/` `kurse.yml` (geplant: `update loop 50`, prüft 50 Min. lang alle 5 Min., weil GitHub geplante Läufe nur alle 40 bis 150 Min. startet; aus der App: `fast` in eigener Concurrency-Gruppe), `analyse.yml` (täglich), `seite.yml` (Pages aus `web/`).
@@ -23,9 +25,9 @@ Aktien- und Krypto-Tracker mit Dashboard im Stil des Börsen-Newsletters (Apple-
 - Das Code-Repo ist öffentlich, die Action-Protokolle auch: nie Ticker, Stückzahlen oder Beträge loggen. Fehler nur als Typ.
 - An KI-Dienste gehen nur Ticker, öffentliche Kennzahlen und Gewichte in Prozent, keine Euro-Beträge.
 - Yahoo: User-Agent muss schlicht `Mozilla/5.0` sein, sonst 429. Kennzahlen brauchen Cookie + Crumb.
-- Texte im Dashboard auf Deutsch, Stil und Farben wie im Newsletter (`~/Downloads/newsletter_code.txt`).
+- Texte im Dashboard auf Deutsch. Schrift und Farben für Kursbewegungen wie im Newsletter (`~/Downloads/newsletter_code.txt`), Layout siehe oben.
 - Broker-Import (Trade Republic, comdirect) ist bewusst noch nicht gebaut: Buchungen haben dafür das Feld `source`.
-- Starke Tagesbewegungen: `update.check_moves` meldet sie per Push mit Bewertung (`analytics.move_read`, dieselben Sätze in `web/views.js` `moveRead` → beide Stellen ändern). Schwellen in `portfolio.settings.move_stock/move_crypto`.
+- Starke Tagesbewegungen: `update.check_moves` meldet sie per Push mit Bewertung (`analytics.move_read`). Schwellen in `portfolio.settings.move_stock/move_crypto`.
 - Anzeige: Aktien immer in Euro, Krypto in US-Dollar. Daten bleiben in der Handelswährung, umgerechnet wird nur bei der Ausgabe (`web/app.js` `toShow`/`px`, `tracker/update.py` `show_price`). Kurs-Alerts tragen `currency`; ohne das Feld gilt die Handelswährung.
 - Bewertung als Punkte 1 bis 10 (1 = deutlich überbewertet, 10 = deutlich unterbewertet): `analytics.rating` aus dem Score, gespeichert als `valuation.rating`; `web/app.js` `ratingOf` rechnet für alte Daten nach. Stufen und Wörter in `RATING_WORDS`.
 - Reiter: Übersicht, Depot (mit Dividenden), Watchlist (mit Alerts), Kalender. Einen Analyse-Reiter gibt es nicht mehr: Punkte, Gründe, Kennzahlen und Recherche stehen nur in der Detailansicht eines Titels (Jakobs Wunsch vom 17.11.2026). Die Watchlist zeigt keine Bewertungsspalten.

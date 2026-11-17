@@ -43,6 +43,12 @@ function toast(msg, ms = 2600) { const t = $('#toast'); t.textContent = msg; t.h
    Lokal (Mac): kleiner Server neben der Seite. Cloud: privates GitHub-Repo über die GitHub-API.
    Der Zugangsschlüssel bleibt nur in diesem Browser gespeichert. */
 const LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+// Darstellung: 'light', 'dark' oder leer (folgt dem System). Nur eine Bequemlichkeit pro Gerät.
+function applyTheme(t) {
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  try { if (t) localStorage.setItem('depot_theme', t); else localStorage.removeItem('depot_theme'); } catch (e) { /* egal */ }
+}
+try { applyTheme(localStorage.getItem('depot_theme') || ''); } catch (e) { /* egal */ }
 let cfg = null;
 try { cfg = JSON.parse(localStorage.getItem('depot_cfg') || 'null'); } catch (e) { cfg = null; }
 const b64 = s => { const b = new TextEncoder().encode(s); let o = ''; for (let i = 0; i < b.length; i += 0x8000) o += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(o); };
@@ -75,7 +81,7 @@ const store = LOCAL ? {
   },
 };
 
-const S = {flt: {}, sort: {}, tab: 'home', range: '1J', mode: 'wert', flowWin: '24', calFilter: 'alle', pf: null, market: {}, daily: {}, analysis: {}, digest: {}, state: {}, loading: false, err: ''};
+const S = {flt: {}, sort: {}, tab: 'home', range: '1J', mode: 'positionen', flowWin: '24', calFilter: 'alle', pf: null, market: {}, daily: {}, analysis: {}, digest: {}, state: {}, loading: false, err: ''};
 const emptyPf = () => ({version: 1, base_currency: 'EUR', transactions: [], watchlist: [], alerts: [], settings: {ntfy_topic: ''}});
 
 async function loadAll() {
@@ -292,31 +298,37 @@ function lineChart(host, series, opt = {}) {
   const step = niceStep((y1 - y0) / 4);
   let g = '';
   for (let v = Math.ceil(y0 / step) * step; v <= y1; v += step) {
-    g += `<line x1="${pl}" x2="${W - pr}" y1="${sy(v)}" y2="${sy(v)}" stroke="#e8e8ed" stroke-width="1"/>` +
-      `<text x="${W - pr + 8}" y="${sy(v) + 4}" font-size="11" fill="#86868b">${esc(fmt(v))}</text>`;
+    g += `<line class="gl" x1="${pl}" x2="${W - pr}" y1="${sy(v)}" y2="${sy(v)}"/>` +
+      `<text class="ax num" x="${W - pr + 8}" y="${sy(v) + 4}">${esc(fmt(v))}</text>`;
   }
   const span = x1 - x0, n = Math.min(5, Math.max(2, Math.floor(W / 110)));
   for (let i = 0; i <= n; i++) {
     const x = x0 + span * i / n, dt = dayToDate(Math.round(x));
     const lab = span > 500 ? `${MON_K[dt.getUTCMonth()]} ${String(dt.getUTCFullYear()).slice(2)}` : `${dt.getUTCDate()}. ${MON_K[dt.getUTCMonth()]}`;
-    g += `<text x="${sx(x)}" y="${H - 6}" font-size="11" fill="#86868b" text-anchor="${i === 0 ? 'start' : i === n ? 'end' : 'middle'}">${lab}</text>`;
+    g += `<text class="ax" x="${sx(x)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === n ? 'end' : 'middle'}">${lab}</text>`;
   }
-  for (const h of opt.hlines || []) {
-    g += `<line x1="${pl}" x2="${W - pr}" y1="${sy(h.y)}" y2="${sy(h.y)}" stroke="${h.color || '#86868b'}" stroke-width="1.5" stroke-dasharray="4 4"/>` +
-      `<text x="${pl + 4}" y="${sy(h.y) - 5}" font-size="11" fill="#424245">${esc(h.label)}</text>`;
+  const used = [];   // Beschriftungen dicht beieinander liegender Linien nicht übereinander schreiben
+  for (const h of [...(opt.hlines || [])].sort((a, b) => b.y - a.y)) {
+    let ly = sy(h.y) - 5;
+    while (used.some(u => Math.abs(u - ly) < 13)) ly += 13;
+    used.push(ly);
+    g += `<line x1="${pl}" x2="${W - pr}" y1="${sy(h.y)}" y2="${sy(h.y)}" style="stroke:${h.color || 'var(--ink3)'}" stroke-width="1.5" stroke-dasharray="4 4"/>` +
+      `<text class="hl" x="${pl + 4}" y="${ly}">${esc(h.label)}</text>`;
   }
-  for (const s of series) {
-    const d = s.pts.map(([x, y], i) => (i ? 'L' : 'M') + sx(x).toFixed(1) + ' ' + sy(y).toFixed(1)).join('');
-    if (s.area) g += `<path d="${d}L${sx(s.pts[s.pts.length - 1][0])} ${H - pb}L${sx(s.pts[0][0])} ${H - pb}Z" fill="${s.color}" opacity=".07"/>`;
-    g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${s.dash ? ' stroke-dasharray="4 4"' : ''}/>`;
-  }
+  const gid = 'g' + Math.random().toString(36).slice(2, 8);
+  series.forEach((s, i) => {
+    const d = s.pts.map(([x, y], j) => (j ? 'L' : 'M') + sx(x).toFixed(1) + ' ' + sy(y).toFixed(1)).join('');
+    if (s.area) g += `<defs><linearGradient id="${gid}${i}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" style="stop-color:${s.color};stop-opacity:.22"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient></defs>` +
+      `<path d="${d}L${sx(s.pts[s.pts.length - 1][0])} ${H - pb}L${sx(s.pts[0][0])} ${H - pb}Z" fill="url(#${gid}${i})"/>`;
+    g += `<path d="${d}" fill="none" style="stroke:${s.color}" stroke-width="${s.thin ? 1.5 : 2}" stroke-linejoin="round" stroke-linecap="round"${s.dash ? ' stroke-dasharray="4 4"' : ''}/>`;
+  });
   for (const m of opt.markers || []) {
     if (m.x < x0 || m.x > x1) continue;
-    g += `<circle cx="${sx(m.x)}" cy="${sy(m.y)}" r="5" fill="${m.color}" stroke="#fff" stroke-width="2"><title>${esc(m.title)}</title></circle>`;
+    g += `<circle cx="${sx(m.x)}" cy="${sy(m.y)}" r="5" style="fill:${m.color};stroke:var(--surface)" stroke-width="2"><title>${esc(m.title)}</title></circle>`;
   }
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="${esc(opt.label || 'Diagramm')}">${g}` +
-    `<line class="xh" y1="${pt}" y2="${H - pb}" stroke="#86868b" stroke-width="1" visibility="hidden"/>` +
-    series.map((s, i) => `<circle class="dot${i}" r="4.5" fill="${s.color}" stroke="#fff" stroke-width="2" visibility="hidden"/>`).join('') +
+    `<line class="xh" y1="${pt}" y2="${H - pb}" stroke-width="1" stroke-dasharray="3 3" visibility="hidden"/>` +
+    series.map((s, i) => `<circle class="dot${i}" r="4.5" style="fill:${s.color};stroke:var(--surface)" stroke-width="2" visibility="hidden"/>`).join('') +
     `<rect x="${pl}" y="0" width="${W - pl - pr}" height="${H}" fill="transparent"/></svg><div class="tip" hidden></div>`;
   const svg = el.querySelector('svg'), tip = el.querySelector('.tip'), xh = el.querySelector('.xh');
   const move = ev => {
@@ -344,4 +356,119 @@ function niceStep(raw) {
   return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p;
 }
 const legend = items => `<div class="legend">${items.map(s => `<span><i class="${s.dash ? 'dash' : ''}" style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')}</div>`;
-const RANGES = {'1M': 30, '3M': 91, '6M': 182, '1J': 365, 'Max': 1e6};
+const RANGES = {'1M': 30, '3M': 91, '6M': 182, '1J': 365, '3J': 1096, 'Max': 1e6};
+
+/* ---------------------------------------------------------------- Mini-Verlauf (Sparkline) */
+function spark(key, n = 30) {
+  const h = D(key).hist;
+  if (!h || h.c.length < 3) return '<span class="ts">–</span>';
+  const c = h.c.slice(-n), live = A(key).price;
+  if (live != null && !A(key).error) c.push(live);
+  const lo = Math.min(...c), hi = Math.max(...c), W = 84, H = 26, k = (W - 2) / (c.length - 1);
+  const y = v => hi === lo ? H / 2 : 2 + (1 - (v - lo) / (hi - lo)) * (H - 4);
+  const d = c.map((v, i) => (i ? 'L' : 'M') + (1 + i * k).toFixed(1) + ' ' + y(v).toFixed(1)).join('');
+  const up = c[c.length - 1] >= c[0];
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${d}" style="stroke:var(--${up ? 'up' : 'down'})"/></svg>`;
+}
+function rangeBar(key) {
+  const t = D(key).tech || {}, p = A(key).price;
+  if (!t.low52 || !t.high52 || p == null || t.high52 <= t.low52) return '<span class="ts">–</span>';
+  const pos = Math.max(0, Math.min(1, (p - t.low52) / (t.high52 - t.low52)));
+  return `<div class="rng" title="52 Wochen: ${esc(px(key, t.low52))} bis ${esc(px(key, t.high52))}"><i style="left:${(pos * 100).toFixed(1)}%"></i></div><div class="ts num">${nf(pos * 100, 0)} % der Spanne</div>`;
+}
+
+/* ---------------------------------------------------------------- Heatmap: Flächen nach Gewicht (squarified treemap) */
+function squarify(items, x, y, w, h) {
+  const out = [], rest = items.filter(i => i.v > 0).sort((a, b) => b.v - a.v);
+  const total = rest.reduce((s, i) => s + i.v, 0); if (!total) return out;
+  const scale = w * h / total; rest.forEach(i => i.a = i.v * scale);
+  const worst = (row, side) => { const s = row.reduce((t, i) => t + i.a, 0), mx = Math.max(...row.map(i => i.a)), mn = Math.min(...row.map(i => i.a)); return Math.max(side * side * mx / (s * s), s * s / (side * side * mn)); };
+  let row = [];
+  while (rest.length) {
+    const side = Math.min(w, h), it = rest[0];
+    if (!row.length || worst(row.concat(it), side) <= worst(row, side)) { row.push(rest.shift()); continue; }
+    ({x, y, w, h} = lay(row, x, y, w, h, out)); row = [];
+  }
+  if (row.length) lay(row, x, y, w, h, out);
+  return out;
+  function lay(r, x, y, w, h, out) {
+    const s = r.reduce((t, i) => t + i.a, 0);
+    if (w >= h) { const cw = s / h; let cy = y; r.forEach(i => { const ih = i.a / cw; out.push(Object.assign({}, i, {x, y: cy, w: cw, h: ih})); cy += ih; }); return {x: x + cw, y, w: w - cw, h}; }
+    const ch = s / w; let cx = x; r.forEach(i => { const iw = i.a / ch; out.push(Object.assign({}, i, {x: cx, y, w: iw, h: ch})); cx += iw; }); return {x, y: y + ch, w, h: h - ch};
+  }
+}
+
+/* ---------------------------------------------------------------- Einordnung der Titel */
+const SECTOR_DE = {Technology: 'Technologie', 'Financial Services': 'Finanzen', Healthcare: 'Gesundheit', 'Consumer Cyclical': 'Zyklischer Konsum',
+  'Consumer Defensive': 'Basiskonsum', 'Communication Services': 'Kommunikation', Industrials: 'Industrie', Energy: 'Energie', Utilities: 'Versorger',
+  'Real Estate': 'Immobilien', 'Basic Materials': 'Grundstoffe'};
+const isCommodity = key => !isCoin(key) && /\b(ETC|Gold|Commodit|Rohstoff)/i.test(nameOf(key));
+const assetClass = key => isCoin(key) ? 'Krypto' : isCommodity(key) ? 'Rohstoffe' : isFund(key) ? 'ETFs' : 'Aktien';
+const sectorOf = key => isCoin(key) ? 'Krypto' : isCommodity(key) ? 'Rohstoffe' : isFund(key) ? 'Breite ETFs' : SECTOR_DE[(D(key).fund || {}).sector] || (D(key).fund || {}).sector || 'Ohne Angabe';
+
+/* ---------------------------------------------------------------- Rückrechnung der heutigen Positionen
+   Wie ein Fonds-Factsheet: Was hätten die heutigen Bestände in der Vergangenheit gemacht? Grundlage für
+   Wertentwicklung, Schwankung, größten Rückgang und Beta, solange die echten Kaufdaten noch kurz zurückreichen. */
+function backcast() {
+  const c = calc();
+  if (c.bc !== undefined) return c.bc;
+  const held = c.held.filter(p => p.value > 0 && D(p.key).hist && D(p.key).hist.d.length > 1);
+  if (!held.length) return (c.bc = null);
+  const end = todayDay(), big = held.filter(p => p.weight >= 2);
+  let start = Math.max(end - 1826, ...big.map(p => D(p.key).hist.d[0]));
+  const d = [], v = [];
+  for (let day = start; day <= end; day++) {
+    let s = 0;
+    for (const p of held) {
+      const pr = day === end && p.price != null ? p.price : priceAt(p.key, day);
+      if (pr != null) s += p.qty * pr / (fxAt(p.cur, day) || 1);
+    }
+    d.push(day); v.push(s);
+  }
+  return (c.bc = {d, v});
+}
+function seriesAt(ser, day) { const i = bisect(ser.d, day); return i >= 0 ? ser.v[i] : null; }
+function perfStats() {
+  const bc = backcast(), c = calc();
+  if (!bc || bc.d.length < 2) return null;
+  const end = bc.d[bc.d.length - 1], last = bc.v[bc.v.length - 1];
+  const yStart = isoToDay(new Date().getFullYear() + '-01-01') - 1;
+  const sp = (S.daily.bench || {}).SP500;
+  const spAt = day => { if (!sp || !sp.d.length) return null; const i = bisect(sp.d, day); return i < 0 ? null : sp.c[i] / (fxAt(sp.currency || 'USD', day) || 1); };
+  const per = (label, from) => {
+    if (from < bc.d[0]) return {label, v: null, b: null};
+    const a = seriesAt(bc, from), s0 = spAt(from), s1 = spAt(end);
+    return {label, v: a ? (last / a - 1) * 100 : null, b: s0 && s1 ? (s1 / s0 - 1) * 100 : null};
+  };
+  const out = [{label: 'Heute', v: c.dayPct, b: ((S.market.indices || []).find(x => x.sym === '^GSPC') || {}).change_pct}, per('1 Woche', end - 7), per('1 Monat', end - 30), per('Seit 1. Januar', yStart), per('1 Jahr', end - 365), per('3 Jahre', end - 1095)];
+  // Risiko über das letzte Jahr
+  const i0 = Math.max(1, bc.d.length - 365), r = [], m = [];
+  let peak = 0, dd = 0;
+  for (let i = i0; i < bc.d.length; i++) {
+    if (bc.v[i - 1] > 0) r.push(bc.v[i] / bc.v[i - 1] - 1);
+    const a = spAt(bc.d[i - 1]), b = spAt(bc.d[i]); m.push(a && b ? b / a - 1 : 0);
+    peak = Math.max(peak, bc.v[i]); if (peak > 0) dd = Math.min(dd, bc.v[i] / peak - 1);
+  }
+  const mean = x => x.reduce((s, y) => s + y, 0) / (x.length || 1);
+  const mr = mean(r), mm = mean(m.slice(-r.length));
+  const vol = r.length > 20 ? Math.sqrt(mean(r.map(x => (x - mr) ** 2))) * Math.sqrt(365) * 100 : null;
+  const mx = m.slice(-r.length), cov = mean(r.map((x, i) => (x - mr) * (mx[i] - mm))), vm = mean(mx.map(x => (x - mm) ** 2));
+  return {periods: out, vol, maxDD: r.length > 20 ? dd * 100 : null, beta: vm > 0 && r.length > 60 ? cov / vm : null, since: bc.d[0]};
+}
+
+/* ---------------------------------------------------------------- Börsenzeiten */
+function marketState(tz, open, close) {
+  const f = new Intl.DateTimeFormat('en-GB', {timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false}).formatToParts(new Date());
+  const g = t => (f.find(p => p.type === t) || {}).value, wd = g('weekday'), mins = +g('hour') * 60 + +g('minute');
+  return !['Sat', 'Sun'].includes(wd) && mins >= open && mins < close;
+}
+function markets() {
+  const idx = sym => (S.market.indices || []).find(x => x.sym === sym) || {};
+  // Feiertag: laut Uhrzeit offen, aber der Index hat seit über 40 Minuten keinen neuen Kurs
+  const fresh = sym => { const t = idx(sym).time, u = Date.parse(S.market.updated || ''); return !t || !u || u / 1000 - t < 2400; };
+  return [
+    {name: 'New York', open: marketState('America/New_York', 570, 960) && fresh('^GSPC'), hours: '15:30–22:00'},
+    {name: 'Xetra', open: marketState('Europe/Berlin', 540, 1050) && fresh('^GDAXI'), hours: '9:00–17:30'},
+    {name: 'Krypto', open: true, hours: 'rund um die Uhr'},
+  ];
+}
