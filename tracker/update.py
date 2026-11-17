@@ -1,6 +1,7 @@
 """Aktualisiert die Daten des Trackers.
 
     python3 -m tracker.update fast    Kurse, Krypto-Flows, Alerts (alle paar Minuten)
+    python3 -m tracker.update loop 50 dasselbe alle 5 Minuten, 50 Minuten lang (für die zeitgesteuerten Läufe)
     python3 -m tracker.update daily   Kursverläufe, Kennzahlen, Dividenden, Nachkauf-Zonen (einmal täglich)
     python3 -m tracker.update all     beides
 """
@@ -102,7 +103,6 @@ def _fmt(x):
 
 def check_alerts(pf, market, state, fx=None):
     st = state.setdefault("alerts", {})
-    today = datetime.date.today().isoformat()
     ids = set()
     fired = 0
     for al in pf.get("alerts") or []:
@@ -136,6 +136,7 @@ def check_alerts(pf, market, state, fx=None):
             continue
         prev = st.get(aid)
         daily = typ.startswith("change_")
+        today = trade_day(q) if daily else datetime.date.today().isoformat()
         if prev and (not daily or prev.get("day") == today):
             continue    # Preis-Alerts feuern einmal, Tages-Alerts einmal pro Tag
         st[aid] = {"fired": now_iso(), "day": today, "value": actual}
@@ -158,11 +159,19 @@ def check_alerts(pf, market, state, fx=None):
 MOVE_DEFAULT = {"stock": 5.0, "crypto": 8.0}   # ab dieser Tagesbewegung in Prozent kommt eine Meldung, 0 = aus
 
 
+def trade_day(q):
+    """Handelstag eines Kurses. Aktien: Tag des letzten Kurses (US-Schluss um 22 Uhr ist nach Mitternacht UTC noch derselbe Tag).
+    Krypto handelt rund um die Uhr: Kalendertag in UTC."""
+    t = q.get("time")
+    if q.get("kind") == "stock" and isinstance(t, (int, float)) and t > 0:
+        return datetime.datetime.utcfromtimestamp(t - 4 * 3600).date().isoformat()
+    return datetime.date.today().isoformat()
+
+
 def check_moves(store, pf, market, state, fx=None):
     """Meldet starke Tagesbewegungen mit Einordnung der Bewertung: bei jeder vollen Schwelle (5, 10, 15 % ...) einmal."""
     cfg = pf.get("settings") or {}
     st = state.setdefault("moves", {})
-    today = datetime.date.today().isoformat()
     hits = []
     for key, q in market.items():
         chg = q.get("change_pct")
@@ -172,9 +181,10 @@ def check_moves(store, pf, market, state, fx=None):
         d = 1 if chg >= 0 else -1
         step = int(abs(chg) // lim)     # 1 = erste Schwelle, 2 = doppelte Schwelle usw.
         old = st.get(key) or {}
+        today = trade_day(q)
         if old.get("day") == today and old.get("dir") == d and old.get("step", 1) >= step:
             continue    # je Tag, Richtung und Stufe nur eine Meldung
-        hits.append((key, q, chg, d, step))
+        hits.append((key, q, chg, d, step, today))
     for key in list(st):
         if key not in market:
             del st[key]
@@ -182,7 +192,7 @@ def check_moves(store, pf, market, state, fx=None):
         return 0
     daily = (store.get("daily.json") or {}).get("assets") or {}
     ai = (store.get("analysis.json") or {}).get("assets") or {}
-    for key, q, chg, d, step in hits:
+    for key, q, chg, d, step, today in hits:
         st[key] = {"day": today, "dir": d, "step": step, "at": now_iso(), "value": chg}
         info = daily.get(key) or {}
         val = info.get("valuation") or {}
@@ -310,6 +320,16 @@ def main():
     try:
         if mode in ("fast", "all"):
             run_fast(store)
+        if mode == "loop":
+            # GitHub startet zeitgesteuerte Läufe nur alle 40 bis 150 Minuten. Deshalb prüft ein Lauf
+            # bis zu 50 Minuten lang alle 5 Minuten; der nächste geplante Lauf übernimmt danach.
+            minutes = float(sys.argv[2]) if len(sys.argv) > 2 else 50
+            end = time.time() + minutes * 60
+            while True:
+                run_fast(store)
+                if time.time() + 300 > end:
+                    break
+                time.sleep(300)
         if mode in ("daily", "all"):
             run_daily(store)
     except Exception as e:

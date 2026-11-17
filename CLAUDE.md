@@ -12,7 +12,7 @@ Aktien- und Krypto-Tracker mit Dashboard im Stil des Börsen-Newsletters (Apple-
 - `web/` statische App (`index.html`, `app.css`, `app.js` = Daten/Rechnen/Diagramme, `views.js` = Ansichten). Kein Build.
   Auf `localhost` spricht sie mit `server.py`, sonst über die GitHub-API mit dem privaten Daten-Repo.
 - `server.py` lokaler Server (`--data <ordner> --port <n>` für Tests mit Beispieldaten).
-- `.github/workflows/` `kurse.yml` (alle 10 Min.), `analyse.yml` (täglich), `seite.yml` (Pages aus `web/`).
+- `.github/workflows/` `kurse.yml` (geplant: `update loop 50`, prüft 50 Min. lang alle 5 Min., weil GitHub geplante Läufe nur alle 40 bis 150 Min. startet; aus der App: `fast` in eigener Concurrency-Gruppe), `analyse.yml` (täglich), `seite.yml` (Pages aus `web/`).
 - `newsletter_baustein.py` Karte „Dein Depot“ zum Einfügen in Jakobs Newsletter.
 
 ## Datendateien (`data/`)
@@ -28,6 +28,10 @@ Aktien- und Krypto-Tracker mit Dashboard im Stil des Börsen-Newsletters (Apple-
 - Starke Tagesbewegungen: `update.check_moves` meldet sie per Push mit Bewertung (`analytics.move_read`, dieselben Sätze in `web/views.js` `moveRead` → beide Stellen ändern). Schwellen in `portfolio.settings.move_stock/move_crypto`.
 - Anzeige: Aktien immer in Euro, Krypto in US-Dollar. Daten bleiben in der Handelswährung, umgerechnet wird nur bei der Ausgabe (`web/app.js` `toShow`/`px`, `tracker/update.py` `show_price`). Kurs-Alerts tragen `currency`; ohne das Feld gilt die Handelswährung.
 - Bewertung als Punkte 1 bis 10 (1 = deutlich überbewertet, 10 = deutlich unterbewertet): `analytics.rating` aus dem Score, gespeichert als `valuation.rating`; `web/app.js` `ratingOf` rechnet für alte Daten nach. Stufen und Wörter in `RATING_WORDS`.
+- Reiter: Übersicht, Depot (mit Dividenden), Watchlist (mit Alerts), Kalender. Einen Analyse-Reiter gibt es nicht mehr: Punkte, Gründe, Kennzahlen und Recherche stehen nur in der Detailansicht eines Titels (Jakobs Wunsch vom 17.11.2026). Die Watchlist zeigt keine Bewertungsspalten.
+- Kalender wie im Newsletter (`digest.build_calendar` + `sources.market_calendar`): Quartalszahlen großer US-Firmen (Nasdaq, ab 40 Mrd. $), US-Konjunktur, Fed und EZB (Forex Factory, nur laufende Woche, drosselt bei vielen Abrufen), Börsengänge (Nasdaq), dazu die eigenen Titel. Markttermine tragen `market: true`; fällt eine Quelle aus, bleiben ihre Termine vom Vortag.
+- Art eines Titels: `common.asset_type` (Krypto, ETF, ETC, Aktie), in der App `isFund`.
+- Alerts und Bewegungen zählen je Handelstag (`update.trade_day`), nicht je UTC-Kalendertag.
 - Dashboard: Listen sind sortierbare Tabellen (`tbl` und `COL` in `web/views.js`), Filter über `S.flt`, Sortierung über `S.sort`, Suche im Kopf.
 - Gewichtung (Jakobs Vorgaben vom 15. und 17.11.2026): Ein gefallener Kurs oder Markt ist allein kein Kaufgrund. Unterbewertet heißt: Der Markt hat überreagiert, der innere Wert hat sich nicht entsprechend geändert. Kennzahlen zählen voll, dazu die Änderung der Gewinnschätzung in 90 Tagen (Yahoo `earningsTrend`, `sources._eps_trend`, `analytics.est_change`). Kursziele und Dividende halb. Kurslage zählt nur, wenn die Kennzahlen positiv sind und der Kurs in 3 Monaten deutlich stärker fiel als die Gewinnschätzung (Coins: 1 Monat gegen `rev_chg`); bei gesenkten Schätzungen nie (`_price_points`, `intrinsic`). Ohne Schätzungsdaten nur der Vergleich mit S&P 500 bzw. Bitcoin (`tech.rel_6m`), Gewicht 0,25. Schätzung um 10 % gesenkt: höchstens 6 Punkte, um 25 %: höchstens 5. Ohne Kennzahlen (ETFs, Gold, Coins ohne Protokoll-Einnahmen) keine Punkte (`rating: null`), nur ein Wort zur Kurslage. Verlustbringer höchstens 5 Punkte.
 - Beim Öffnen der App (und beim Zurückkehren) startet `autoRefresh` in `web/app.js` einen Kurslauf, wenn `market.json` älter als 3 Minuten ist, und lädt neu, sobald er fertig ist.

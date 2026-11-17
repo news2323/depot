@@ -80,7 +80,7 @@ def cmd_plan(store, args):
         if q.get("error") or not q.get("price"):
             continue
         fund = d.get("fund") or {}
-        is_fund = any(w in (q.get("name") or "").upper() for w in ("ETF", "ETC", "UCITS"))
+        is_fund = common.asset_type(a["kind"], q) in ("ETF", "ETC")
         if a["kind"] == "stock" and (is_fund or not (fund.get("forward_pe") or fund.get("target_mean"))):
             continue    # ETFs und ETCs haben keine Quartalszahlen: nur Kurslage, keine Recherche
         prompt = (ai.crypto_prompt if a["kind"] == "crypto" else ai.stock_prompt)(a, q, d, today)

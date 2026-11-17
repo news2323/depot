@@ -3,6 +3,7 @@
 Jede Funktion gibt bei einem Ausfall None zurück. Welche Quelle geantwortet hat, steht in STATUS
 (nur Quellenname und Zähler, keine Ticker).
 """
+import datetime
 import http.cookiejar
 import statistics
 import urllib.parse
@@ -609,4 +610,109 @@ def onchain_revenue(symbols):
             d["fdv"] = v
             if d.get("rev_30d"):
                 d["pe_fdv"] = v / (d["rev_30d"] * 365 / 30.0)
+    return out
+
+
+# ----------------------------------------------------------------- Marktkalender (wie im Newsletter)
+NASDAQ_H = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Origin": "https://www.nasdaq.com", "Referer": "https://www.nasdaq.com/"}
+BIG_CAP = 40e9          # Quartalszahlen ab diesem Börsenwert kommen in den Kalender, eigene Titel immer
+MACRO_DE = [            # häufige US-Termine auf Deutsch; Rest bleibt im Original
+    ("Federal Funds Rate", "Fed-Zinsentscheid"), ("FOMC Statement", "Fed-Zinsentscheid: Erklärung"),
+    ("FOMC Press Conference", "Fed-Pressekonferenz"), ("FOMC Meeting Minutes", "Fed-Protokoll der letzten Sitzung"),
+    ("FOMC Economic Projections", "Fed-Prognosen"), ("Fed Chairman", "Rede von Fed-Chef"), ("Fed Chair", "Rede von Fed-Chef"),
+    ("FOMC Member", "Rede von Fed-Mitglied"), ("ECB President", "Rede von EZB-Chefin"),
+    ("Core CPI", "Kerninflation (CPI)"), ("CPI", "Verbraucherpreise (CPI)"), ("Core PCE", "Kerninflation (PCE)"),
+    ("Core PPI", "Erzeugerpreise ohne Energie (PPI)"), ("PPI", "Erzeugerpreise (PPI)"),
+    ("Non-Farm Employment Change", "Arbeitsmarktbericht: neue Stellen"), ("Unemployment Rate", "Arbeitslosenquote"),
+    ("Average Hourly Earnings", "Stundenlöhne"), ("Unemployment Claims", "Erstanträge Arbeitslosenhilfe"),
+    ("JOLTS Job Openings", "Offene Stellen (JOLTS)"), ("ADP Non-Farm", "ADP-Arbeitsmarktbericht"),
+    ("Advance GDP", "BIP, erste Schätzung"), ("Prelim GDP", "BIP, zweite Schätzung"), ("Final GDP", "BIP, endgültig"), ("GDP", "BIP"),
+    ("Core Retail Sales", "Einzelhandelsumsatz ohne Autos"), ("Retail Sales", "Einzelhandelsumsatz"),
+    ("ISM Manufacturing PMI", "ISM-Industrie-Einkaufsmanager"), ("ISM Services PMI", "ISM-Dienstleister-Einkaufsmanager"),
+    ("Flash Manufacturing PMI", "Einkaufsmanager Industrie (vorläufig)"), ("Flash Services PMI", "Einkaufsmanager Dienstleister (vorläufig)"),
+    ("Prelim UoM Consumer Sentiment", "Verbraucherstimmung Uni Michigan"), ("CB Consumer Confidence", "Verbrauchervertrauen"),
+    ("Durable Goods Orders", "Aufträge langlebiger Güter"), ("Main Refinancing Rate", "EZB-Zinsentscheid"),
+    ("Monetary Policy Statement", "EZB-Erklärung"), ("ECB Financial Stability Review", "EZB-Finanzstabilitätsbericht"), ("ECB Press Conference", "EZB-Pressekonferenz"),
+    ("German Flash", "Deutschland: Einkaufsmanager (vorläufig)"), ("German ifo", "Deutschland: ifo-Geschäftsklima"),
+]
+
+
+def _de_macro(title):
+    title = title.replace(" Speaks", "").strip()
+    for en, de in MACRO_DE:
+        if title.startswith(en) or (" " + en) in title:
+            rest = title.replace(en, "").strip()
+            rest = {"m/m": "zum Vormonat", "y/y": "zum Vorjahr", "q/q": "zum Vorquartal"}.get(rest, rest)
+            return (de + (" " + rest if rest else "")).strip()
+    return title
+
+
+def _firm(name):
+    """Firmennamen kürzen: 'Walt Disney Company (The)' -> 'Walt Disney Company'."""
+    n = (name or "").replace(" (The)", "")
+    for tail in (", PBC", ", Inc.", " Inc.", " Incorporated", " Corporation", " Corp.", " Limited", " Ltd", " plc", " N.V.", " S.A.", ", Inc", " Inc"):
+        if n.endswith(tail):
+            n = n[: -len(tail)]
+    return n.strip(" ,")
+
+
+def market_calendar(own_symbols=(), days=7):
+    """Termine der nächsten Tage für den ganzen Markt: Quartalszahlen großer US-Firmen (Nasdaq), US-Konjunktur, Fed und EZB
+    (Wirtschaftskalender von Forex Factory), Börsengänge (Nasdaq). Uhrzeiten in deutscher Zeit."""
+    from zoneinfo import ZoneInfo
+    berlin = ZoneInfo("Europe/Berlin")
+    today = datetime.date.today()
+    own = {s.upper() for s in own_symbols}
+    out = []
+    # Quartalszahlen
+    for i in range(days):
+        d = today + datetime.timedelta(days=i)
+        if d.weekday() >= 5:
+            continue
+        r = _try("Nasdaq Kalender", "https://api.nasdaq.com/api/calendar/earnings?date=" + d.isoformat(), headers=NASDAQ_H)
+        for row in (((r or {}).get("data") or {}).get("rows") or []):
+            sym = (row.get("symbol") or "").upper()
+            cap = fnum(str(row.get("marketCap") or "").replace("$", "").replace(",", "")) or 0
+            if cap < BIG_CAP and sym not in own:
+                continue
+            when = {"time-pre-market": "vorbörslich", "time-after-hours": "nachbörslich"}.get(row.get("time"), "")
+            out.append({"date": d.isoformat(), "time": when, "category": "Earnings", "symbol": sym, "cap": cap, "own": sym in own,
+                        "title": "%s (%s): Quartalszahlen" % (_firm(row.get("name")) or sym, sym)})
+    # Konjunktur, Fed, EZB
+    r = _try("Wirtschaftskalender", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")
+    for e in r or []:
+        if not isinstance(e, dict):
+            continue
+        cur, imp, title = e.get("country"), e.get("impact"), e.get("title") or ""
+        fed = cur == "USD" and any(w in title for w in ("FOMC", "Federal Funds", "Fed Chair"))
+        ecb = cur == "EUR" and any(w in title for w in ("ECB", "Main Refinancing", "Monetary Policy"))
+        if (fed or ecb) and imp == "Low":
+            continue    # Reden ohne Gewicht für den Markt weglassen
+        if not (fed or ecb or (cur == "USD" and imp == "High") or (cur == "EUR" and imp == "High" and "German" in title)):
+            continue
+        try:
+            t = datetime.datetime.fromisoformat(e["date"]).astimezone(berlin)
+        except (KeyError, ValueError):
+            continue
+        if t.date() < today or t.date() >= today + datetime.timedelta(days=days):
+            continue
+        de = lambda v: str(v).replace(".", ",").replace("%", " %")
+        extra = [x for x in ("Prognose %s" % de(e["forecast"]) if e.get("forecast") else "", "zuvor %s" % de(e["previous"]) if e.get("previous") else "") if x]
+        out.append({"date": t.date().isoformat(), "time": t.strftime("%H:%M") if t.hour or t.minute else "",
+                    "category": "Fed" if fed or ecb else "Makro",
+                    "title": ("USA: " if cur == "USD" and not fed else "") + _de_macro(title) + (" (%s)" % ", ".join(extra) if extra else "")})
+    # Börsengänge
+    r = _try("Nasdaq Kalender", "https://api.nasdaq.com/api/ipo/calendar?date=" + today.strftime("%Y-%m"), headers=NASDAQ_H)
+    for row in ((((r or {}).get("data") or {}).get("upcoming") or {}).get("upcomingTable") or {}).get("rows") or []:
+        try:
+            d = datetime.datetime.strptime(row.get("expectedPriceDate") or "", "%m/%d/%Y").date()
+        except ValueError:
+            continue
+        val = fnum(str(row.get("dollarValueOfSharesOffered") or "").replace("$", "").replace(",", "")) or 0
+        if d < today or d >= today + datetime.timedelta(days=days) or val < 100e6:
+            continue
+        size = ("%.1f" % (val / 1e9)).replace(".", ",") + " Mrd. $" if val >= 1e9 else "%d Mio. $" % (val / 1e6)
+        out.append({"date": d.isoformat(), "time": "", "category": "IPO",
+                    "title": "Börsengang: %s (%s), %s, Volumen %s" % (_firm(row.get("companyName")), row.get("proposedTickerSymbol"),
+                                                                        row.get("proposedExchange") or "", size)})
     return out

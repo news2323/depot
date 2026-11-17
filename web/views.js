@@ -10,8 +10,9 @@ const ICON = {
   sync: '<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>',
 };
 const svg = n => `<svg viewBox="0 0 24 24">${ICON[n]}</svg>`;
-const TABS = [['home', 'Übersicht'], ['depot', 'Depot'], ['analyse', 'Analyse'], ['watch', 'Watchlist'], ['cal', 'Kalender']];
-const CAT = {Earnings: ['blue', 'Quartalszahlen'], Dividende: ['teal', 'Ex-Dividende'], Zahltag: ['purple', 'Zahltag'], Krypto: ['warn', 'Krypto']};
+const TABS = [['home', 'Übersicht'], ['depot', 'Depot'], ['watch', 'Watchlist'], ['cal', 'Kalender']];
+const CAT = {Earnings: ['blue', 'Quartalszahlen'], Makro: ['teal', 'Konjunktur'], Fed: ['purple', 'Notenbank'], IPO: ['pink', 'IPO'], Dividende: ['good', 'Ex-Dividende'], Zahltag: ['good', 'Zahltag'], Krypto: ['warn', 'Krypto'], Event: ['', 'Event']};
+const isMine = e => !e.market;
 const ALERT_TYPES = {price_above: 'Kurs steigt über', price_below: 'Kurs fällt unter', change_above: 'Tagesplus größer als (%)',
   change_below: 'Tagesminus größer als (%)', funding_above: 'Funding über (% je 8 Std.)', funding_below: 'Funding unter (% je 8 Std.)'};
 const valClass = l => !l ? '' : /unter|niedrig|abgekühlt/.test(l) ? 'good' : /über|hoch/.test(l) ? 'bad' : '';
@@ -24,11 +25,12 @@ function render() {
   if (!LOCAL && !cfg) return renderSetup();
   const c = calc(), now = new Date(), upd = S.market.updated;
   const stale = upd && Date.now() - Date.parse(upd) > 45 * 6e4;
-  const view = {home: vHome, depot: vDepot, analyse: vAnalyse, watch: vWatch, cal: vCal}[S.tab](c);
+  if (!['home', 'depot', 'watch', 'cal'].includes(S.tab)) S.tab = 'watch';
+  const view = {home: vHome, depot: vDepot, watch: vWatch, cal: vCal}[S.tab](c);
   $('#app').innerHTML = `<nav class="tabs">${TABS.map(([k, l]) => `<button data-act="tab" data-v="${k}" class="${S.tab === k ? 'on' : ''}">${svg(k)}<span>${l}</span></button>`).join('')}</nav>
   <div class="wrap">
     <header class="top"><div><p class="date">${WT_LANG[now.getDay()]}, ${now.getDate()}. ${MON[now.getMonth()]} ${now.getFullYear()}</p>
-      <h1>${{home: 'Dein Depot', depot: 'Positionen', analyse: 'Analyse', watch: 'Watchlist', cal: 'Termine'}[S.tab]}</h1>
+      <h1>${{home: 'Dein Depot', depot: 'Positionen', watch: 'Watchlist', cal: 'Termine'}[S.tab]}</h1>
       <p class="sub">Kurse ${esc(ago(upd))}${S.daily.updated ? ' · Kennzahlen ' + esc(ago(S.daily.updated)) : ''}</p></div>
       <div class="topact"><div class="search"><input id="q" type="search" placeholder="Titel suchen" autocomplete="off" aria-label="Titel suchen"><div id="qres" class="qres" hidden></div></div>
       <button class="iconbtn" id="refresh" data-act="refresh" title="Aktualisieren">${svg('sync')}</button>
@@ -97,13 +99,7 @@ function vHome(c) {
     <button class="btn ghost" data-act="addwatch">Titel beobachten</button></div>`)}</div>`;
   const fired = firedAlerts(), ap = S.analysis.portfolio;
   const movers = c.held.filter(p => p.dayPct != null).sort((a, b) => Math.abs(b.dayPct) - Math.abs(a.dayPct)).slice(0, 5);
-  const cal = (S.digest.calendar || []).slice(0, 4), top = c.held[0];
-  // Bewertung im Depot: wie viel Geld in welcher Stufe liegt
-  const tiers = [0, 0, 0, 0, 0]; let rated = 0, sum = 0;
-  c.held.forEach(p => { const r = ratingOf(p.key); if (r != null && p.value) { tiers[tierOf(r)] += p.value; rated += p.value; sum += r * p.value; } });
-  const cheap = allTracked().filter(k => ratingOf(k) >= 8).sort((a, b) => ratingOf(b) - ratingOf(a));
-  const dear = c.held.filter(p => ratingOf(p.key) != null && ratingOf(p.key) <= 3).sort((a, b) => ratingOf(a.key) - ratingOf(b.key));
-  const near = allTracked().map(k => ({k, l: zoneOf(k)})).filter(x => x.l && (x.l.price / A(x.k).price - 1) * 100 > -3);
+  const cal = (S.digest.calendar || []).filter(e => isMine(e) || e.category === 'Fed' || e.category === 'Makro').slice(0, 6), top = c.held[0];
   const syms = (l, n = 4) => l.slice(0, n).map(k => esc(String(k.key || k.k || k).split(':')[1])).join(', ') + (l.length > n ? ` und ${l.length - n} weitere` : '');
   const ins = (n, label, text, tone, act) => `<button class="ins ${tone}" ${act}><div class="n num">${n}</div><div class="tx"><b>${label}</b><span>${text}</span></div></button>`;
   return `<div class="grid two"><div class="col">
@@ -114,12 +110,7 @@ function vHome(c) {
       <div class="charthead">${seg('mode', ['Wert', 'Rendite'], S.mode === 'wert' ? 'Wert' : 'Rendite')}${seg('range', Object.keys(RANGES), S.range)}</div>
       <div class="chart" id="ch-main"></div><div id="lg-main"></div>
       <p class="tiny muted" style="margin:8px 0 0">${S.mode === 'wert' ? 'Depotwert und eingesetztes Geld in Euro.' : 'Rendite ohne Einzahlungen, verglichen mit S&P 500 und Bitcoin in Euro.'}</p></section>
-    <div class="insrow">
-      ${fired.length ? ins(fired.length, 'Alerts ausgelöst', syms(fired.map(a => 'x:' + a.symbol)), 'warn', 'data-act="tab" data-v="watch"') : ''}
-      ${ins(cheap.length, 'günstig bewertet', cheap.length ? syms(cheap) : 'Kein Titel mit 8 Punkten oder mehr', 'good', 'data-act="goflt" data-v="Alle"')}
-      ${ins(dear.length, 'im Depot teuer', dear.length ? syms(dear) : 'Kein Titel mit 3 Punkten oder weniger', dear.length ? 'bad' : '', 'data-act="goflt" data-v="Depot"')}
-      ${ins(near.length, 'nahe Nachkauf-Zone', near.length ? syms(near) : 'Kein Titel näher als 3 %', '', 'data-act="gosort" data-v="zone"')}
-    </div>
+    ${fired.length ? `<div class="insrow">${ins(fired.length, 'Alerts ausgelöst', syms(fired.map(a => 'x:' + a.symbol)), 'warn', 'data-act="tab" data-v="watch"')}</div>` : ''}
     ${ap ? card('Einschätzung', 'Recherche von Claude, ' + esc(ago(ap.at)), `<p class="lead">${esc(ap.headline)}</p><p class="body">${esc(ap.summary)}</p>
       ${(ap.buy_candidates || []).length ? `<p class="sh">Nachkauf-Kandidaten</p><div class="rows">${ap.buy_candidates.map(b => `<div class="row"><div class="l"><div class="t">${esc(b.symbol)}<span>${esc(b.level)}</span></div><div class="x">${esc(b.reason)}</div></div></div>`).join('')}</div>` : ''}
       ${(ap.risks || []).length ? `<p class="sh">Risiken</p><ul class="dots">${ap.risks.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}`) : ''}
@@ -132,10 +123,6 @@ function vHome(c) {
       ${tile('Größter Rückgang', c.maxDD == null ? '–' : nf(c.maxDD, 0) + ' %', 'vom Hoch, seit Start')}${tile('Dividenden bisher', eur(c.divGot, 0), 'geschätzt, brutto')}</div>`)}
   </div><div class="col">
     ${card('Heute bewegt', 'Größte Tagesbewegungen im Depot', movers.length ? `<div class="rows tight">${movers.map(moverRow).join('')}</div>` : '<p class="empty">Noch keine Kurse.</p>')}
-    ${rated ? card('Bewertung im Depot', `Im Schnitt ${nf(sum / rated, 1)} von 10 Punkten, nach Geld gewichtet`, `
-      <div class="bar tall">${tiers.map((v, i) => v ? `<i style="width:${v / rated * 100}%;background:${TIER_COL[i]}" title="${TIER[i]}: ${nf(v / rated * 100, 0)} %"></i>` : '').join('')}</div>
-      <div class="tierlist">${tiers.map((v, i) => `<div><i style="background:${TIER_COL[i]}"></i><span>${TIER[i]}</span><b class="num">${nf(v / rated * 100, 0)} %</b></div>`).reverse().join('')}</div>
-      <p class="tiny muted" style="margin:10px 0 0">10 Punkte heißt deutlich unterbewertet, 1 Punkt deutlich überbewertet. ETFs und Coins ohne Einnahmen haben keine Punkte und fehlen hier. Faustregel, keine Anlageberatung.</p>`) : ''}
     ${card('Nächste Termine', '', cal.length ? calList(cal) + `<div class="btnrow"><button class="btn sm ghost" data-act="tab" data-v="cal">Alle Termine</button></div>` : '<p class="empty">Keine Termine bekannt.</p>')}
   </div></div>`;
 }
@@ -206,45 +193,21 @@ function vDepot(c) {
       <div class="t">${esc(t.symbol)}<span>${t.type === 'buy' ? 'Kauf' : 'Verkauf'}${t.source && t.source !== 'manual' ? ' · ' + esc(t.source) : ''}</span></div><div class="m num">${dateDe(t.date)} · ${nf(t.qty, t.qty % 1 ? 4 : 0)} × ${money(t.price, t.currency)}</div></div>
       <div class="r"><span class="chip ${t.type === 'buy' ? 'good' : 'bad'}">${t.type === 'buy' ? '−' : '+'}${money(t.qty * t.price, t.currency)}</span></div></button>`).join('')}</div>` : '<p class="empty">Noch keine Buchungen.</p>'}
       <p class="tiny muted" style="margin:12px 0 0">Der direkte Import aus Trade Republic oder comdirect ist vorbereitet, aber noch nicht aktiv. Jede Buchung merkt sich ihre Herkunft.</p></details>
+    ${divCard(c)}
   </div>`;
 }
 
 // Änderung der Gewinnschätzung in 90 Tagen (dieselbe Rechnung wie tracker/analytics.py est_change)
 const estChg = f => { const v = f.est_chg_90d != null ? f.est_chg_90d : (f.est_eps != null && f.est_eps_90d ? (f.est_eps - f.est_eps_90d) / Math.abs(f.est_eps_90d) * 100 : null); return v == null ? null : Math.max(-100, Math.min(100, v)); };
 
-/* ---------------------------------------------------------------- Analyse */
-function vAnalyse(c) {
-  const all = allTracked();
-  if (!all.length) return `<div class="grid">${card('Noch nichts zu analysieren', '', '<p class="empty">Trag einen Kauf ein oder setz einen Titel auf die Watchlist.</p>')}</div>`;
-  const heldKeys = new Set(c.held.map(p => p.key)), scope = fltOn('scope'), typ = fltOn('rank');
-  const rows = all.filter(k => (scope === 'Alle' || (scope === 'Depot') === heldKeys.has(k)) && (typ === 'Alle' || typeOf(k) === typ)).map(k => ({key: k}));
-  const coins = all.filter(k => isCoin(k) && A(k).price != null).map(k => ({key: k}));
-  const w = S.flowWin;
-  const fcols = [COL.name,
-    {id: 'chg', label: w + ' Std.', cls: 'r', num: true, sort: r => w === '4' ? (A(r.key).flow || {}).px_chg_4h : A(r.key).change_pct, html: r => chg(w === '4' ? (A(r.key).flow || {}).px_chg_4h : A(r.key).change_pct, 1)},
-    {id: 'read', label: 'Getragen von', cls: '', html: r => { const rd = (A(r.key).flow_read || {})[w]; return rd ? `<span class="chip ${toneClass(rd.tone)}">${esc(rd.label)}</span>` : '<span class="ts">keine Futures-Daten</span>'; }},
-    {id: 'spot', label: 'Spot-Käufe', cls: 'r hm', num: true, sort: r => (((A(r.key).flow || {}).spot || {})[w] || {}).ratio, html: r => { const x = (((A(r.key).flow || {}).spot || {})[w] || {}).ratio; return x == null ? '<span class="ts">–</span>' : chg(x * 100, 1); }},
-    {id: 'fut', label: 'Futures-Käufe', cls: 'r hm', num: true, sort: r => (((A(r.key).flow || {}).fut || {})[w] || {}).ratio, html: r => { const x = (((A(r.key).flow || {}).fut || {})[w] || {}).ratio; return x == null ? '<span class="ts">–</span>' : chg(x * 100, 1); }},
-    {id: 'oi', label: 'Open Interest', cls: 'r hm', num: true, sort: r => ((A(r.key).flow || {}).oi_chg || {})[w], html: r => { const f = A(r.key).flow || {}; return f.oi_total ? `<div class="num">${big(f.oi_total)} $</div><div class="ts">${chg((f.oi_chg || {})[w], 1)}</div>` : '<span class="ts">–</span>'; }},
-    {id: 'fund', label: 'Funding', cls: 'r hm', num: true, sort: r => (A(r.key).flow || {}).funding_avg, html: r => { const x = (A(r.key).flow || {}).funding_avg; return x == null ? '<span class="ts">–</span>' : `<span class="num ${x > 0.03 ? 'neg' : ''}">${nf(x, 4)} %</span>`; }},
-    {id: 'pe', label: 'Marktwert zu Einnahmen', cls: 'r hm', num: true, sort: r => { const o = D(r.key).onchain; return o && o.type === 'protocol' ? o.pe : null; }, html: r => { const o = D(r.key).onchain; return o && o.type === 'protocol' && o.pe ? `<span class="num">${o.pe > 999 ? 'über 999' : nf(o.pe, o.pe < 10 ? 1 : 0)}-fach</span>` : '<span class="ts">–</span>'; }},
-    COL.score];
+/* ---------------------------------------------------------------- Dividenden (im Depot) */
+function divCard(c) {
   const divs = c.held.filter(p => D(p.key).div && D(p.key).div.annual);
-  return `<div class="grid">
-    <section class="card"><div class="head"><div><h2>Rangliste</h2><p class="sub">Von günstig nach teuer: 10 Punkte heißt deutlich unterbewertet, 1 deutlich überbewertet</p></div>
-      <div class="toolbar end">${flt('scope', ['Alle', 'Depot', 'Watchlist'])}${flt('rank', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div></div>
-      ${tbl('rank', [COL.score, COL.name, COL.label, COL.why, COL.ai, COL.day, COL.zone], rows, ['score', -1])}
-      <div class="note">Die Punkte sind eine Faustregel. Bei Aktien zählen Kennzahlen voll (PEG, KGV, freier Geldfluss, Wachstum, Marge), Kursziele und Dividende halb. Bei Coins zählen die Einnahmen des Protokolls.
-      Ein gefallener Kurs allein gibt keine Punkte: Er zählt nur, wenn die Kennzahlen ihn stützen und der Titel nicht deutlich schwächer läuft als der Gesamtmarkt. ETFs, Gold und Coins ohne Einnahmen bekommen deshalb keine Punkte, nur ein Wort zur Kurslage.
-      „Recherche“ ist das Urteil aus der KI-Recherche${S.analysis.updated ? '' : ' (läuft wöchentlich, noch nicht gelaufen)'}. Tippe einen Titel an für alle Gründe. Keine Anlageberatung.</div></section>
-    ${coins.length ? `<section class="card"><div class="head"><div><h2>Krypto: Spot oder Futures?</h2><p class="sub">Wer die Bewegung getragen hat, dazu Hebel und Einnahmen der Protokolle</p></div>${seg('flowwin', ['4 Std.', '24 Std.'], w === '4' ? '4 Std.' : '24 Std.')}</div>
-      ${tbl('flow', fcols, coins, ['chg', -1])}
-      <p class="tiny muted" style="margin:12px 0 0">Spot- und Futures-Käufe: Anteil der Käufe minus Verkäufe am gehandelten Volumen. Funding je 8 Stunden. Tippe einen Coin an für die Einordnung im Detail.</p></section>` : ''}
-    ${card('Dividenden', `Erwartet pro Jahr: ${eur(c.divYear)} brutto`, divs.length ? `<div class="rows tight two">${divs.sort((a, b) => (b.divYear || 0) - (a.divYear || 0)).map(p => { const d = D(p.key).div; return `<button class="row" data-act="open" data-key="${esc(p.key)}"><div class="l">
+  return `${card('Dividenden', `Erwartet pro Jahr: ${eur(c.divYear)} brutto`, divs.length ? `<div class="rows tight two">${divs.sort((a, b) => (b.divYear || 0) - (a.divYear || 0)).map(p => { const d = D(p.key).div; return `<button class="row" data-act="open" data-key="${esc(p.key)}"><div class="l">
       <div class="t">${esc(p.symbol)}<span>${nf(d.yield_pct, 2)} % Rendite</span></div><div class="m num">${px(p.key, d.annual)} je Aktie · ${d.per_year || '–'}× jährlich${d.next_ex ? ' · Ex-Tag ' + dateDe(d.next_ex) + (d.next_ex_estimated ? ' (geschätzt)' : '') : ''}</div></div>
-      <div class="r"><div class="v num">${eur(p.divYear)}</div><span class="muted tiny">pro Jahr</span></div></button>`; }).join('')}</div>` : '<p class="empty">Keine Dividendentitel im Depot.</p>')}
-  </div>`;
+      <div class="r"><div class="v num">${eur(p.divYear)}</div><span class="muted tiny">pro Jahr</span></div></button>`; }).join('')}</div>` : '<p class="empty">Keine Dividendentitel im Depot.</p>')}`;
 }
+
 function flowBlock(key) {
   const a = A(key), f = a.flow || {}, w = S.flowWin, rd = (a.flow_read || {})[w], sym = key.split(':')[1];
   const sp = (f.spot || {})[w], fu = (f.fut || {})[w], chg = w === '4' ? f.px_chg_4h : a.change_pct;
@@ -266,11 +229,11 @@ function flowBlock(key) {
 function vWatch() {
   const wl = S.pf.watchlist || [], al = S.pf.alerts || [], st = S.state.alerts || {}, f = fltOn('watch');
   const rows = wl.map(w => ({key: keyOf(w.kind, w.symbol)})).filter(r => f === 'Alle' || typeOf(r.key) === f);
-  return `<div class="grid two wide"><div class="col">
+  return `<div class="grid">
     <section class="card"><div class="toolbar"><div>${flt('watch', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
-      <div class="sumline"><b>${rows.length}</b> ${rows.length === 1 ? 'Titel' : 'Titel'} beobachtet</div><button class="btn" data-act="addwatch">Titel hinzufügen</button></div>
-      ${wl.length ? tbl('watch', [COL.score, COL.name, COL.price, COL.day, COL.zone, COL.ai], rows, ['score', -1]) : '<p class="empty">Noch nichts auf der Watchlist.</p>'}</section>
-  </div><div class="col">
+      <div class="sumline"><b>${rows.length}</b> Titel beobachtet</div><button class="btn" data-act="addwatch">Titel hinzufügen</button></div>
+      ${wl.length ? tbl('watch', [COL.name, COL.price, COL.day, COL.zone], rows, ['name', 1]) : '<p class="empty">Noch nichts auf der Watchlist.</p>'}
+      <p class="tiny muted" style="margin:12px 0 0">Tippe einen Titel an: Dort stehen Punkte, Gründe, Kennzahlen und Recherche. Keine Anlageberatung.</p></section>
     ${card('Alerts', 'Push aufs Handy, sobald eine Schwelle erreicht ist', (al.length ? `<div class="rows tight">${al.map(a => { const fd = st[a.id];
       return `<div class="row"><div class="l"><div class="t">${esc(a.symbol)}<span>${esc(alertText(a))}</span></div>
       <div class="m">${fd ? 'Ausgelöst ' + esc(ago(fd.fired)) : 'Aktiv'}${a.note ? ' · ' + esc(a.note) : ''}</div></div>
@@ -279,7 +242,7 @@ function vWatch() {
       + `<div class="btnrow"><button class="btn" data-act="addalert">Alert anlegen</button></div>
       ${(S.pf.settings || {}).ntfy_topic ? '' : '<div class="note">Für Push aufs Handy fehlt noch der ntfy-Kanal. Du richtest ihn in den Einstellungen (Zahnrad oben rechts) ein.</div>'}`)}
     ${card('Automatische Meldungen', '', `<p class="body" style="margin:0">Bewegt sich ein Titel an einem Tag um mehr als ${nf((S.pf.settings || {}).move_stock ?? 5, 0)} % (Aktien) oder ${nf((S.pf.settings || {}).move_crypto ?? 8, 0)} % (Krypto), kommt eine Meldung mit Punkten und nächster Nachkauf-Zone. Die Schwellen änderst du im Zahnrad.</p>`)}
-  </div></div>`;
+  </div>`;
 }
 
 /* ---------------------------------------------------------------- Kalender */
@@ -289,14 +252,17 @@ function calList(events) {
   return `<div class="cal">${Object.keys(by).sort().map(d => { const dt = new Date(d + 'T12:00:00');
     return `<div class="day"><div class="badge ${d === today ? 'today' : ''}"><div class="w">${d === today ? 'Heute' : WT[dt.getDay()]}</div><div class="d">${dt.getDate()}</div><div class="mo">${MON_K[dt.getMonth()]}</div></div>
     <div style="min-width:0;flex:1">${by[d].map(e => { const [cls, lab] = CAT[e.category] || ['', e.category];
-      return `<div class="ev"><span class="chip ${cls}">${esc(lab)}</span>${e.estimated ? ' <span class="tiny muted">geschätzt</span>' : ''}
+      return `<div class="ev ${e.market ? '' : 'mine'}"><span class="chip ${cls}">${esc(lab)}</span>${e.time ? ` <span class="tiny muted">${esc(e.time)}${/^\d/.test(e.time) ? ' Uhr' : ''}</span>` : ''}${e.estimated ? ' <span class="tiny muted">geschätzt</span>' : ''}${e.market ? '' : ' <span class="tiny mine-tag">dein Titel</span>'}
       <div class="ti">${esc(e.title)}${e.expected ? ` <span class="muted">· für dich etwa ${fxNow(e.currency) ? eur(e.expected / fxNow(e.currency)) : money(e.expected, e.currency)} brutto</span>` : ''}</div></div>`; }).join('')}</div></div>`; }).join('')}</div>`;
 }
 function vCal() {
   const all = S.digest.calendar || [], f = S.calFilter;
-  const ev = all.filter(e => f === 'alle' || (f === 'Zahlen' && e.category === 'Earnings') || (f === 'Dividenden' && /Dividende|Zahltag/.test(e.category)) || (f === 'Krypto' && e.category === 'Krypto'));
-  return `<div class="grid">${card('Kommende Termine', 'Quartalszahlen, Ex-Tage und Zahltage deiner Titel',
-    ev.length ? calList(ev) : '<p class="empty">Keine Termine gefunden. Der Kalender füllt sich mit der täglichen Aktualisierung.</p>', seg('calf', ['alle', 'Zahlen', 'Dividenden', 'Krypto'], f))}</div>`;
+  const FL = {alle: () => true, 'Meine Titel': isMine, Zahlen: e => e.category === 'Earnings', Konjunktur: e => e.category === 'Makro' || e.category === 'Fed',
+    Dividenden: e => /Dividende|Zahltag/.test(e.category), Krypto: e => e.category === 'Krypto', IPOs: e => e.category === 'IPO'};
+  const ev = all.filter(FL[f] || FL.alle);
+  return `<div class="grid">${card('Termine', 'Wie im Newsletter: Quartalszahlen großer US-Firmen, Konjunktur, Fed und EZB, Börsengänge, dazu Zahlen, Dividenden und Krypto-Termine deiner Titel. Uhrzeiten in deutscher Zeit.',
+    ev.length ? calList(ev) : '<p class="empty">Keine Termine gefunden. Der Kalender füllt sich mit der täglichen Aktualisierung.</p>', seg('calf', Object.keys(FL), f))}
+    <p class="tiny muted" style="margin:0 4px">Quellen: Nasdaq (Quartalszahlen ab 40 Mrd. $ Börsenwert, Börsengänge), Forex Factory (Konjunktur und Notenbanken, nur die laufende Woche), Yahoo und die Recherche für deine Titel.</p></div>`;
 }
 
 /* ---------------------------------------------------------------- Detailansicht */
@@ -426,8 +392,6 @@ document.addEventListener('click', async ev => {
   if (act === 'tab') { S.tab = v; closeSheet(); render(); window.scrollTo(0, 0); }
   else if (act === 'flt') { S.flt[id] = v; render(); }
   else if (act === 'sort') { const cur = S.sort[id]; S.sort[id] = cur && cur[0] === v ? [v, -cur[1]] : [v, b.dataset.num === '1' ? -1 : 1]; render(); }
-  else if (act === 'goflt') { S.tab = 'analyse'; S.flt.scope = v; S.flt.rank = 'Alle'; S.sort.rank = ['score', v === 'Depot' ? 1 : -1]; render(); window.scrollTo(0, 0); }
-  else if (act === 'gosort') { S.tab = 'analyse'; S.flt.scope = 'Alle'; S.flt.rank = 'Alle'; S.sort.rank = [v, -1]; render(); window.scrollTo(0, 0); }
   else if (act === 'range') { S.range = v; render(); }
   else if (act === 'mode') { S.mode = v === 'Wert' ? 'wert' : 'rendite'; render(); }
   else if (act === 'calf') { S.calFilter = v; render(); }

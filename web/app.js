@@ -162,7 +162,7 @@ const px = (key, v, day) => money(toShow(key, v, day), showCur(key));
 // Punkte 1 bis 10 aus der Bewertung (dieselbe Formel in tracker/analytics.py: rating)
 function ratingOf(key) { const v = D(key).valuation; return !v || v.score == null ? null : (v.rating ?? Math.max(1, Math.min(10, Math.floor(6 + 3 * v.score)))); }
 const tierOf = r => r == null ? null : r <= 2 ? 0 : r <= 4 ? 1 : r <= 6 ? 2 : r <= 8 ? 3 : 4;
-const isFund = key => !isCoin(key) && /\b(ETF|ETC|UCITS)\b/i.test(A(key).name || D(key).name || '');
+const isFund = key => !isCoin(key) && (A(key).type === 'ETF' || /\b(ETF|ETC|UCITS)\b/i.test(A(key).name || D(key).name || ''));
 const nameOf = key => A(key).name || D(key).name || key.split(':')[1];
 function priceAt(key, day) {
   const h = D(key).hist;

@@ -2,6 +2,7 @@
 import base64
 import datetime
 import json
+import time
 import os
 import urllib.error
 import urllib.parse
@@ -102,17 +103,24 @@ class GitHubStore:
     def put(self, name, obj):
         text = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
         h = dict(self.auth, Accept="application/vnd.github+json")
-        sha = None
-        try:
-            sha = http_json(self._url(name), headers=h, timeout=30).get("sha")
-        except SourceError as e:
-            if "404" not in str(e):
-                raise
-        body = {"message": "Daten aktualisiert", "branch": self.branch,
-                "content": base64.b64encode(text.encode("utf-8")).decode("ascii")}
-        if sha:
-            body["sha"] = sha
-        http_json(self.base + urllib.parse.quote(name), body=body, headers=h, timeout=60, method="PUT")
+        for attempt in range(3):   # zwei Läufe gleichzeitig (geplant und aus der App): bei Konflikt neu versuchen
+            sha = None
+            try:
+                sha = http_json(self._url(name), headers=h, timeout=30).get("sha")
+            except SourceError as e:
+                if "404" not in str(e):
+                    raise
+            body = {"message": "Daten aktualisiert", "branch": self.branch,
+                    "content": base64.b64encode(text.encode("utf-8")).decode("ascii")}
+            if sha:
+                body["sha"] = sha
+            try:
+                http_json(self.base + urllib.parse.quote(name), body=body, headers=h, timeout=60, method="PUT")
+                return
+            except SourceError as e:
+                if attempt == 2 or not any(c in str(e) for c in ("409", "422")):
+                    raise
+                time.sleep(2)
 
 
 def get_store():
@@ -142,3 +150,15 @@ def tracked_assets(pf):
             if x.get("name") and not a["name"]:
                 a["name"] = x["name"]
     return out
+
+
+def asset_type(kind, q):
+    """Art eines Titels: Krypto, ETF, ETC oder Aktie. Yahoo liefert den Typ, der Name fängt Lücken ab (Gold-ETCs heißen bei Yahoo EQUITY)."""
+    if kind == "crypto":
+        return "Krypto"
+    name = " %s " % ((q or {}).get("name") or "").upper().replace("(", " ").replace(")", " ")
+    if " ETC " in name:
+        return "ETC"
+    if (q or {}).get("type") == "ETF" or " ETF " in name or " UCITS " in name:
+        return "ETF"
+    return "Aktie"

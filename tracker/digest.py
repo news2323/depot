@@ -5,7 +5,7 @@
 import datetime
 import sys
 
-from . import portfolio
+from . import portfolio, sources
 from .common import CLOUD, empty_portfolio, get_store, log, now_iso, tracked_assets
 
 
@@ -55,8 +55,27 @@ def build_calendar(assets, market, daily, analysis, pos):
             for e in c.get("events") or []:
                 if e.get("title"):
                     add(e.get("date"), "Krypto", key, "%s: %s" % (a["symbol"], e["title"]))
-    out.sort(key=lambda e: (e["date"], e["category"]))
+    # Markttermine wie im Newsletter: große US-Quartalszahlen, Konjunktur, Notenbanken, Börsengänge
+    own_stocks = {k.split(":", 1)[1].upper(): k for k, a in assets.items() if a["kind"] == "stock"}
+    mine = {(e["date"], e["symbol"].upper()): e for e in out if e["category"] == "Earnings"}
+    for e in sources.market_calendar(own_stocks):
+        if e["category"] == "Earnings" and e.get("symbol") in own_stocks:
+            hit = mine.get((e["date"], e["symbol"]))
+            if hit:
+                hit["time"] = e["time"]
+                continue
+            add(e["date"], "Earnings", own_stocks[e["symbol"]], e["title"], time=e["time"])
+            continue
+        if e["date"] >= today:
+            out.append({"date": e["date"], "time": e.get("time") or "", "category": e["category"], "key": "markt:" + (e.get("symbol") or ""),
+                        "symbol": e.get("symbol") or "", "title": e["title"], "market": True})
+    out.sort(key=lambda e: (e["date"], _clock(e.get("time")), e["category"]))
     return out
+
+
+def _clock(t):
+    """Sortierschlüssel für die Uhrzeit: vorbörslich vor Börsenstart, nachbörslich nach Börsenschluss (deutsche Zeit)."""
+    return {"vorbörslich": "13:00", "nachbörslich": "22:05", "": "00:00", None: "00:00"}.get(t, t)
 
 
 def main():
@@ -69,6 +88,13 @@ def main():
     pos_list = portfolio.positions(pf, market, daily)
     pos = {p["key"]: p for p in pos_list}
     cal = build_calendar(assets, market, daily, analysis, pos)
+    # Antwortet eine Markt-Quelle nicht, bleiben ihre Termine vom letzten Lauf stehen
+    old = (store.get("digest.json") or {}).get("calendar") or []
+    today = datetime.date.today().isoformat()
+    for cats in (("Makro", "Fed"), ("IPO",)):
+        if not any(e["category"] in cats for e in cal):
+            cal += [e for e in old if e.get("market") and e["category"] in cats and e["date"] >= today]
+    cal.sort(key=lambda e: (e["date"], _clock(e.get("time")), e["category"]))
     tot = portfolio.totals(pos_list)
     held = [p for p in pos_list if p["qty"] > 1e-12 and p["value"] is not None]
     movers = sorted((p for p in held if p["day_pct"] is not None), key=lambda p: -abs(p["day_pct"]))[:5]

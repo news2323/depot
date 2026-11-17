@@ -77,7 +77,7 @@ nächste Nachkauf-Zone liegt. Die Schwellen stehen in den Einstellungen (Zahnrad
 
 | Ablauf | Wann | Was |
 |---|---|---|
-| Kurse und Alerts | alle 10 Minuten (GitHub startet oft etwas später) | Kurse, Krypto-Flows, Alerts |
+| Kurse und Alerts | durchgehend alle 5 Minuten (GitHub startet die Läufe unregelmäßig, jeder prüft deshalb 50 Minuten lang) | Kurse, Krypto-Flows, Alerts |
 | Kurse beim Öffnen | wenn du die App öffnest und die Kurse älter als 3 Minuten sind | wie oben; die Seite lädt nach etwa einer Minute selbst neu |
 | Tagesanalyse | täglich 5:30 bzw. 6:30 Uhr | Verläufe, Kennzahlen, Dividenden, Nachkauf-Zonen, KI-Recherche, Kalender |
 

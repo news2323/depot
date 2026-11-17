@@ -5,20 +5,22 @@ on:
     - cron: "*/10 * * * *"   # GitHub startet zeitgesteuerte Läufe oft einige Minuten später
   workflow_dispatch:
 
+# Geplante Läufe prüfen 50 Minuten lang alle 5 Minuten (GitHub startet sie nur alle 40 bis 150 Minuten).
+# Läufe aus der App laufen daneben in eigener Gruppe, damit sie nicht hinter der Schleife warten.
 concurrency:
-  group: kurse
+  group: kurse-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
   kurse:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 58
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m tracker.update fast
+      - run: python -m tracker.update ${{ github.event_name == 'schedule' && 'loop 50' || 'fast' }}
         env:
           DATA_REPO: ${{ secrets.DATA_REPO }}
           DATA_TOKEN: ${{ secrets.DATA_TOKEN }}

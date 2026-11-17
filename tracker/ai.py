@@ -13,7 +13,7 @@ import json
 import os
 import sys
 
-from . import portfolio
+from . import common, portfolio
 from .common import CLOUD, SourceError, get_store, http_json, log, now_iso, tracked_assets, empty_portfolio
 
 # ================= EINSTELLUNGEN =================
@@ -211,7 +211,8 @@ def depot_rows(assets, res, market, daily, pos):
         p = pos.get(key)
         d = (daily.get("assets") or {}).get(key) or {}
         q = (market.get("assets") or {}).get(key) or {}
-        rows.append({"symbol": a["symbol"], "art": "Krypto" if a["kind"] == "crypto" else "Aktie",
+        art = common.asset_type(a["kind"], q)
+        rows.append({"symbol": a["symbol"], "art": art, "name": q.get("name") or a.get("name") or "",
                      "gewicht_pct": round(p["value"] / total * 100, 1) if p and p["value"] and p["qty"] > 1e-12 else 0,
                      "gewinn_pct": round(p["pnl_pct"], 1) if p and p["pnl_pct"] is not None and p["qty"] > 1e-12 else None,
                      "kurs": q.get("price"), "waehrung": q.get("currency"),
