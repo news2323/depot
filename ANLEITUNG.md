@@ -93,13 +93,16 @@ die Aufgabe beim nächsten Start nach. Den Zugangsschlüssel holt das Skript `tr
 
 **Über die API (aus):** Mit dem Secret `ANTHROPIC_API_KEY` recherchiert stattdessen der tägliche Lauf auf GitHub
 (`tracker/ai.py`, höchstens 6 Titel pro Tag, Abrechnung nach Verbrauch). Ohne das Secret wird das übersprungen.
-`XAI_API_KEY` schaltet zusätzlich die Stimmung von X über Grok ein, ebenfalls nach Verbrauch.
+`XAI_API_KEY` schaltet zusätzlich die Stimmung von X über Grok automatisch ein, ebenfalls nach Verbrauch. Ohne Kosten geht es von Hand über die App (siehe Stimmung unten).
 
 ## Woher die Daten kommen
 
 - **Aktien:** Yahoo Finance (Kurse, Dividenden, KGV, PEG, Analystenziele, Termine). Die KI ergänzt Quartalszahlen von den Investor-Relations-Seiten.
 - **Einblicke:** ebenfalls Yahoo Finance, einmal am Tag: Branchen deiner ETFs, Urteile und Kursziele der Analysten samt Hoch- und Abstufungen,
   Insider-Käufe und -Verkäufe. Insider melden einzeln nur US-Firmen, für europäische Titel bleibt der Bereich leer.
+- **Stimmung:** Reddit-Erwähnungen von ApeWisdom und der Angst-und-Gier-Index für Krypto von alternative.me, täglich und kostenlos.
+  Die Stimmung auf X holst du kostenlos über Grok: In Einblicke → Stimmung „Frage kopieren“ tippen, bei Grok einfügen,
+  Groks Antwort kopieren und unter „Antwort einfügen“ speichern. Sie erscheint dann in der Tabelle und in der Detailansicht.
 - **Krypto:** Velo hat keine frei nutzbare Schnittstelle. Der Tracker holt dieselben Größen direkt von den Börsen:
   Spot-Kaufdruck von Binance, Futures-Kaufdruck von Binance oder OKX, Open Interest und Funding von OKX, Hyperliquid, Bybit und Binance.
   Jeder Coin verlinkt zu Velo.

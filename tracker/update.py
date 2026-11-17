@@ -314,6 +314,11 @@ def run_daily(store):
         h = hist_cache.get(key) or (sources.crypto_history(sym) if kind == "crypto" else sources.stock_history(sym))
         if h:
             bench[name] = {"d": h["d"], "c": h["c"], "label": label, "currency": h["currency"]}
+    # Stimmung ohne Schlüssel: Reddit-Erwähnungen je Titel, Angst und Gier bei Krypto
+    for key, b in sources.reddit_buzz([(a["kind"], a["symbol"]) for a in assets.values()]).items():
+        if key in out:
+            out[key]["reddit"] = b
+    crypto_fg = sources.crypto_fear_greed()
     # Branchen der großen Indizes als Vergleich für die Sektoren des Depots (über die ETFs URTH und SPY)
     sector_bench = {}
     for name, sym in SECTOR_BENCH:
@@ -327,7 +332,7 @@ def run_daily(store):
             h = sources.fx_history(cur)
             if h:
                 fx[cur] = h
-    store.put("daily.json", {"updated": now_iso(), "assets": out, "bench": bench, "sector_bench": sector_bench, "fx": fx,
+    store.put("daily.json", {"updated": now_iso(), "assets": out, "bench": bench, "sector_bench": sector_bench, "crypto_fg": crypto_fg, "fx": fx,
                              "sources": sources.STATUS})
     log("Tagesdaten: %d von %d Titeln mit Verlauf" % (len(out), len(assets)))
 

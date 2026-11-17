@@ -412,10 +412,75 @@ function sectorCard(c) {
     body + `<p class="hint">Zeile antippen zeigt, welche Titel in der Branche stecken. Unterschied in Prozentpunkten.${out ? ' Nicht enthalten: ' + esc(out) + ' des Depots.' : ''}</p>`,
     `<div class="headr">${legend}${names.length > 1 ? seg('secb', names, bn) : ''}</div>`, 'span12');
 }
+/* Stimmung: Reddit (ApeWisdom) und Angst-und-Gier für Krypto kommen täglich automatisch. Die Stimmung auf X liefert Grok:
+   kostenlos über das eigene Konto (Frage kopieren, Antwort einfügen, gespeichert in portfolio.json → grok) oder mit XAI_API_KEY im Tageslauf. */
+const sentCls = s => /bull/i.test(s || '') ? 'good' : /bär|baer|bear/i.test(s || '') ? 'bad' : '';
+function grokOf(key) {
+  const a = AI(key).grok, p = ((S.pf.grok || {}).assets || {})[key];
+  if (!p || !a) return p || a || null;
+  return (p.at || '') >= (a.at || '') ? p : a;
+}
+const FG_DE = {'Extreme Fear': 'Extreme Angst', Fear: 'Angst', Neutral: 'Neutral', Greed: 'Gier', 'Extreme Greed': 'Extreme Gier'};
+const GROK_MAX = 35;
+const grokParts = c => { const k = insightKeys(c).filter(x => !isFund(x)), out = []; for (let i = 0; i < k.length; i += GROK_MAX) out.push(k.slice(i, i + GROK_MAX)); return out; };
+function grokPrompt(keys) {
+  const lab = k => { const s = k.split(':')[1], n = nameOf(k); return n && n.toUpperCase() !== s ? `${s} (${n})` : s; };
+  const st = keys.filter(k => !isCoin(k)), cr = keys.filter(isCoin), d = new Date();
+  return `Heute ist der ${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}. Suche auf X und im Web nach der aktuellen Stimmung zu diesen Titeln.
+${st.length ? 'Aktien: ' + st.map(lab).join(', ') + '\n' : ''}${cr.length ? 'Kryptowährungen: ' + cr.map(lab).join(', ') + '\n' : ''}
+Bewerte je Titel die Stimmung der letzten 48 Stunden und fasse zusammen, worüber gesprochen wird. Schreib auf Deutsch, sachlich und in kurzen Sätzen.
+Antworte nur mit JSON, ohne weiteren Text. Als symbol das Kürzel genau wie oben vor der Klammer. Struktur:
+{"market_mood": "1 bis 2 Sätze zur Gesamtstimmung", "assets": [{"symbol": "", "sentiment": "bullisch oder neutral oder bärisch", "summary": "1 bis 2 Sätze", "topics": ["2 bis 3 Stichworte"]}]}`;
+}
+// Antwort von Grok lesen und in portfolio.json → grok ablegen. Gibt die Zahl der erkannten Titel zurück.
+function saveGrok(text, c) {
+  const a = text.indexOf('{'), b = text.lastIndexOf('}');
+  if (a < 0 || b <= a) throw new Error('In der Antwort steht kein JSON. Kopiere bitte die ganze Antwort von Grok.');
+  let j; try { j = JSON.parse(text.slice(a, b + 1)); } catch (e) { throw new Error('Die Antwort ließ sich nicht lesen. Kopiere sie bitte vollständig.'); }
+  const all = [...new Set([...(S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol)), ...c.held.map(p => p.key)])];
+  const now = new Date().toISOString(), g = {assets: {}, ...(S.pf.grok || {})}, cut = (x, n) => String(x == null ? '' : x).slice(0, n);
+  g.assets = {...g.assets};
+  let n = 0;
+  (Array.isArray(j.assets) ? j.assets : []).forEach(x => {
+    const sym = String((x || {}).symbol || '').toUpperCase().replace(/\s*\(.*$/, '').trim();
+    let cand = all.filter(k => k.split(':')[1] === sym);
+    if (cand.length > 1 && S.grokKeys) cand = cand.filter(k => S.grokKeys.includes(k));
+    if (cand.length !== 1) return;
+    g.assets[cand[0]] = {sentiment: /bull/i.test(x.sentiment) ? 'bullisch' : /bär|baer|bear/i.test(x.sentiment) ? 'bärisch' : 'neutral', summary: cut(x.summary, 400),
+      topics: (Array.isArray(x.topics) ? x.topics : []).slice(0, 4).map(t => cut(t, 40)), at: now};
+    n++;
+  });
+  if (!n) throw new Error('In der Antwort steht keiner deiner Titel.');
+  if (j.market_mood) g.market_mood = cut(j.market_mood, 500);
+  g.at = now; S.pf.grok = g;
+  return n;
+}
+const SCOL = {
+  x: {id: 'x', label: 'Auf X', cls: 'c-x', num: true, sort: r => { const g = grokOf(r.key); return g ? ({bad: 0, '': 1, good: 2})[sentCls(g.sentiment)] : null; }, html: r => { const g = grokOf(r.key); return g ? `<span class="chip ${sentCls(g.sentiment)}">${esc(g.sentiment)}</span><div class="ts">${esc(ago(g.at))}</div>` : '<span class="ts">–</span>'; }},
+  about: {id: 'about', label: 'Worüber gesprochen wird', cls: 'hm c-about', html: r => { const g = grokOf(r.key); return g && g.summary ? `<div class="ab">${esc(g.summary)}</div>` : '<span class="ts">–</span>'; }},
+  rd: {id: 'rd', label: 'Reddit 24 Std.', cls: 'r', num: true, sort: r => (D(r.key).reddit || {}).mentions, html: r => { const x = D(r.key).reddit; return x ? `<div class="num">${nf(x.mentions, 0)}</div><div class="ts num">Vortag ${nf(x.prev, 0)}</div>` : '<span class="ts">–</span>'; }},
+};
+function moodCard(keys, sw) {
+  const c = calc(), fg = S.daily.crypto_fg, g = S.pf.grok || {}, parts = grokParts(c);
+  const rows = keys.filter(k => !isFund(k) && (grokOf(k) || D(k).reddit)).map(key => ({key}));
+  const none = keys.filter(k => !isFund(k)).length - rows.length;
+  const fgBox = fg ? `<div class="fgbox"><div class="l">Krypto: Angst und Gier</div><div class="v num">${fg.value}<span>${esc(FG_DE[fg.label] || fg.label)}</span></div>
+    <div class="fgbar" role="img" aria-label="${fg.value} von 100"><b style="left:${Math.max(0, Math.min(100, fg.value))}%"></b></div><div class="fgax"><span>Angst</span><span>Gier</span></div>
+    ${fg.prev != null ? `<div class="n">Gestern ${fg.prev}</div>` : ''}</div>` : '';
+  const grokBox = `<div class="grokbox"><div class="gt"><b>Stimmung auf X über Grok, kostenlos</b>${g.at ? `<span class="ts">Zuletzt ${esc(ago(g.at))}</span>` : ''}</div>
+    <ol><li>Frage kopieren. Grok öffnet sich in einem neuen Fenster.</li><li>Dort einfügen und absenden. Das geht mit deinem kostenlosen X- oder Grok-Konto.</li><li>Groks ganze Antwort kopieren, hier einfügen und speichern.</li></ol>
+    <div class="btnrow" style="margin-top:10px">${parts.map((p, i) => `<button class="btn" data-act="grokcopy" data-v="${i}">Frage kopieren${parts.length > 1 ? ` (Teil ${i + 1} von ${parts.length})` : ''}</button>`).join('')}</div>
+    <textarea id="grokans" rows="3" placeholder="Antwort von Grok hier einfügen" aria-label="Antwort von Grok"></textarea>
+    <div class="btnrow" style="margin-top:8px"><button class="btn ghost" data-act="groksave">Antwort speichern</button></div></div>`;
+  return card('Stimmung', 'Was auf X und Reddit über deine Titel gesagt wird. Ohne Kosten.', `<div class="moodtop${fgBox ? '' : ' one'}">${fgBox}${grokBox}</div>
+    ${g.market_mood ? `<div class="note"><b>Grok zur Gesamtstimmung</b> (${esc(ago(g.at))}): ${esc(g.market_mood)}</div>` : ''}
+    ${rows.length ? `<div style="margin-top:14px">${tbl('mood', [COL.name, SCOL.x, SCOL.about, SCOL.rd], rows, ['rd', -1])}</div>` : '<p class="empty" style="margin-top:12px">Noch keine Stimmung für diese Auswahl.</p>'}
+    <p class="hint">Reddit: wie oft ein Titel in 24 Stunden in den großen Börsen-Foren genannt wurde (ApeWisdom, täglich, nur US-Kürzel und Coins).${none > 0 ? ` ${none} Titel ohne Daten.` : ''} Viel Gerede heißt nicht, dass ein Kurs steigt. Stimmung ist kein Kaufgrund. Keine Anlageberatung.</p>`, sw, 'span12');
+}
+const insightKeys = c => [...new Set(fltOn('ein', 'Depot') === 'Depot' ? c.held.filter(p => p.value > 0).map(p => p.key) : (S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol)))];
 function vInsight(c) {
-  const f = fltOn('ein', 'Depot');
-  const keys = f === 'Depot' ? c.held.filter(p => p.value > 0).map(p => p.key) : (S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol));
-  const stocks = [...new Set(keys)].filter(k => !isCoin(k) && !isFund(k)).map(key => ({key}));
+  const keys = insightKeys(c);
+  const stocks = keys.filter(k => !isCoin(k) && !isFund(k)).map(key => ({key}));
   const aRows = stocks.filter(r => an(r.key).now || (D(r.key).fund || {}).target_mean), iRows = stocks.filter(r => ins(r.key));
   const sw = flt('ein', ['Depot', 'Watchlist']);
   const tot = k => aRows.reduce((s, r) => s + (an(r.key)[k] || 0), 0);
@@ -427,6 +492,7 @@ function vInsight(c) {
     ${card('Was sagen Analysten', 'Urteile und Kursziele für 12 Monate, zusammengetragen von Yahoo Finance. Nur Aktien: ETFs und Krypto haben keine Analysten.',
       aRows.length ? `<div class="sumline" style="margin-bottom:10px">Letzte 90 Tage: ${moves}</div>${tbl('analyst', [COL.name, ACOL.rec, ACOL.n, ACOL.buy, ACOL.tgt, ACOL.last], aRows, ['rec', 1])}
       <p class="hint">Analysten liegen oft daneben, und Kursziele folgen meist dem Kurs. Ein hohes Kursziel ist deshalb kein Kaufgrund. Zeile antippen für alle Änderungen. Keine Anlageberatung.</p>` : '<p class="empty">Keine Analystendaten für diese Auswahl.</p>', sw, 'span12')}
+    ${moodCard(keys, sw)}
     ${card('Insider je Titel', 'Käufe und Verkäufe von Management, Board und Großaktionären in den letzten 6 Monaten',
       iRows.length ? tbl('insider', [COL.name, ICOL.buy, ICOL.sell, ICOL.last], iRows, ['ibuy', -1]) + `<p class="hint">${INS_HINT}${noData.length ? ' Ohne Meldungen: ' + esc(noData.join(', ')) + '.' : ''}</p>` : '<p class="empty">Keine Insider-Meldungen für diese Auswahl. Einzeln melden müssen nur US-Firmen.</p>', sw, 'span7')}
     ${card('Letzte Insider-Meldungen', 'Neueste zuerst, nur Käufe und Verkäufe', feed.length ? `<div class="rows tight">${feed.map(e => insRow(e.key, e.x, true)).join('')}</div>` : '<p class="empty">Keine Meldungen in den letzten 12 Monaten.</p>', '', 'span5')}
@@ -483,7 +549,7 @@ function closeSheet() { $('#sheet').hidden = true; document.body.style.overflow 
 const sheetTop = (title, sub) => `<div class="sheet-top"><div><h2>${title}</h2>${sub ? `<p class="muted small" style="margin:4px 0 0">${sub}</p>` : ''}</div><button class="xbtn" data-act="close">×</button></div>`;
 function vAsset(key) {
   S.sheetKey = key;
-  const a = A(key), d = D(key), ai = AI(key).claude, gr = AI(key).grok, c = calc(), p = c.pos.find(x => x.key === key && x.qty > 1e-12);
+  const a = A(key), d = D(key), ai = AI(key).claude, gr = grokOf(key), c = calc(), p = c.pos.find(x => x.key === key && x.qty > 1e-12);
   const [kind, sym] = key.split(':'), cur = curOf(key), f = d.fund || {}, t = d.tech || {}, v = d.valuation, dv = d.div;
   const watched = (S.pf.watchlist || []).some(w => keyOf(w.kind, w.symbol) === key);
   const ir = safeUrl((ai || {}).ir_url) || safeUrl(f.ir_website) || safeUrl(f.website);
@@ -533,8 +599,10 @@ function vAsset(key) {
       ${(ai.risks || []).length ? `<p class="sh">Risiken</p><ul class="dots">${ai.risks.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
       ${(ai.sources || []).filter(s => safeUrl(s.url)).length ? `<p class="small" style="margin:12px 0 0">${ai.sources.filter(s => safeUrl(s.url)).slice(0, 5).map(s => `<a href="${safeUrl(s.url)}" target="_blank" rel="noopener">${esc(s.name || 'Quelle')} ›</a>`).join(' &nbsp; ')}</p>` : ''}`);
   }
-  if (gr) h += card('Stimmung auf X', `Von Grok, ${esc(ago(gr.at))}`, `<span class="chip ${/bull/.test(gr.sentiment) ? 'good' : /bär/.test(gr.sentiment) ? 'bad' : ''}" style="font-size:14px;padding:5px 12px">${esc(gr.sentiment || '')}</span>
-    <p style="margin:10px 0 0;font-size:15px;line-height:1.55;color:var(--ink2)">${esc(gr.summary)}</p>${(gr.topics || []).length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${gr.topics.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</div>` : ''}`);
+  if (gr || d.reddit) h += card('Stimmung', gr ? `Auf X, von Grok ${esc(ago(gr.at))}` : 'Reddit, letzte 24 Stunden', `${gr ? `<span class="chip ${sentCls(gr.sentiment)}" style="font-size:14px;padding:5px 12px">${esc(gr.sentiment || '')}</span>
+    <p style="margin:10px 0 0;font-size:15px;line-height:1.55;color:var(--ink2)">${esc(gr.summary)}</p>${(gr.topics || []).length ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${gr.topics.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</div>` : ''}` : ''}
+    ${d.reddit ? `<div class="note">Reddit: <b class="num">${nf(d.reddit.mentions, 0)}</b> Erwähnungen in 24 Stunden (am Vortag ${nf(d.reddit.prev, 0)}), Platz ${d.reddit.rank} der meistgenannten ${isCoin(key) ? 'Coins' : 'Aktien'}.</div>` : ''}
+    ${gr ? '' : '<p class="hint">Die Stimmung auf X holst du kostenlos über Grok: Reiter Einblicke, Bereich Stimmung.</p>'}`);
   h += `<section class="card"><div class="btnrow" style="margin:0"><button class="btn" data-act="addtx" data-key="${esc(key)}">Kauf oder Verkauf</button><button class="btn ghost" data-act="addalert" data-key="${esc(key)}">Alert</button>
     ${watched ? '' : `<button class="btn ghost" data-act="watchkey" data-key="${esc(key)}">Auf die Watchlist</button>`}${watched ? `<button class="btn danger" data-act="unwatch" data-key="${esc(key)}">Von der Watchlist nehmen</button>` : ''}</div>
     <p class="small" style="margin:14px 0 0">${ir ? `<a href="${ir}" target="_blank" rel="noopener">Investor Relations ›</a> &nbsp; ` : ''}${kind === 'stock' ? `<a href="https://finance.yahoo.com/quote/${encodeURIComponent(sym)}" target="_blank" rel="noopener">Yahoo Finance ›</a>` : `<a href="https://velo.xyz/futures/${encodeURIComponent(sym)}" target="_blank" rel="noopener">Velo ›</a>`}</p></section>`;
@@ -614,6 +682,13 @@ document.addEventListener('click', async ev => {
   else if (act === 'cmp') { S.cmp = v; render(); }
   else if (act === 'alloc') { S.alloc = v; render(); }
   else if (act === 'secb') { S.secb = v; render(); }
+  else if (act === 'grokcopy') { // Kopieren und Öffnen im selben Tipp, sonst blockt Safari das neue Fenster
+    const keys = grokParts(calc())[+v] || [], txt = grokPrompt(keys); S.grokKeys = keys;
+    const manual = () => openSheet(sheetTop('Frage für Grok', 'Text markieren, kopieren und bei Grok einfügen') + `<textarea rows="14" readonly>${esc(txt)}</textarea>`);
+    try { navigator.clipboard.writeText(txt).then(() => toast('Frage kopiert. Bei Grok einfügen und absenden.', 4000), manual); } catch (e) { manual(); }
+    window.open('https://grok.com/', '_blank', 'noopener'); }
+  else if (act === 'groksave') { const t = ($('#grokans') || {}).value || '';
+    try { const n = saveGrok(t, calc()); await savePf(`Stimmung für ${n} Titel gespeichert`); } catch (e) { toast(e.message || 'Speichern fehlgeschlagen', 4500); } }
   else if (act === 'theme') { applyTheme(v === 'Hell' ? 'light' : v === 'Dunkel' ? 'dark' : ''); vSettings(); render(); }
   else if (act === 'searchopen') { const t = $('.top'); t.classList.add('searching'); $('#q').focus(); }
   else if (act === 'calf') { S.calFilter = v; render(); }

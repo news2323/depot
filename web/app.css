@@ -254,6 +254,21 @@ a{color:var(--link);text-decoration:none}
 .recsum{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.recsum b{font-size:18px;font-weight:650;letter-spacing:-.01em}
 .reclegend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:12px;color:var(--ink2)}
 .reclegend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.moodtop{display:grid;gap:14px;grid-template-columns:minmax(0,1fr);align-items:start}
+.fgbox,.grokbox{background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:14px}
+.fgbox .l{font-size:12px;color:var(--ink3);font-weight:600}
+.fgbox .v{font-size:28px;font-weight:650;letter-spacing:-.02em;margin:4px 0 10px;display:flex;align-items:baseline;gap:10px}
+.fgbox .v span{font-size:14px;font-weight:600;color:var(--ink2);letter-spacing:0}
+.fgbar{position:relative;height:6px;border-radius:3px;background:linear-gradient(90deg,var(--down),var(--s0) 50%,var(--up))}
+.fgbar b{position:absolute;top:-4px;width:4px;height:14px;margin-left:-2px;border-radius:2px;background:var(--ink);box-shadow:0 0 0 2px var(--surface2)}
+.fgax{display:flex;justify-content:space-between;font-size:11px;color:var(--ink3);margin-top:5px}
+.fgbox .n{font-size:12px;color:var(--ink3);margin-top:6px}
+.grokbox .gt{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;align-items:baseline;font-size:14px}
+.grokbox ol{margin:8px 0 0;padding-left:20px;font-size:13px;line-height:1.55;color:var(--ink2)}
+.grokbox textarea{margin-top:10px;font-size:16px;background:var(--surface);resize:vertical;min-height:70px}
+.sheet-box textarea[readonly]{font-size:13px;line-height:1.5;font-family:var(--mono)}
+.tbl .c-about{max-width:420px;white-space:normal}.tbl .c-about .ab{font-size:12.5px;line-height:1.45;color:var(--ink2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+@media(min-width:760px){.moodtop{grid-template-columns:240px minmax(0,1fr)}.moodtop.one{grid-template-columns:minmax(0,1fr)}}
 .tbl .c-last{max-width:280px}.tbl .c-last .tl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tbl .c-last .ts{white-space:nowrap}
 @media(max-width:759px){
   .secrows .sechead,.secrows summary{grid-template-columns:minmax(0,1fr) 52px 66px 50px;gap:8px}

@@ -330,6 +330,51 @@ def _eps_trend(mod):
     return {}
 
 
+# ----------------------------------------------------------------- Stimmung (frei nutzbar, ohne Schlüssel)
+APEWISDOM = "https://apewisdom.io/api/v1.0/filter/%s/page/%d"
+
+
+def reddit_buzz(symbols):
+    """Wie oft ein Titel in den letzten 24 Stunden auf Reddit genannt wurde (ApeWisdom zählt die großen Börsen-Foren).
+    symbols: (kind, symbol). Aktien nur mit US-Kürzel, europäische Börsenkürzel kennt die Quelle nicht.
+    Ergebnis: {"stock:NVDA": {"rank", "mentions", "prev", "upvotes", "rank_prev"}}."""
+    want = {"all-stocks": {}, "all-crypto": {}}
+    for kind, sym in symbols:
+        sym = str(sym).upper()
+        if kind == "crypto":
+            want["all-crypto"][sym + ".X"] = "crypto:" + sym
+        elif "." not in sym:
+            want["all-stocks"][sym] = want["all-stocks"][sym.replace("-", ".")] = "stock:" + sym
+    out = {}
+    for filt, m in want.items():
+        if not m:
+            continue
+        page, pages = 1, 1
+        while page <= min(pages, 15):
+            r = _try("ApeWisdom (Reddit)", APEWISDOM % (filt, page), timeout=20)
+            if not r:
+                break
+            pages = int(fnum(r.get("pages")) or 1)
+            for x in r.get("results") or []:
+                key = m.get(str(x.get("ticker") or "").upper())
+                if key and key not in out:
+                    out[key] = {"rank": int(fnum(x.get("rank")) or 0), "mentions": int(fnum(x.get("mentions")) or 0),
+                                "prev": int(fnum(x.get("mentions_24h_ago")) or 0), "upvotes": int(fnum(x.get("upvotes")) or 0),
+                                "rank_prev": int(fnum(x.get("rank_24h_ago")) or 0) or None}
+            page += 1
+    return out
+
+
+def crypto_fear_greed():
+    """Angst-und-Gier-Index für Krypto (alternative.me, 0 = extreme Angst, 100 = extreme Gier), heute und gestern."""
+    r = _try("Fear & Greed", "https://api.alternative.me/fng/?limit=2", timeout=20)
+    d = (r or {}).get("data") or []
+    if not d or fnum(d[0].get("value")) is None:
+        return None
+    return {"value": int(fnum(d[0]["value"])), "prev": int(fnum(d[1]["value"])) if len(d) > 1 and fnum(d[1].get("value")) is not None else None,
+            "label": d[0].get("value_classification") or ""}
+
+
 # ----------------------------------------------------------------- Krypto
 BINANCE_SPOT = "https://data-api.binance.vision/api/v3"   # öffentlicher Marktdaten-Spiegel, weltweit erreichbar
 BINANCE_FUT = "https://fapi.binance.com"                  # aus den USA (GitHub-Server) meist gesperrt
