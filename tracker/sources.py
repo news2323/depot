@@ -116,7 +116,7 @@ class YahooFundamentals:
     """Kennzahlen über quoteSummary. Yahoo sperrt Rechenzentren gelegentlich aus: dann bleibt alles leer
     und die KI-Recherche liefert die Zahlen."""
 
-    MODULES = "summaryDetail,defaultKeyStatistics,financialData,calendarEvents,assetProfile"
+    MODULES = "summaryDetail,defaultKeyStatistics,financialData,calendarEvents,assetProfile,earningsTrend"
 
     def __init__(self):
         self.crumb = None
@@ -185,7 +185,32 @@ class YahooFundamentals:
             "sector": prof.get("sector"), "industry": prof.get("industry"),
             "website": prof.get("website"), "ir_website": prof.get("irWebsite"),
         }
+        out.update(_eps_trend(d.get("earningsTrend")))
         return {k: v for k, v in out.items() if v not in (None, "")}
+
+
+def _eps_trend(mod):
+    """Wie sich die Gewinnschätzung der Analysten für das nächste Geschäftsjahr in 30 und 90 Tagen verändert hat.
+    Das ist der beste frei verfügbare Hinweis darauf, ob sich am inneren Wert etwas geändert hat."""
+    trend = {t.get("period"): t for t in ((mod or {}).get("trend") or []) if isinstance(t, dict)}
+    for period in ("+1y", "0y"):
+        t = trend.get(period)
+        e = (t or {}).get("epsTrend") or {}
+        val = lambda k: fnum(e[k].get("raw")) if isinstance(e.get(k), dict) else fnum(e.get(k))
+        now, d30, d90 = val("current"), val("30daysAgo"), val("90daysAgo")
+        if now is None or d90 is None:
+            continue
+        rev = t.get("epsRevisions") or {}
+        num = lambda k: fnum(rev[k].get("raw")) if isinstance(rev.get(k), dict) else fnum(rev.get(k))
+        out = {"est_period": period, "est_year": str(t.get("endDate") or "")[:4], "est_eps": now, "est_eps_90d": d90,
+               "est_up_30d": num("upLast30days"), "est_down_30d": num("downLast30days")}
+        if d30 is not None:
+            out["est_eps_30d"] = d30
+        # Prozent nur, wenn beide Werte positiv sind. Bei Verlusten ist eine Prozentänderung irreführend.
+        if now > 0 and d90 > 0:
+            out["est_chg_90d"] = (now / d90 - 1) * 100
+        return out
+    return {}
 
 
 # ----------------------------------------------------------------- Krypto

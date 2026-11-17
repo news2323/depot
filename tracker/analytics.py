@@ -162,9 +162,10 @@ class _Points:
         return sum(1 for x in self.items if x["g"] in groups and x["w"] > 0)
 
 
-def _price_points(pts, price, tech, backed, rel, market_name, crypto=False):
-    """Kurslage. Ein gefallener Kurs zählt nur, wenn die Kennzahlen ihn stützen und der Titel nicht
-    deutlich schwächer läuft als der Gesamtmarkt. Sonst wird er gezeigt, aber nicht gewertet."""
+def _price_points(pts, price, tech, backed, rel, market_name, crypto=False, intrinsic=None):
+    """Kurslage. Ein gefallener Kurs ist allein kein Grund. Er zählt nur, wenn die Kennzahlen positiv sind und der Markt
+    überreagiert hat: Der Kurs fiel deutlich stärker als der innere Wert (Gewinnschätzungen bzw. Einnahmen).
+    intrinsic = (Änderung des inneren Werts in %, Kursänderung im selben Zeitraum in %, was, Zeitraum)."""
     if not tech:
         return
     low = []
@@ -181,15 +182,64 @@ def _price_points(pts, price, tech, backed, rel, market_name, crypto=False):
     if not low:
         return
     text = low[0] + (" und " + low[1] if len(low) > 1 else "")
-    limit = -20 if crypto else -15
     if not backed:
         pts.add(0, text + ": zählt nicht, weil die Kennzahlen den Rückgang nicht als Chance stützen", 0, "kurs")
-    elif rel is not None and rel < limit:
+        return
+    val, px, what, win = intrinsic or (None, None, "", "")
+    if val is not None:
+        cut, drop, gap = (-15, -15, -20) if crypto else (-5, -10, -15)
+        if val <= cut:
+            pts.add(0, text + ": zählt nicht, %s sanken %s um %.0f %%, der Rückgang ist begründet" % (what, win, -val), 0, "kurs")
+        elif px is not None and px <= drop and px - val <= gap:
+            pts.add(1, text + ": zählt, der Kurs fiel %s um %.0f %%, %s %s, der Markt hat wohl überreagiert"
+                    % (win, -px, what, "stiegen um %.0f %%" % val if val >= 1 else "blieben stabil"), 0.75, "kurs")
+        else:
+            pts.add(0, text + ": zählt nicht, kein Zeichen für eine Übertreibung (Kurs %s %+.0f %%, %s %+.0f %%)"
+                    % (win, px or 0, what, val), 0, "kurs")
+        return
+    # Ohne Daten zum inneren Wert: nur der Vergleich mit dem Gesamtmarkt, und nur mit kleinem Gewicht
+    limit = -20 if crypto else -15
+    if rel is not None and rel < limit:
         pts.add(0, text + ": zählt nicht, der Titel fiel in 6 Monaten %.0f Punkte stärker als %s" % (-rel, market_name), 0, "kurs")
     elif rel is not None:
-        pts.add(1, text + ", im Gleichschritt mit %s gefallen" % market_name, 0.5, "kurs")
+        pts.add(1, text + ", im Gleichschritt mit %s gefallen (ohne Daten zum inneren Wert, zählt wenig)" % market_name, 0.25, "kurs")
     else:
-        pts.add(1, text, 0.25, "kurs")
+        pts.add(0, text + ": zählt nicht, ohne Daten zum inneren Wert lässt sich keine Übertreibung erkennen", 0, "kurs")
+
+
+def est_change(fund):
+    """Änderung der Gewinnschätzung für das nächste Geschäftsjahr in 90 Tagen, in Prozent, begrenzt auf ±100.
+    Bei Verlusten oder Gewinnen nahe null bezogen auf den Betrag, damit die Richtung stimmt."""
+    fund = fund or {}
+    if fund.get("est_chg_90d") is not None:
+        return max(-100.0, min(100.0, fund["est_chg_90d"]))
+    now, old = fund.get("est_eps"), fund.get("est_eps_90d")
+    if now is None or not old:
+        return None
+    return max(-100.0, min(100.0, (now - old) / abs(old) * 100))
+
+
+def _intrinsic_points(pts, fund):
+    """Hat sich am inneren Wert etwas geändert? Gemessen an den Gewinnschätzungen der Analysten. Zählt voll."""
+    chg = est_change(fund)
+    if chg is None:
+        return None
+    yr = fund.get("est_year") or "das nächste Jahr"
+    raw = fund.get("est_chg_90d")
+    if raw is not None and abs(raw) <= 100:
+        how = "um %.0f %%" % abs(chg)
+    else:   # Verlust, Vorzeichenwechsel oder winzige Basis: Betrag je Aktie statt Prozent
+        how = "von %s auf %s je Aktie" % (("%.2f" % fund["est_eps_90d"]), ("%.2f" % fund["est_eps"]))
+    if chg >= 5:
+        pts.add(1, "Gewinnschätzung für %s in 3 Monaten %s angehoben" % (yr, how), 1.0, "qual")
+    elif chg <= -10:
+        pts.add(-2, "Gewinnschätzung für %s in 3 Monaten %s gesenkt: der innere Wert ist gesunken, deshalb höchstens %d Punkte"
+                % (yr, how, 5 if chg <= -25 else 6), 1.0, "qual")
+    elif chg <= -3:
+        pts.add(-1, "Gewinnschätzung für %s in 3 Monaten %s gesenkt" % (yr, how), 1.0, "qual")
+    else:
+        pts.add(0, "Gewinnschätzung für %s in 3 Monaten kaum verändert (%+.0f %%)" % (yr, chg), 1.0, "qual")
+    return chg
 
 
 def stock_valuation(price, tech, fund, div):
@@ -251,9 +301,11 @@ def stock_valuation(price, tech, fund, div):
             pts.add(1, "Dividendenrendite %.1f %% über dem 5-Jahres-Schnitt (%.1f %%)" % (y, avg), 0.5, "markt")
         elif y < avg * 0.8:
             pts.add(-1, "Dividendenrendite %.1f %% unter dem 5-Jahres-Schnitt (%.1f %%)" % (y, avg), 0.5, "markt")
+    est = _intrinsic_points(pts, fund)
     core = pts.score(("wert", "qual"))
     has_core = pts.count(("wert", "qual")) >= 2
-    _price_points(pts, price, tech, has_core and core is not None and core > 0, (tech or {}).get("rel_6m"), "der Gesamtmarkt")
+    _price_points(pts, price, tech, has_core and core is not None and core > 0, (tech or {}).get("rel_6m"), "der Gesamtmarkt",
+                  intrinsic=(est, (tech or {}).get("perf_3m"), "die Gewinnschätzungen", "in 3 Monaten") if est is not None else None)
     if not has_core:
         # ETFs, ETCs und Titel ohne Kennzahlen: keine Punkte, nur die Kurslage als Wort
         lage = _lage(price, tech)
@@ -264,9 +316,11 @@ def stock_valuation(price, tech, fund, div):
     score = pts.score()
     if loss:
         score = min(score, -0.2)      # Verlustbringer gelten nie als günstig
+    if est is not None and est <= -10:
+        score = min(score, -0.2 if est <= -25 else 0.3)   # innerer Wert gesunken: niedriger Kurs ist kein Schnäppchen
     points = rating(score)
     return {"score": round(score, 2), "rating": points, "label": rating_label(points, "stock"),
-            "basis": "Kennzahlen zählen voll, Kursziele halb, Kurslage nur gestützt", "reasons": pts.items}
+            "basis": "Kennzahlen voll, Kursziele halb, gefallener Kurs nur bei Überreaktion", "reasons": pts.items}
 
 
 def _plain(items):
@@ -320,7 +374,9 @@ def crypto_valuation(price, tech, flow, onchain=None):
     if tech.get("rsi") is not None and tech["rsi"] > 75:
         pts.add(-1, "RSI %.0f: kurzfristig überkauft" % tech["rsi"], 0.25, "kurs")
     core = pts.score(("wert", "qual"))
-    _price_points(pts, price, tech, bool(has_rev) and core is not None and core > 0, tech.get("rel_6m"), "Bitcoin", crypto=True)
+    rc = oc.get("rev_chg") if has_rev else None
+    _price_points(pts, price, tech, bool(has_rev) and core is not None and core > 0, tech.get("rel_6m"), "Bitcoin", crypto=True,
+                  intrinsic=(rc, tech.get("perf_1m"), "die Einnahmen", "im letzten Monat") if rc is not None else None)
     if not has_rev:
         lage = _lage(price, tech) or 0.0
         why = ("Blockchains werden nicht über Gebühren bewertet" if oc.get("type") == "chain" else "Keine Einnahmen bekannt, die sich bewerten lassen")
@@ -329,7 +385,7 @@ def crypto_valuation(price, tech, flow, onchain=None):
     score = pts.score()
     points = rating(score)
     return {"score": round(score, 2), "rating": points, "label": rating_label(points, "stock"),
-            "basis": "Einnahmen des Protokolls zählen voll, Hebel halb, Kurslage nur gestützt", "reasons": pts.items}
+            "basis": "Einnahmen des Protokolls voll, Hebel halb, gefallener Kurs nur bei Überreaktion", "reasons": pts.items}
 
 
 def move_read(chg, valuation, kind="stock"):

@@ -107,6 +107,37 @@ async function refresh(mode, quiet) {
   const b2 = $('#refresh'); if (b2) b2.classList.remove('spin');
 }
 
+/* Beim Öffnen: Sind die Kurse älter als 3 Minuten, startet ein Kurslauf. Die Seite lädt neu, sobald er fertig ist.
+   Ein Lauf, der vor kurzem schon angestoßen wurde (auch aus einem anderen Fenster), wird nicht doppelt gestartet. */
+const STALE = 3 * 6e4;
+async function autoRefresh() {
+  if (S.auto || !S.pf || S.err) return;
+  const age = Date.now() - (Date.parse(S.market.updated || '') || 0);
+  if (age < STALE) return;
+  S.auto = true;
+  const spin = on => { const b = $('#refresh'); if (b) b.classList.toggle('spin', on); };
+  spin(true);
+  try {
+    let last = 0;
+    try { last = +localStorage.getItem('depot_auto') || 0; } catch (e) { last = 0; }
+    let r = 'queued';
+    if (LOCAL || Date.now() - last > 4 * 6e4) {
+      r = await store.refresh('fast');
+      try { localStorage.setItem('depot_auto', String(Date.now())); } catch (e) { /* egal */ }
+    }
+    if (r === 'queued') {
+      const before = S.market.updated || '';
+      for (let i = 0; i < 12; i++) {             // höchstens 4 Minuten warten
+        await new Promise(ok => setTimeout(ok, 20000));
+        const m = await store.get('market.json').catch(() => null);
+        if (m && m.updated && m.updated !== before) break;
+      }
+    }
+    if (r) { await loadAll(); S.loaded = Date.now(); if ($('#sheet').hidden) render(); else S.calc = null; toast('Kurse aktualisiert'); }
+  } catch (e) { /* still: dann bleiben die zuletzt geladenen Kurse stehen */ }
+  S.auto = false; spin(false);
+}
+
 /* ---------------------------------------------------------------- Rechnen */
 function bisect(arr, x) { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] <= x) lo = m + 1; else hi = m; } return lo - 1; }
 const fxNow = cur => cur === 'EUR' ? 1 : ((S.market.fx || {})[cur] || null);
