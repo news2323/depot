@@ -81,7 +81,7 @@ const store = LOCAL ? {
   },
 };
 
-const S = {flt: {}, sort: {}, tab: 'home', range: '1J', mode: 'positionen', flowWin: '24', calFilter: 'alle', pf: null, market: {}, daily: {}, analysis: {}, digest: {}, state: {}, loading: false, err: ''};
+const S = {flt: {}, sort: {}, tab: 'home', range: '1J', mode: 'kauf', flowWin: '24', calFilter: 'alle', pf: null, market: {}, daily: {}, analysis: {}, digest: {}, state: {}, loading: false, err: ''};
 const emptyPf = () => ({version: 1, base_currency: 'EUR', transactions: [], watchlist: [], alerts: [], settings: {ntfy_topic: ''}});
 
 async function loadAll() {
@@ -227,27 +227,41 @@ function calc() {
     if (p.qty > 1e-12 && d.div && d.div.annual) { p.divYear = p.qty * d.div.annual / (fxNow(p.cur) || 1); divYear += p.divYear; }
   }
 
-  // Verlauf: Wert, eingesetztes Geld und zeitgewichtete Rendite (Einzahlungen herausgerechnet)
-  const series = {d: [], v: [], inv: [], twr: []};
+  // Verlauf: Wert, eingesetztes Geld und zeitgewichtete Rendite (Einzahlungen herausgerechnet).
+  // Dazu der Vergleich mit gleichen Käufen: jeder Kauf von Aktien und ETFs geht am selben Tag mit demselben Euro-Betrag
+  // in den S&P 500, jeder Krypto-Kauf in Bitcoin. Verkäufe ziehen denselben Betrag wieder ab. Getrennt nach Teil:
+  // a = Aktien und ETFs, k = Krypto.
+  const series = {d: [], v: [], inv: [], twr: [], va: [], vk: [], ia: [], ik: [], ba: [], bk: [], bench: false};
   if (txs.length) {
     const end = todayDay(), qty = {}; let ti = 0, inv = 0, prev = 0, idx = 1;
+    const part = k => k.startsWith('crypto:') ? 'k' : 'a', units = {a: 0, k: 0}, net = {a: 0, k: 0};
+    const bp = {a: d => benchAt('SP500', d), k: d => benchAt('BTC', d)};
+    series.bench = !!(bp.a(end) && bp.k(end));
     for (let day = txs[0].day; day <= end; day++) {
       let cf = 0;
       while (ti < txs.length && txs[ti].day <= day) {
-        const t = txs[ti++], rate = fxAt(t.currency, t.day) || 1;
+        const t = txs[ti++], rate = fxAt(t.currency, t.day) || 1, p = part(t.key);
         qty[t.key] = (qty[t.key] || 0) + (t.type === 'buy' ? t.qty : -t.qty);
-        cf += t.type === 'buy' ? (t.qty * t.price + t.fee) / rate : -(t.qty * t.price - t.fee) / rate;
+        const amt = t.type === 'buy' ? (t.qty * t.price + t.fee) / rate : -(t.qty * t.price - t.fee) / rate;
+        cf += amt; net[p] += amt;
+        const bpx = bp[p](day);
+        if (bpx) {
+          if (amt > 0) units[p] += amt / bpx;
+          else { const val = units[p] * bpx; units[p] = val > 0 ? units[p] * Math.max(0, 1 + amt / val) : 0; }
+        }
       }
-      let v = 0;
+      let v = 0; const vp = {a: 0, k: 0};
       for (const k in qty) {
         if (qty[k] <= 1e-12) continue;
         const px = day === end && A(k).price != null && !A(k).error ? A(k).price : priceAt(k, day);
-        if (px != null) v += qty[k] * px / (fxAt(curOf(k), day) || 1);
+        if (px != null) { const x = qty[k] * px / ((day === end && fxNow(curOf(k))) || fxAt(curOf(k), day) || 1); v += x; vp[part(k)] += x; }
       }
       inv += cf;
       if (prev > 0) idx *= (v - cf) / prev;
       prev = v;
       series.d.push(day); series.v.push(v); series.inv.push(inv); series.twr.push(idx);
+      series.va.push(vp.a); series.vk.push(vp.k); series.ia.push(net.a); series.ik.push(net.k);
+      series.ba.push(units.a * (bp.a(day) || 0)); series.bk.push(units.k * (bp.k(day) || 0));
     }
   }
   // Risiko aus der zeitgewichteten Rendite
@@ -266,6 +280,14 @@ function calc() {
     dayPct: value - dayEur > 0 ? dayEur / (value - dayEur) * 100 : null, realized: pos.reduce((s, p) => s + p.realized, 0),
     divGot, divYear, series, vol, maxDD, cryptoShare: value ? cryptoV / value * 100 : null};
   return S.calc;
+}
+// Kurs eines Vergleichsindex an einem Tag, in Euro (S&P 500 als Kursindex ohne Dividenden, Bitcoin)
+function benchAt(name, day) {
+  const b = (S.daily.bench || {})[name];
+  if (!b || !b.d.length) return null;
+  const i = bisect(b.d, day), ix = (S.market.indices || []).find(x => x.sym === (name === 'BTC' ? 'BTC' : '^GSPC'));
+  const live = day >= todayDay() && ix && ix.price ? ix.price : null;   // heute: aktueller Stand aus der Marktleiste
+  return (live || (i >= 0 ? b.c[i] : b.c[0])) / ((live && fxNow(b.currency || 'USD')) || fxAt(b.currency || 'USD', day) || 1);
 }
 function benchIndex(name, days) {
   const b = (S.daily.bench || {})[name];

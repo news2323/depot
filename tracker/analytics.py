@@ -94,13 +94,25 @@ def dividend_info(divs, price, fund=None):
     last12 = [a for d, a in divs if d > today - 365]
     prev12 = [a for d, a in divs if today - 730 < d <= today - 365]
     ttm = sum(last12)
+    # Rhythmus aus den Abständen erkennen und die letzten Zahlungen eines vollen Jahres zählen. Ein starres
+    # 365-Tage-Fenster verliert Zahlungen, wenn sich der Ex-Tag um ein paar Tage verschiebt oder Yahoo eine Zahlung spät meldet (oft bei ETFs).
+    freq, recent = len(last12), ttm
+    if len(divs) >= 3:
+        gaps = [b[0] - a[0] for a, b in zip(divs[-9:-1], divs[-8:])]
+        gap = statistics.median(gaps) if gaps else 0
+        if gap >= 20:
+            freq = max(1, min(12, round(365.0 / gap)))
+            if divs[-1][0] > today - (gap * 1.5 + 60):      # zahlt noch
+                recent = sum(a for _, a in divs[-freq:])
+            else:
+                recent = 0.0
     if fund.get("div_rate"):
         out["annual"] = fund["div_rate"]
-    elif ttm:
-        out["annual"] = round(ttm, 4)
+    elif recent:
+        out["annual"] = round(recent, 4)
     if out.get("annual") and price:
         out["yield_pct"] = round(out["annual"] / price * 100, 2)
-    out["per_year"] = len(last12)
+    out["per_year"] = freq
     if ttm and prev12 and sum(prev12):
         out["growth_pct"] = round((ttm / sum(prev12) - 1) * 100, 1)
     if fund.get("div_yield_5y"):

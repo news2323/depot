@@ -22,14 +22,15 @@ const card = (title, sub, inner, extra = '', cls = '') => `<section class="card 
 const tile = (l, v, n = '', cls = '') => `<div class="tile"><div class="l">${l}</div><div class="v num ${cls}">${v}</div>${n ? `<div class="n">${n}</div>` : ''}</div>`;
 const stat = (l, v, n = '', cls = '') => `<div class="stat"><div class="l">${l}</div><div class="v num ${cls}">${v}</div>${n ? `<div class="n">${n}</div>` : ''}</div>`;
 const seg = (act, opts, cur) => `<div class="seg">${opts.map(o => `<button data-act="${act}" data-v="${o}" class="${o === cur ? 'on' : ''}">${o}</button>`).join('')}</div>`;
-const MODES = {positionen: 'Heutige Positionen', kauf: 'Seit Kauf'};
+const MODES = {kauf: 'Seit Kauf', positionen: 'Heutige Positionen'};
+const CMP = {Gesamt: ['Dein Depot', 'Gleiche Käufe in S&P 500 und Bitcoin'], Aktien: ['Deine Aktien und ETFs', 'Gleiche Käufe im S&P 500'], Krypto: ['Dein Krypto', 'Gleiche Käufe in Bitcoin']};
 
 function render() {
   if (!LOCAL && !cfg) return renderSetup();
   const c = calc(), now = new Date(), upd = S.market.updated;
   const stale = upd && Date.now() - Date.parse(upd) > 45 * 6e4;
   if (!TABS.some(t => t[0] === S.tab)) S.tab = 'home';
-  if (!MODES[S.mode]) S.mode = 'positionen';
+  if (!MODES[S.mode]) S.mode = 'kauf';
   const view = {home: vHome, depot: vDepot, watch: vWatch, cal: vCal}[S.tab](c);
   const title = Object.fromEntries(TABS)[S.tab];
   $('#app').innerHTML = `<div class="shell">${sideBar(upd, stale)}
@@ -84,6 +85,7 @@ const flt = (id, opts) => { const cur = (S.flt || {})[id] || opts[0]; return `<d
 const fltOn = (id, def = 'Alle') => (S.flt || {})[id] || def;
 
 const COL = {
+  score: {id: 'score', label: 'Punkte', cls: 'c-score', num: true, sort: r => ratingOf(r.key), html: r => score(r.key)},
   name: {id: 'name', label: 'Titel', cls: 'c-name', sort: r => r.key.split(':')[1], html: r => `<span class="sym">${esc(r.key.split(':')[1])}</span><div class="ts">${esc(nameOf(r.key))}</div>`},
   spark: {id: 'spark', label: '30 Tage', cls: 'c-spark hm', html: r => spark(r.key)},
   price: {id: 'price', label: 'Kurs', cls: 'r hm', html: r => `<span class="num">${px(r.key, A(r.key).price)}</span>`},
@@ -121,8 +123,37 @@ function allocation(c, dim) {
     groups.forEach((g, i) => g.col = g.name === 'Weitere' ? 'var(--s0)' : `var(--s${i + 1})`);
   }
   const tot = groups.reduce((s, g) => s + g.v, 0) || 1;
-  return `<div class="stack" role="img" aria-label="Aufteilung nach ${esc(dim)}">${groups.map(g => `<i style="width:${g.v / tot * 100}%;background:${g.col}" title="${esc(g.name)} ${nf(g.v / tot * 100, 1)} %"></i>`).join('')}</div>
-    <div class="legendrows">${groups.map(g => `<div><i style="background:${g.col}"></i><span>${esc(g.name)}${g.n ? ` <span class="muted">(${g.n})</span>` : ''}</span><span class="e num">${eur(g.v, 0)}</span><span class="p num">${nf(g.v / tot * 100, 1)} %</span></div>`).join('')}</div>`;
+  return `<div class="alloc">${donut(groups, tot, dim)}
+    <div class="legendrows">${groups.map((g, i) => `<div data-slice="${i}"><i style="background:${g.col}"></i><span>${esc(g.name)}${g.n ? ` <span class="muted">(${g.n})</span>` : ''}</span><span class="e num">${eur(g.v, 0)}</span><span class="p num">${nf(g.v / tot * 100, 1)} %</span></div>`).join('')}</div></div>`;
+}
+// Ring aus Kreissegmenten mit 2 px Fuge in Flächenfarbe. Die Mitte zeigt die Summe, beim Zeigen auf ein Segment dessen Anteil.
+function donut(groups, tot, dim) {
+  const R = 80, r = 52, cx = 90, cy = 90;
+  let a0 = -Math.PI / 2, paths = '';
+  const P = (rad, a) => `${(cx + rad * Math.cos(a)).toFixed(2)} ${(cy + rad * Math.sin(a)).toFixed(2)}`;
+  groups.forEach((g, i) => {
+    const frac = g.v / tot, a1 = a0 + frac * Math.PI * 2, big = frac > 0.5 ? 1 : 0;
+    const d = frac >= 0.9999 ? `M${P(R, -Math.PI / 2)}A${R} ${R} 0 1 1 ${P(R, Math.PI * 1.5 - 0.0001)}ZM${P(r, -Math.PI / 2)}A${r} ${r} 0 1 0 ${P(r, Math.PI * 1.5 - 0.0001)}Z`
+      : `M${P(R, a0)}A${R} ${R} 0 ${big} 1 ${P(R, a1)}L${P(r, a1)}A${r} ${r} 0 ${big} 0 ${P(r, a0)}Z`;
+    paths += `<path d="${d}" fill-rule="evenodd" style="fill:${g.col}" data-slice="${i}" data-name="${esc(g.name)}" data-pct="${nf(frac * 100, 1)} %" data-val="${esc(eur(g.v, 0))}"><title>${esc(g.name)}: ${nf(frac * 100, 1)} %</title></path>`;
+    a0 = a1;
+  });
+  return `<div class="donut"><svg viewBox="0 0 180 180" role="img" aria-label="Aufteilung nach ${esc(dim)}">${paths}</svg>
+    <div class="dc" data-def-n="${esc(dim)}" data-def-v="${esc(eur(tot, 0))}"><span class="n">${esc(dim)}</span><b class="num">${eur(tot, 0)}</b></div></div>`;
+}
+// Vergleich mit gleichen Käufen: gleiche Beträge an denselben Tagen in S&P 500 (Aktien und ETFs) bzw. Bitcoin (Krypto)
+const eurS0 = v => v == null || isNaN(v) ? '–' : (v >= 0 ? '+' : '−') + nf(Math.abs(v), 0) + ' €';
+function cmpTable(c) {
+  const sr = c.series, n = sr.d.length - 1;
+  if (n < 0) return '';
+  const rows = [['Aktien &amp; ETFs', 'S&amp;P 500', sr.ia[n], sr.va[n], sr.ba[n]], ['Krypto', 'Bitcoin', sr.ik[n], sr.vk[n], sr.bk[n]]].filter(r => r[2] > 0.5 || r[3] > 0.5);
+  if (rows.length > 1) rows.push(['Gesamt', 'beide', sr.inv[n], sr.v[n], sr.ba[n] + sr.bk[n]]);
+  const unknown = c.txs.filter(t => /Kaufdatum unbekannt/i.test(t.note || '')), uday = unknown.length ? dateDe(unknown[0].date) : '';
+  return `${sr.bench ? `<div class="tblwrap" style="margin-top:14px"><table class="tbl cmp"><thead><tr><th>Teil</th><th class="r">Eingesetzt</th><th class="r">Dein Wert</th><th class="r">Mit Index</th><th class="r">Vorsprung</th></tr></thead><tbody>
+    ${rows.map(r => `<tr class="${r[0] === 'Gesamt' ? 'sum' : ''}"><td><b>${r[0]}</b><div class="ts">gegen ${r[1]}</div></td><td class="r num">${eur(r[2], 0)}</td><td class="r num">${eur(r[3], 0)}<div class="ts ${sign(r[3] - r[2])}">${eurS0(r[3] - r[2])}</div></td>
+      <td class="r num">${eur(r[4], 0)}<div class="ts ${sign(r[4] - r[2])}">${eurS0(r[4] - r[2])}</div></td><td class="r num ${sign(r[3] - r[4])}"><b>${eurS0(r[3] - r[4])}</b></td></tr>`).join('')}</tbody></table></div>` : ''}
+    <p class="hint">Jeder Kauf von Aktien und ETFs geht am selben Tag mit demselben Euro-Betrag in den S&P 500, jeder Krypto-Kauf in Bitcoin. Verkäufe ziehen denselben Betrag wieder ab. S&P 500 als Kursindex ohne Dividenden, alles in Euro.</p>
+    ${unknown.length ? `<div class="note"><b>${unknown.length} Buchungen ohne echtes Kaufdatum.</b> Die Positionen aus comdirect stehen mit dem ${uday} im Depot, weil das Kaufdatum fehlte. Für sie rechnet der Vergleich mit den Kursen von diesem Tag: Ihr Gewinn aus der Zeit davor erscheint deshalb als Vorsprung gegenüber dem Index. Mit den echten Kaufdaten wird der Vergleich genau.</div>` : ''}`;
 }
 function attribution(c) {
   const ps = c.held.filter(p => p.dayEur != null && Math.abs(p.dayEur) >= 0.005);
@@ -146,15 +177,15 @@ function vHome(c) {
   const top5 = c.held.slice(0, 5).reduce((s, p) => s + p.weight, 0);
   const cal = (S.digest.calendar || []).filter(e => isMine(e) || e.category === 'Fed' || e.category === 'Makro').slice(0, 6);
   const alloc = S.alloc || 'Anlageklasse', hm = S.hm || 'Heute';
-  const perf = ps ? `<div class="perf">${ps.periods.map(x => `<div><div class="l">${x.label}</div><div class="v num ${sign(x.v)}">${x.v == null ? '–' : pctS(x.v, 1)}</div><div class="b num">${x.b == null ? '&nbsp;' : 'S&amp;P ' + pctS(x.b, 1)}</div></div>`).join('')}</div>` : '';
+  const perf = ps ? `<div class="eyebrow" style="margin-top:18px">Wertentwicklung der heutigen Positionen</div><div class="perf">${ps.periods.map(x => `<div><div class="l">${x.label}</div><div class="v num ${sign(x.v)}">${x.v == null ? '–' : pctS(x.v, 1)}</div><div class="b num">${x.b == null ? '&nbsp;' : 'S&amp;P ' + pctS(x.b, 1)}</div></div>`).join('')}</div>` : '';
   return `<div class="g12"><div class="colstack span8">
     <section class="card hero"><div class="herotop"><div><div class="eyebrow">Depotwert</div><div class="nav-value num">${eur(c.value)}</div>
       <div class="chgrow">${pill(c.dayPct)}<span class="num ${sign(c.dayEur)}">${eurS(c.dayEur)}</span><span class="muted">heute</span></div></div>
       <div class="heroside"><div class="eyebrow">Gewinn offen</div><div class="num ${sign(c.pnl)}" style="font-size:20px;font-weight:650;margin-top:4px">${eurS(c.pnl)}</div><div class="small muted num">${pctS(c.pnlPct, 1)} auf ${eur(c.cost, 0)}</div></div></div>
       ${perf}
-      <div class="charthead">${seg('mode', Object.values(MODES), MODES[S.mode])}${seg('range', Object.keys(RANGES), S.range)}</div>
+      <div class="charthead"><div style="display:flex;gap:8px;flex-wrap:wrap">${seg('mode', Object.values(MODES), MODES[S.mode])}${S.mode === 'kauf' ? seg('cmp', Object.keys(CMP), CMP[S.cmp] ? S.cmp : 'Gesamt') : ''}</div>${seg('range', Object.keys(RANGES), S.range)}</div>
       <div class="chart" id="ch-main"></div><div id="lg-main"></div>
-      <p class="hint">${S.mode === 'positionen' ? 'Wertentwicklung und Diagramm: deine heutigen Bestände, mit den Kursen der Vergangenheit zurückgerechnet. S&P 500 und Bitcoin mit gleichem Startwert, alles in Euro.' : 'Depotwert und eingesetztes Geld seit deinen eingetragenen Käufen.'}</p></section>
+      ${S.mode === 'kauf' ? cmpTable(c) : '<p class="hint">Deine heutigen Bestände, mit den Kursen der Vergangenheit zurückgerechnet. So sieht man, wie sich das Depot in seiner jetzigen Zusammensetzung entwickelt hätte.</p>'}</section>
     ${card('Heatmap', 'Fläche nach Anteil am Depot, Farbe nach ' + (hm === 'Heute' ? 'Tagesbewegung' : 'Gewinn seit Kauf'), `<div class="tm" id="tm"></div>
       <div class="scale"><span class="num">${hm === 'Heute' ? '−3 %' : '−50 %'}</span><i></i><span class="num">${hm === 'Heute' ? '+3 %' : '+50 %'}</span><span style="margin-left:auto">Krypto-Skala doppelt so weit</span></div>`, seg('hm', ['Heute', 'Seit Kauf'], hm))}
     </div>
@@ -187,21 +218,20 @@ function drawCharts() {
       if (bc && bc.d.length > 1) {
         const from = bc.d[bc.d.length - 1] - RANGES[S.range];
         let i0 = bc.d.findIndex(d => d >= from); if (i0 < 0) i0 = 0;
-        const d = bc.d.slice(i0), base = bc.v[i0], eu = v => nf(v, 0) + ' €';
-        const s = [{name: 'Heutige Positionen', color: 'var(--accent)', area: true, pts: d.map((x, i) => [x, bc.v[i0 + i]])}];
-        const sp = benchIndex('SP500', d), bt = benchIndex('BTC', d);
-        if (sp) s.push({name: 'S&P 500', color: 'var(--s3)', thin: true, pts: d.map((x, i) => [x, base * sp[i]])});
-        if (bt) s.push({name: 'Bitcoin', color: 'var(--s2)', thin: true, pts: d.map((x, i) => [x, base * bt[i]])});
-        lineChart('#ch-main', s, {fmt: eu, label: 'Wertentwicklung der heutigen Positionen im Vergleich', height: 260});
+        const s = [{name: 'Heutige Positionen', color: 'var(--accent)', area: true, pts: bc.d.slice(i0).map((x, i) => [x, bc.v[i0 + i]])}];
+        lineChart('#ch-main', s, {fmt: v => nf(v, 0) + ' €', label: 'Wert der heutigen Positionen, zurückgerechnet', height: 260});
         $('#lg-main').innerHTML = legend(s);
       } else $('#ch-main').innerHTML = '<p class="empty">Die Rückrechnung kommt mit der nächsten täglichen Aktualisierung.</p>';
     } else if (c.series.d.length > 1) {
-      const from = c.series.d[c.series.d.length - 1] - RANGES[S.range];
-      let i0 = c.series.d.findIndex(d => d >= from); if (i0 < 0) i0 = 0;
-      const d = c.series.d.slice(i0);
-      const s = [{name: 'Depotwert', color: 'var(--accent)', area: true, pts: d.map((x, i) => [x, c.series.v[i0 + i]])},
-        {name: 'Eingesetzt', color: 'var(--ink3)', dash: true, thin: true, pts: d.map((x, i) => [x, c.series.inv[i0 + i]])}];
-      lineChart('#ch-main', s, {fmt: v => nf(v, 0) + ' €', label: 'Depotwert seit Kauf', height: 260});
+      const sr = c.series, cm = CMP[S.cmp] ? S.cmp : 'Gesamt';
+      const from = sr.d[sr.d.length - 1] - RANGES[S.range];
+      let i0 = sr.d.findIndex(d => d >= from); if (i0 < 0) i0 = 0;
+      const d = sr.d.slice(i0), at = f => d.map((x, i) => [x, f(i0 + i)]);
+      const [val, ben, inv] = {Gesamt: [i => sr.v[i], i => sr.ba[i] + sr.bk[i], i => sr.inv[i]], Aktien: [i => sr.va[i], i => sr.ba[i], i => sr.ia[i]], Krypto: [i => sr.vk[i], i => sr.bk[i], i => sr.ik[i]]}[cm];
+      const s = [{name: CMP[cm][0], color: 'var(--accent)', area: true, pts: at(val)}];
+      if (sr.bench) s.push({name: CMP[cm][1], color: 'var(--s2)', pts: at(ben)});
+      s.push({name: 'Eingesetzt', color: 'var(--ink3)', dash: true, thin: true, pts: at(inv)});
+      lineChart('#ch-main', s, {fmt: v => nf(v, 0) + ' €', label: 'Depotwert seit Kauf im Vergleich mit gleichen Käufen', height: 260});
       $('#lg-main').innerHTML = legend(s);
     }
   }
@@ -289,8 +319,8 @@ function vWatch() {
   const rows = wl.map(w => ({key: keyOf(w.kind, w.symbol)})).filter(r => f === 'Alle' || typeOf(r.key) === f);
   return `<div class="grid">
     <section class="card"><div class="toolbar"><div>${flt('watch', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
-      <div class="sumline"><b>${rows.length}</b> Titel beobachtet · Zeile antippen für Analyse und Kennzahlen</div><button class="btn" data-act="addwatch">Titel hinzufügen</button></div>
-      ${wl.length ? tbl('watch', [COL.name, COL.spark, COL.price, COL.day, COL.m1, COL.rng, COL.zone], rows, ['name', 1]) : '<p class="empty">Noch nichts auf der Watchlist.</p>'}</section>
+      <div class="sumline"><b>${rows.length}</b> Titel beobachtet · Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet · Zeile antippen für die Gründe</div><button class="btn" data-act="addwatch">Titel hinzufügen</button></div>
+      ${wl.length ? tbl('watch', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.m1, COL.rng, COL.zone], rows, ['name', 1]) : '<p class="empty">Noch nichts auf der Watchlist.</p>'}</section>
     <div class="grid half">
     ${card('Alerts', 'Push aufs Handy, sobald eine Schwelle erreicht ist', (al.length ? `<div class="rows tight">${al.map(a => { const fd = st[a.id];
       return `<div class="row"><div class="l"><div class="t"><span class="sym" style="margin:0;color:inherit">${esc(a.symbol)}</span><span>${esc(alertText(a))}</span></div>
@@ -462,6 +492,7 @@ document.addEventListener('click', async ev => {
   else if (act === 'range') { S.range = v; render(); }
   else if (act === 'mode') { S.mode = Object.keys(MODES).find(k => MODES[k] === v) || 'positionen'; render(); }
   else if (act === 'hm') { S.hm = v; render(); }
+  else if (act === 'cmp') { S.cmp = v; render(); }
   else if (act === 'alloc') { S.alloc = v; render(); }
   else if (act === 'theme') { applyTheme(v === 'Hell' ? 'light' : v === 'Dunkel' ? 'dark' : ''); vSettings(); render(); }
   else if (act === 'searchopen') { const t = $('.top'); t.classList.add('searching'); $('#q').focus(); }
@@ -542,6 +573,15 @@ document.addEventListener('input', ev => {
   box.hidden = !q;
   box.innerHTML = hits.length ? hits.map(k => `<button data-act="open" data-key="${esc(k)}"><span class="sym" style="min-width:64px">${esc(k.split(':')[1])}</span><span class="ts">${esc(nameOf(k))}</span>${chg(A(k).change_pct, 1)}</button>`).join('') : '<p class="empty" style="padding:10px 12px">Kein Titel gefunden. Neue Titel fügst du in der Watchlist hinzu.</p>';
 });
+// Kuchendiagramm: Anteil des Segments in der Mitte zeigen, solange der Zeiger darauf liegt
+document.addEventListener('mouseover', ev => {
+  const sl = ev.target.closest('[data-slice]'), box = ev.target.closest('.alloc');
+  if (!box) return;
+  const dc = box.querySelector('.dc'), path = sl && box.querySelector(`path[data-slice="${sl.dataset.slice}"]`);
+  box.querySelectorAll('path').forEach(p => p.style.opacity = path && p !== path ? '.35' : '');
+  dc.innerHTML = path ? `<span class="n">${esc(path.dataset.name)}</span><b class="num">${esc(path.dataset.pct)}</b><span class="n num">${esc(path.dataset.val)}</span>` : `<span class="n">${esc(dc.dataset.defN)}</span><b class="num">${esc(dc.dataset.defV)}</b>`;
+});
+document.addEventListener('mouseleave', ev => { if (ev.target.classList && ev.target.classList.contains('alloc')) { ev.target.querySelectorAll('path').forEach(p => p.style.opacity = ''); const dc = ev.target.querySelector('.dc'); dc.innerHTML = `<span class="n">${esc(dc.dataset.defN)}</span><b class="num">${esc(dc.dataset.defV)}</b>`; } }, true);
 document.addEventListener('click', ev => { const q = $('#qres'); if (q && !ev.target.closest('.search')) q.hidden = true; });
 let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawCharts, 150); });
 document.addEventListener('visibilitychange', async () => { if (document.hidden || !S.pf) return; if (Date.now() - (S.loaded || 0) > 6e4 && $('#sheet').hidden && !S.auto) { await loadAll(); S.loaded = Date.now(); render(); } autoRefresh(); });
