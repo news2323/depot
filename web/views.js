@@ -97,11 +97,9 @@ function vHome(c) {
     `<p class="x" style="color:var(--ink2);line-height:1.55;margin:0">Du gibst Aktien und Coins mit Kaufdatum, Stückzahl und Preis ein. Kurse, Dividenden, Quartalstermine,
     Krypto-Flows und Nachkauf-Zonen kommen automatisch dazu.</p><div class="btnrow"><button class="btn" data-act="addtx">Ersten Kauf eintragen</button>
     <button class="btn ghost" data-act="addwatch">Titel beobachten</button></div>`)}</div>`;
-  const fired = firedAlerts(), ap = S.analysis.portfolio;
+  const ap = S.analysis.portfolio;
   const movers = c.held.filter(p => p.dayPct != null).sort((a, b) => Math.abs(b.dayPct) - Math.abs(a.dayPct)).slice(0, 5);
   const cal = (S.digest.calendar || []).filter(e => isMine(e) || e.category === 'Fed' || e.category === 'Makro').slice(0, 6), top = c.held[0];
-  const syms = (l, n = 4) => l.slice(0, n).map(k => esc(String(k.key || k.k || k).split(':')[1])).join(', ') + (l.length > n ? ` und ${l.length - n} weitere` : '');
-  const ins = (n, label, text, tone, act) => `<button class="ins ${tone}" ${act}><div class="n num">${n}</div><div class="tx"><b>${label}</b><span>${text}</span></div></button>`;
   return `<div class="grid two"><div class="col">
     <section class="card hero"><div class="herotop"><div><div class="label">Gesamtwert</div><div class="value num">${eur(c.value)}</div>
       <div class="row">${pill(c.dayPct)}<span class="num">${eurS(c.dayEur)} heute</span></div></div>
@@ -110,7 +108,6 @@ function vHome(c) {
       <div class="charthead">${seg('mode', ['Wert', 'Rendite'], S.mode === 'wert' ? 'Wert' : 'Rendite')}${seg('range', Object.keys(RANGES), S.range)}</div>
       <div class="chart" id="ch-main"></div><div id="lg-main"></div>
       <p class="tiny muted" style="margin:8px 0 0">${S.mode === 'wert' ? 'Depotwert und eingesetztes Geld in Euro.' : 'Rendite ohne Einzahlungen, verglichen mit S&P 500 und Bitcoin in Euro.'}</p></section>
-    ${fired.length ? `<div class="insrow">${ins(fired.length, 'Alerts ausgelöst', syms(fired.map(a => 'x:' + a.symbol)), 'warn', 'data-act="tab" data-v="watch"')}</div>` : ''}
     ${ap ? card('Einschätzung', 'Recherche von Claude, ' + esc(ago(ap.at)), `<p class="lead">${esc(ap.headline)}</p><p class="body">${esc(ap.summary)}</p>
       ${(ap.buy_candidates || []).length ? `<p class="sh">Nachkauf-Kandidaten</p><div class="rows">${ap.buy_candidates.map(b => `<div class="row"><div class="l"><div class="t">${esc(b.symbol)}<span>${esc(b.level)}</span></div><div class="x">${esc(b.reason)}</div></div></div>`).join('')}</div>` : ''}
       ${(ap.risks || []).length ? `<p class="sh">Risiken</p><ul class="dots">${ap.risks.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}`) : ''}
