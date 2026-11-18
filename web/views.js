@@ -156,11 +156,13 @@ function cmpTable(c) {
   const rows = [['Aktien &amp; ETFs', 'S&amp;P 500', sr.ia[n], sr.va[n], sr.ba[n]], ['Krypto', 'Bitcoin', sr.ik[n], sr.vk[n], sr.bk[n]]].filter(r => r[2] > 0.5 || r[3] > 0.5);
   if (rows.length > 1) rows.push(['Gesamt', 'beide', sr.inv[n], sr.v[n], sr.ba[n] + sr.bk[n]]);
   const unknown = c.txs.filter(t => /Kaufdatum unbekannt/i.test(t.note || '')), uday = unknown.length ? dateDe(unknown[0].date) : '';
+  const guessed = c.txs.filter(t => /Kaufdatum geschätzt/i.test(t.note || ''));
   return `${sr.bench ? `<div class="tblwrap" style="margin-top:14px"><table class="tbl cmp"><thead><tr><th>Teil</th><th class="r">Eingesetzt</th><th class="r">Dein Wert</th><th class="r">Mit Index</th><th class="r">Vorsprung</th></tr></thead><tbody>
     ${rows.map(r => `<tr class="${r[0] === 'Gesamt' ? 'sum' : ''}"><td><b>${r[0]}</b><div class="ts">gegen ${r[1]}</div></td><td class="r num">${eur(r[2], 0)}</td><td class="r num">${eur(r[3], 0)}<div class="ts ${sign(r[3] - r[2])}">${eurS0(r[3] - r[2])}</div></td>
       <td class="r num">${eur(r[4], 0)}<div class="ts ${sign(r[4] - r[2])}">${eurS0(r[4] - r[2])}</div></td><td class="r num ${sign(r[3] - r[4])}"><b>${eurS0(r[3] - r[4])}</b></td></tr>`).join('')}</tbody></table></div>` : ''}
     <p class="hint">Jeder Kauf von Aktien und ETFs geht am selben Tag mit demselben Euro-Betrag in den S&P 500, jeder Krypto-Kauf in Bitcoin. Verkäufe ziehen denselben Betrag wieder ab. S&P 500 als Kursindex ohne Dividenden, alles in Euro.</p>
-    ${unknown.length ? `<div class="note"><b>${unknown.length} Buchungen ohne echtes Kaufdatum.</b> Die Positionen aus comdirect stehen mit dem ${uday} im Depot, weil das Kaufdatum fehlte. Für sie rechnet der Vergleich mit den Kursen von diesem Tag: Ihr Gewinn aus der Zeit davor erscheint deshalb als Vorsprung gegenüber dem Index. Mit den echten Kaufdaten wird der Vergleich genau.</div>` : ''}`;
+    ${unknown.length ? `<div class="note"><b>${unknown.length} Buchungen ohne echtes Kaufdatum.</b> Die Positionen aus comdirect stehen mit dem ${uday} im Depot, weil das Kaufdatum fehlte. Für sie rechnet der Vergleich mit den Kursen von diesem Tag: Ihr Gewinn aus der Zeit davor erscheint deshalb als Vorsprung gegenüber dem Index. Mit den echten Kaufdaten wird der Vergleich genau.</div>` : ''}
+    ${guessed.length ? `<p class="hint">${guessed.length} Kaufdaten aus comdirect sind geschätzt: der letzte Tag vor dem 18.11.2024, an dem der Kurs bei deinem Einstandskurs lag. Bei mehreren Käufen zu verschiedenen Preisen stimmt das nur ungefähr.</p>` : ''}`;
 }
 function attribution(c) {
   const ps = c.held.filter(p => p.dayEur != null && Math.abs(p.dayEur) >= 0.005);
