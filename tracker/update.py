@@ -259,18 +259,22 @@ def run_daily(store):
     pf = store.get("portfolio.json") or empty_portfolio()
     market = (store.get("market.json") or {}).get("assets") or {}
     assets = tracked_assets(pf)
+    # Verläufe müssen bis zum ersten Kauf reichen, sonst rechnet der Vergleich alte Käufe mit späteren Kursen
+    first = min((str(t.get("date") or "")[:10] for t in pf.get("transactions") or [] if t.get("date")), default="")
+    rng = "10y" if first and first < (datetime.date.today() - datetime.timedelta(days=5 * 365 - 30)).isoformat() else "5y"
+    first_day = (datetime.date.fromisoformat(first) - datetime.date(1970, 1, 1)).days if first else None
     yf = sources.YahooFundamentals()
     onchain = sources.onchain_revenue([a["symbol"] for a in assets.values() if a["kind"] == "crypto"])
     out, currencies = {}, {"USD"}
     # Gesamtmarkt als Maßstab: ein Rückgang zählt nur, wenn der Titel nicht deutlich schwächer läuft als der Markt
     hist_cache, market_6m = {}, {}
     for kind, sym in (("stock", "^GSPC"), ("crypto", "BTC")):
-        h = sources.crypto_history(sym) if kind == "crypto" else sources.stock_history(sym)
+        h = sources.crypto_history(sym) if kind == "crypto" else sources.stock_history(sym, rng)
         hist_cache[asset_key(kind, sym)] = h
         market_6m[kind] = _perf_6m(h, kind == "crypto")
     for key, a in assets.items():
         crypto = a["kind"] == "crypto"
-        h = hist_cache.get(key) or (sources.crypto_history(a["symbol"]) if crypto else sources.stock_history(a["symbol"]))
+        h = hist_cache.get(key) or (sources.crypto_history(a["symbol"]) if crypto else sources.stock_history(a["symbol"], rng))
         if not h or len(h["c"]) < 2:
             continue
         currencies.add(h["currency"])
@@ -308,10 +312,14 @@ def run_daily(store):
     bench = {}
     for name, (kind, sym, label) in BENCH.items():
         key = asset_key(kind, sym)
-        if key in out:
-            bench[name] = dict(out[key]["hist"], label=label, currency=out[key]["currency"])
+        h = out[key]["hist"] if key in out else hist_cache.get(key)
+        if h and first_day is not None and h["d"] and h["d"][0] > first_day:
+            # Binance liefert bei Bitcoin nur gut 1000 Tage: dann den längeren Verlauf von Yahoo nehmen
+            h = sources.stock_history(sym + "-USD" if kind == "crypto" else sym, rng) or h
+        if h and key in out and h is out[key]["hist"]:
+            bench[name] = dict(h, label=label, currency=out[key]["currency"])
             continue
-        h = hist_cache.get(key) or (sources.crypto_history(sym) if kind == "crypto" else sources.stock_history(sym))
+        h = h or (sources.crypto_history(sym) if kind == "crypto" else sources.stock_history(sym, rng))
         if h:
             bench[name] = {"d": h["d"], "c": h["c"], "label": label, "currency": h["currency"]}
     # Stimmung ohne Schlüssel: Reddit-Erwähnungen je Titel, Angst und Gier bei Krypto
@@ -329,7 +337,7 @@ def run_daily(store):
     fx = {}
     for cur in sorted(currencies):
         if cur != "EUR":
-            h = sources.fx_history(cur)
+            h = sources.fx_history(cur, rng)
             if h:
                 fx[cur] = h
     store.put("daily.json", {"updated": now_iso(), "assets": out, "bench": bench, "sector_bench": sector_bench, "crypto_fg": crypto_fg, "fx": fx,

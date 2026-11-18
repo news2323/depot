@@ -228,15 +228,15 @@ function calc() {
   }
 
   // Verlauf: Wert, eingesetztes Geld und zeitgewichtete Rendite (Einzahlungen herausgerechnet).
-  // Dazu der Vergleich mit gleichen Käufen: jeder Kauf von Aktien und ETFs geht am selben Tag mit demselben Euro-Betrag
-  // in den S&P 500, jeder Krypto-Kauf in Bitcoin. Verkäufe ziehen denselben Betrag wieder ab. Getrennt nach Teil:
-  // a = Aktien und ETFs, k = Krypto.
-  const series = {d: [], v: [], inv: [], twr: [], va: [], vk: [], ia: [], ik: [], ba: [], bk: [], bench: false};
+  // Dazu der Vergleich mit gleichen Käufen in zwei Szenarien: jeder Kauf geht am selben Tag mit demselben Euro-Betrag
+  // ganz in den S&P 500 (s) bzw. ganz in Bitcoin (b). Verkäufe ziehen denselben Betrag wieder ab.
+  // Getrennt nach Teil (a = Aktien und ETFs, k = Krypto), damit die Ansichten Aktien und Krypto einzeln rechnen.
+  const series = {d: [], v: [], inv: [], twr: [], va: [], vk: [], ia: [], ik: [], as: [], ab: [], ks: [], kb: [], bench: false};
   if (txs.length) {
     const end = todayDay(), qty = {}; let ti = 0, inv = 0, prev = 0, idx = 1;
-    const part = k => k.startsWith('crypto:') ? 'k' : 'a', units = {a: 0, k: 0}, net = {a: 0, k: 0};
-    const bp = {a: d => benchAt('SP500', d), k: d => benchAt('BTC', d)};
-    series.bench = !!(bp.a(end) && bp.k(end));
+    const part = k => k.startsWith('crypto:') ? 'k' : 'a', units = {a: {s: 0, b: 0}, k: {s: 0, b: 0}}, net = {a: 0, k: 0};
+    const bp = {s: d => benchAt('SP500', d), b: d => benchAt('BTC', d)};
+    series.bench = !!(bp.s(end) && bp.b(end));
     for (let day = txs[0].day; day <= end; day++) {
       let cf = 0;
       while (ti < txs.length && txs[ti].day <= day) {
@@ -244,10 +244,11 @@ function calc() {
         qty[t.key] = (qty[t.key] || 0) + (t.type === 'buy' ? t.qty : -t.qty);
         const amt = t.type === 'buy' ? (t.qty * t.price + t.fee) / rate : -(t.qty * t.price - t.fee) / rate;
         cf += amt; net[p] += amt;
-        const bpx = bp[p](day);
-        if (bpx) {
-          if (amt > 0) units[p] += amt / bpx;
-          else { const val = units[p] * bpx; units[p] = val > 0 ? units[p] * Math.max(0, 1 + amt / val) : 0; }
+        for (const b of ['s', 'b']) {
+          const bpx = bp[b](day), u = units[p];
+          if (!bpx) continue;
+          if (amt > 0) u[b] += amt / bpx;
+          else { const val = u[b] * bpx; u[b] = val > 0 ? u[b] * Math.max(0, 1 + amt / val) : 0; }
         }
       }
       let v = 0; const vp = {a: 0, k: 0};
@@ -261,7 +262,8 @@ function calc() {
       prev = v;
       series.d.push(day); series.v.push(v); series.inv.push(inv); series.twr.push(idx);
       series.va.push(vp.a); series.vk.push(vp.k); series.ia.push(net.a); series.ik.push(net.k);
-      series.ba.push(units.a * (bp.a(day) || 0)); series.bk.push(units.k * (bp.k(day) || 0));
+      const ps = bp.s(day) || 0, pb = bp.b(day) || 0;
+      series.as.push(units.a.s * ps); series.ab.push(units.a.b * pb); series.ks.push(units.k.s * ps); series.kb.push(units.k.b * pb);
     }
   }
   // Risiko aus der zeitgewichteten Rendite

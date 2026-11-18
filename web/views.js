@@ -24,7 +24,7 @@ const tile = (l, v, n = '', cls = '') => `<div class="tile"><div class="l">${l}<
 const stat = (l, v, n = '', cls = '') => `<div class="stat"><div class="l">${l}</div><div class="v num ${cls}">${v}</div>${n ? `<div class="n">${n}</div>` : ''}</div>`;
 const seg = (act, opts, cur) => `<div class="seg">${opts.map(o => `<button data-act="${act}" data-v="${o}" class="${o === cur ? 'on' : ''}">${o}</button>`).join('')}</div>`;
 const MODES = {kauf: 'Seit Kauf', positionen: 'Heutige Positionen'};
-const CMP = {Gesamt: ['Dein Depot', 'Gleiche Käufe in S&P 500 und Bitcoin'], Aktien: ['Deine Aktien und ETFs', 'Gleiche Käufe im S&P 500'], Krypto: ['Dein Krypto', 'Gleiche Käufe in Bitcoin']};
+const CMP = {Gesamt: 'Dein Depot', Aktien: 'Deine Aktien und ETFs', Krypto: 'Dein Krypto'};
 
 function render() {
   if (!LOCAL && !cfg) return renderSetup();
@@ -148,19 +148,21 @@ function donut(groups, tot, dim) {
   return `<div class="donut"><svg viewBox="0 0 180 180" role="img" aria-label="Aufteilung nach ${esc(dim)}">${paths}</svg>
     <div class="dc" data-def-n="${esc(dim)}" data-def-v="${esc(eur(tot, 0))}"><span class="n">${esc(dim)}</span><b class="num">${eur(tot, 0)}</b></div></div>`;
 }
-// Vergleich mit gleichen Käufen: gleiche Beträge an denselben Tagen in S&P 500 (Aktien und ETFs) bzw. Bitcoin (Krypto)
+// Vergleich mit gleichen Käufen: jeder Kauf ganz in den S&P 500 bzw. ganz in Bitcoin (zwei Szenarien)
 const eurS0 = v => v == null || isNaN(v) ? '–' : (v >= 0 ? '+' : '−') + nf(Math.abs(v), 0) + ' €';
 function cmpTable(c) {
   const sr = c.series, n = sr.d.length - 1;
   if (n < 0) return '';
-  const rows = [['Aktien &amp; ETFs', 'S&amp;P 500', sr.ia[n], sr.va[n], sr.ba[n]], ['Krypto', 'Bitcoin', sr.ik[n], sr.vk[n], sr.bk[n]]].filter(r => r[2] > 0.5 || r[3] > 0.5);
-  if (rows.length > 1) rows.push(['Gesamt', 'beide', sr.inv[n], sr.v[n], sr.ba[n] + sr.bk[n]]);
+  // [Teil, eingesetzt, dein Wert, alles in S&P 500, alles in Bitcoin]
+  const rows = [['Aktien &amp; ETFs', sr.ia[n], sr.va[n], sr.as[n], sr.ab[n]], ['Krypto', sr.ik[n], sr.vk[n], sr.ks[n], sr.kb[n]]].filter(r => r[1] > 0.5 || r[2] > 0.5);
+  if (rows.length > 1) rows.push(['Gesamt', sr.inv[n], sr.v[n], sr.as[n] + sr.ks[n], sr.ab[n] + sr.kb[n]]);
+  const cell = (x, r) => `<td class="r num">${eur(x, 0)}<div class="ts ${sign(r[2] - x)}">du ${eurS0(r[2] - x)}</div></td>`;
   const unknown = c.txs.filter(t => /Kaufdatum unbekannt/i.test(t.note || '')), uday = unknown.length ? dateDe(unknown[0].date) : '';
   const guessed = c.txs.filter(t => /Kaufdatum geschätzt/i.test(t.note || ''));
-  return `${sr.bench ? `<div class="tblwrap" style="margin-top:14px"><table class="tbl cmp"><thead><tr><th>Teil</th><th class="r">Eingesetzt</th><th class="r">Dein Wert</th><th class="r">Mit Index</th><th class="r">Vorsprung</th></tr></thead><tbody>
-    ${rows.map(r => `<tr class="${r[0] === 'Gesamt' ? 'sum' : ''}"><td><b>${r[0]}</b><div class="ts">gegen ${r[1]}</div></td><td class="r num">${eur(r[2], 0)}</td><td class="r num">${eur(r[3], 0)}<div class="ts ${sign(r[3] - r[2])}">${eurS0(r[3] - r[2])}</div></td>
-      <td class="r num">${eur(r[4], 0)}<div class="ts ${sign(r[4] - r[2])}">${eurS0(r[4] - r[2])}</div></td><td class="r num ${sign(r[3] - r[4])}"><b>${eurS0(r[3] - r[4])}</b></td></tr>`).join('')}</tbody></table></div>` : ''}
-    <p class="hint">Jeder Kauf von Aktien und ETFs geht am selben Tag mit demselben Euro-Betrag in den S&P 500, jeder Krypto-Kauf in Bitcoin. Verkäufe ziehen denselben Betrag wieder ab. S&P 500 als Kursindex ohne Dividenden, alles in Euro.</p>
+  return `${sr.bench ? `<div class="tblwrap" style="margin-top:14px"><table class="tbl cmp"><thead><tr><th>Teil</th><th class="r">Eingesetzt</th><th class="r">Dein Wert</th><th class="r">Alles in S&amp;P 500</th><th class="r">Alles in Bitcoin</th></tr></thead><tbody>
+    ${rows.map(r => `<tr class="${r[0] === 'Gesamt' ? 'sum' : ''}"><td><b>${r[0]}</b></td><td class="r num">${eur(r[1], 0)}</td><td class="r num"><b>${eur(r[2], 0)}</b><div class="ts ${sign(r[2] - r[1])}">${eurS0(r[2] - r[1])}</div></td>
+      ${cell(r[3], r)}${cell(r[4], r)}</tr>`).join('')}</tbody></table></div>` : ''}
+    <p class="hint">Zwei Szenarien: Jeder deiner Käufe geht am selben Tag mit demselben Euro-Betrag ganz in den S&P 500 bzw. ganz in Bitcoin, Verkäufe ziehen denselben Betrag wieder ab. „du“ ist dein Vorsprung (+) oder Rückstand (−). S&P 500 als Kursindex ohne Dividenden, alles in Euro.</p>
     ${unknown.length ? `<div class="note"><b>${unknown.length} Buchungen ohne echtes Kaufdatum.</b> Die Positionen aus comdirect stehen mit dem ${uday} im Depot, weil das Kaufdatum fehlte. Für sie rechnet der Vergleich mit den Kursen von diesem Tag: Ihr Gewinn aus der Zeit davor erscheint deshalb als Vorsprung gegenüber dem Index. Mit den echten Kaufdaten wird der Vergleich genau.</div>` : ''}
     ${guessed.length ? `<p class="hint">${guessed.length} Kaufdaten aus comdirect sind geschätzt: der letzte Tag vor dem 18.11.2024, an dem der Kurs bei deinem Einstandskurs lag. Bei mehreren Käufen zu verschiedenen Preisen stimmt das nur ungefähr.</p>` : ''}`;
 }
@@ -236,9 +238,10 @@ function drawCharts() {
       const from = sr.d[sr.d.length - 1] - RANGES[S.range];
       let i0 = sr.d.findIndex(d => d >= from); if (i0 < 0) i0 = 0;
       const d = sr.d.slice(i0), at = f => d.map((x, i) => [x, f(i0 + i)]);
-      const [val, ben, inv] = {Gesamt: [i => sr.v[i], i => sr.ba[i] + sr.bk[i], i => sr.inv[i]], Aktien: [i => sr.va[i], i => sr.ba[i], i => sr.ia[i]], Krypto: [i => sr.vk[i], i => sr.bk[i], i => sr.ik[i]]}[cm];
-      const s = [{name: CMP[cm][0], color: 'var(--accent)', area: true, pts: at(val)}];
-      if (sr.bench) s.push({name: CMP[cm][1], color: 'var(--s2)', pts: at(ben)});
+      const [val, bs, bb, inv] = {Gesamt: [i => sr.v[i], i => sr.as[i] + sr.ks[i], i => sr.ab[i] + sr.kb[i], i => sr.inv[i]],
+        Aktien: [i => sr.va[i], i => sr.as[i], i => sr.ab[i], i => sr.ia[i]], Krypto: [i => sr.vk[i], i => sr.ks[i], i => sr.kb[i], i => sr.ik[i]]}[cm];
+      const s = [{name: CMP[cm], color: 'var(--accent)', area: true, pts: at(val)}];
+      if (sr.bench) s.push({name: 'Alles in S&P 500', color: 'var(--s2)', pts: at(bs)}, {name: 'Alles in Bitcoin', color: 'var(--s7)', pts: at(bb)});
       s.push({name: 'Eingesetzt', color: 'var(--ink3)', dash: true, thin: true, pts: at(inv)});
       lineChart('#ch-main', s, {fmt: v => nf(v, 0) + ' €', label: 'Depotwert seit Kauf im Vergleich mit gleichen Käufen', height: 260});
       $('#lg-main').innerHTML = legend(s);
