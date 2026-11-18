@@ -281,9 +281,9 @@ function vDepot(c) {
     <section class="card"><div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">${stat('Wert', eur(sumV, 0), rows.length + (rows.length === 1 ? ' Position' : ' Positionen'))}
       ${stat('Gewinn offen', eurS(sumP), sumV - sumP > 0 ? pctS(sumP / (sumV - sumP) * 100, 1) : '', sign(sumP))}${stat('Heute', eurS(sumD), '', sign(sumD))}${stat('Dividenden pro Jahr', eur(c.divYear, 0), 'erwartet, brutto')}</div></section>
     <section class="card"><div class="toolbar"><div>${flt('depot', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
-      <div class="sumline">Spalten per Klick sortieren, Zeile antippen für Analyse und Kennzahlen.</div>
+      <div class="sumline">Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet · Spalten per Klick sortieren, Zeile antippen für die Gründe.</div>
       <button class="btn" data-act="addtx">Kauf oder Verkauf</button></div>
-      ${c.held.length ? tbl('depot', [COL.name, COL.spark, COL.price, COL.day, COL.value, COL.pnl, COL.weight, COL.rng], rows, ['value', -1]) : '<p class="empty">Trag oben deinen ersten Kauf ein.</p>'}</section>
+      ${c.held.length ? tbl('depot', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.value, COL.pnl, COL.weight, COL.rng], rows, ['value', -1]) : '<p class="empty">Trag oben deinen ersten Kauf ein.</p>'}</section>
     ${divCard(c)}
     <details class="card fold"><summary><div><h2>Buchungen</h2><p class="sub">${txs.length} eingetragene Käufe und Verkäufe</p></div><span class="chev"></span></summary>
       ${txs.length ? `<div class="rows">${txs.map(t => `<button class="row" data-act="edittx" data-id="${esc(t.id)}"><div class="l">
