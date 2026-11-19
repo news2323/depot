@@ -427,7 +427,7 @@ function spark7(key) {
   const pts = c.map((v, i) => [(1 + i * k).toFixed(1), y(v).toFixed(1)]);
   const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ' ' + p[1]).join('');
   const up = c[c.length - 1] >= c[0], col = `var(--${up ? 'up' : 'down'})`, id = 'sg' + (++sparkN);
-  return `<svg class="spark7" viewBox="0 0 ${W} ${H}" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+  return `<svg class="spark7" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0" stop-color="${col}" stop-opacity=".28"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
     <path d="${d}L${pts[pts.length - 1][0]} ${H}L${pts[0][0]} ${H}Z" fill="url(#${id})" stroke="none"/><path d="${d}" fill="none" style="stroke:${col}"/></svg>`;
 }
