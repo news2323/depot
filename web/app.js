@@ -177,9 +177,16 @@ function priceAt(key, day) {
   return i >= 0 ? h.c[i] : h.c[0];
 }
 
+// Teildepots: jede Buchung trägt `depot` (ohne Feld: Hauptdepot). Die Auswahl gilt nur auf diesem Gerät.
+const depots = () => (S.pf.depots && S.pf.depots.length ? S.pf.depots : [{id: 'main', name: 'Hauptdepot'}]);
+const depOf = t => t.depot || 'main';
+const depName = id => (depots().find(d => d.id === id) || {}).name || id;
+try { S.dep = localStorage.getItem('depot_dep') || 'all'; } catch (e) { S.dep = 'all'; }
+function setDep(id) { S.dep = id; S.calc = null; try { localStorage.setItem('depot_dep', id); } catch (e) { /* egal */ } }
 function calc() {
   if (S.calc) return S.calc;
-  const txs = (S.pf.transactions || []).map(t => Object.assign({}, t, {day: isoToDay(t.date), key: keyOf(t.kind, t.symbol),
+  if (S.dep !== 'all' && !depots().some(d => d.id === S.dep)) S.dep = 'all';
+  const txs = (S.pf.transactions || []).filter(t => S.dep === 'all' || depOf(t) === S.dep).map(t => Object.assign({}, t, {day: isoToDay(t.date), key: keyOf(t.kind, t.symbol),
     qty: +t.qty || 0, price: +t.price || 0, fee: +t.fee || 0, currency: t.currency || 'EUR'}))
     .filter(t => !isNaN(t.day)).sort((a, b) => a.day - b.day || (a.type === 'buy' ? -1 : 1));
   // Positionen (FIFO)
@@ -203,12 +210,15 @@ function calc() {
   }
   const pos = Object.keys(lots).map(key => {
     const a = A(key), qty = lots[key].reduce((s, x) => s + x[0], 0), cost = lots[key].reduce((s, x) => s + x[1], 0);
-    const price = a.error ? null : a.price ?? null, rate = fxNow(curOf(key)) || 1;
-    const value = price == null ? null : qty * price / rate, chg = a.change_pct;
+    const avgNative = native[key] && native[key].q ? native[key].c / native[key].q : null;
+    let price = a.error ? null : a.price ?? null, noQuote = false, chg = a.change_pct;
+    // Noch kein Kurs (z. B. Börsengang am selben Tag): bis zum ersten Kurs mit dem Kaufkurs rechnen
+    if (price == null && !(D(key).hist || {}).d && avgNative != null) { price = avgNative; noQuote = true; chg = null; }
+    const rate = fxNow(curOf(key)) || 1, value = price == null ? null : qty * price / rate;
     return {key, kind: key.split(':')[0], symbol: key.split(':')[1], name: nameOf(key), qty, cost, value, price, cur: curOf(key),
       realized: realized[key] || 0, pnl: value == null ? null : value - cost, pnlPct: value != null && cost > 0 ? (value / cost - 1) * 100 : null,
       dayPct: chg, dayEur: value != null && chg != null && chg > -100 ? value - value / (1 + chg / 100) : null,
-      avgNative: native[key] && native[key].q ? native[key].c / native[key].q : null};
+      avgNative, noQuote};
   });
   const held = pos.filter(p => p.qty > 1e-12).sort((a, b) => (b.value || 0) - (a.value || 0));
   const value = held.reduce((s, p) => s + (p.value || 0), 0), cost = held.reduce((s, p) => s + p.cost, 0);

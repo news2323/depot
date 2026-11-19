@@ -22,6 +22,9 @@ const toneClass = t => ({good: 'good', bad: 'bad', warn: 'warn'}[t] || '');
 const card = (title, sub, inner, extra = '', cls = '') => `<section class="card ${cls}"><div class="head"><div><h2>${title}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${extra}</div>${inner}</section>`;
 const tile = (l, v, n = '', cls = '') => `<div class="tile"><div class="l">${l}</div><div class="v num ${cls}">${v}</div>${n ? `<div class="n">${n}</div>` : ''}</div>`;
 const stat = (l, v, n = '', cls = '') => `<div class="stat"><div class="l">${l}</div><div class="v num ${cls}">${v}</div>${n ? `<div class="n">${n}</div>` : ''}</div>`;
+// Auswahl der Teildepots (nur wenn es mehr als eines gibt): Alle, dann je Depot
+const depSeg = () => depots().length < 2 ? '' : `<div class="seg depseg">${[{id: 'all', name: 'Alle'}, ...depots()].map(d =>
+  `<button data-act="dep" data-v="${esc(d.id)}" class="${d.id === S.dep ? 'on' : ''}">${esc(d.name)}</button>`).join('')}</div>`;
 const seg = (act, opts, cur) => `<div class="seg">${opts.map(o => `<button data-act="${act}" data-v="${o}" class="${o === cur ? 'on' : ''}">${o}</button>`).join('')}</div>`;
 const MODES = {kauf: 'Seit Kauf', positionen: 'Heutige Positionen'};
 const CMP = {Gesamt: 'Dein Depot', Aktien: 'Deine Aktien und ETFs', Krypto: 'Dein Krypto'};
@@ -189,8 +192,8 @@ function vHome(c) {
   const cal = (S.digest.calendar || []).filter(e => isMine(e) || e.category === 'Fed' || e.category === 'Makro').slice(0, 6);
   const alloc = S.alloc || 'Anlageklasse', hm = S.hm || 'Heute';
   const perf = ps ? `<div class="eyebrow" style="margin-top:18px">Wertentwicklung der heutigen Positionen</div><div class="perf">${ps.periods.map(x => `<div><div class="l">${x.label}</div><div class="v num ${sign(x.v)}">${x.v == null ? '–' : pctS(x.v, 1)}</div><div class="b num">${x.b == null ? '&nbsp;' : 'S&amp;P ' + pctS(x.b, 1)}</div></div>`).join('')}</div>` : '';
-  return `<div class="g12"><div class="colstack span8">
-    <section class="card hero"><div class="herotop"><div><div class="eyebrow">Depotwert</div><div class="nav-value num">${eur(c.value)}</div>
+  return `${depSeg() ? `<div class="depbar">${depSeg()}</div>` : ''}<div class="g12"><div class="colstack span8">
+    <section class="card hero"><div class="herotop"><div><div class="eyebrow">${S.dep === 'all' ? 'Depotwert' : 'Depotwert · ' + esc(depName(S.dep))}</div><div class="nav-value num">${eur(c.value)}</div>
       <div class="chgrow">${pill(c.dayPct)}<span class="num ${sign(c.dayEur)}">${eurS(c.dayEur)}</span><span class="muted">heute</span></div></div>
       <div class="heroside"><div class="eyebrow">Gewinn offen</div><div class="num ${sign(c.pnl)}" style="font-size:20px;font-weight:650;margin-top:4px">${eurS(c.pnl)}</div><div class="small muted num">${pctS(c.pnlPct, 1)} auf ${eur(c.cost, 0)}</div></div></div>
       ${perf}
@@ -282,7 +285,7 @@ function vDepot(c) {
   const f = fltOn('depot'), rows = c.held.filter(p => f === 'Alle' || typeOf(p.key) === f).map(p => ({key: p.key, p}));
   const sumV = rows.reduce((s, r) => s + (r.p.value || 0), 0), sumP = rows.reduce((s, r) => s + (r.p.pnl || 0), 0), sumD = rows.reduce((s, r) => s + (r.p.dayEur || 0), 0);
   const txs = [...c.txs].reverse();
-  return `<div class="grid">
+  return `${depSeg() ? `<div class="depbar">${depSeg()}</div>` : ''}<div class="grid">
     <section class="card"><div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">${stat('Wert', eur(sumV, 0), rows.length + (rows.length === 1 ? ' Position' : ' Positionen'))}
       ${stat('Gewinn offen', eurS(sumP), sumV - sumP > 0 ? pctS(sumP / (sumV - sumP) * 100, 1) : '', sign(sumP))}${stat('Heute', eurS(sumD), '', sign(sumD))}${stat('Dividenden pro Jahr', eur(c.divYear, 0), 'erwartet, brutto')}</div></section>
     <section class="card"><div class="toolbar"><div>${flt('depot', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
@@ -292,7 +295,7 @@ function vDepot(c) {
     ${divCard(c)}
     <details class="card fold"><summary><div><h2>Buchungen</h2><p class="sub">${txs.length} eingetragene Käufe und Verkäufe</p></div><span class="chev"></span></summary>
       ${txs.length ? `<div class="rows">${txs.map(t => `<button class="row" data-act="edittx" data-id="${esc(t.id)}"><div class="l">
-      <div class="t"><span class="sym" style="margin:0;color:inherit">${esc(t.symbol)}</span><span>${t.type === 'buy' ? 'Kauf' : 'Verkauf'}${t.source && t.source !== 'manual' ? ' · ' + esc(t.source) : ''}</span></div><div class="m num">${dateDe(t.date)} · ${nf(t.qty, t.qty % 1 ? 4 : 0)} × ${money(t.price, t.currency)}</div></div>
+      <div class="t"><span class="sym" style="margin:0;color:inherit">${esc(t.symbol)}</span><span>${t.type === 'buy' ? 'Kauf' : 'Verkauf'}${t.source && t.source !== 'manual' ? ' · ' + esc(t.source) : ''}${depots().length > 1 && S.dep === 'all' ? ' · ' + esc(depName(depOf(t))) : ''}</span></div><div class="m num">${dateDe(t.date)} · ${nf(t.qty, t.qty % 1 ? 4 : 0)} × ${money(t.price, t.currency)}</div></div>
       <div class="r"><span class="chip ${t.type === 'buy' ? 'good' : 'bad'}">${t.type === 'buy' ? '−' : '+'}${money(t.qty * t.price, t.currency)}</span></div></button>`).join('')}</div>` : '<p class="empty">Noch keine Buchungen.</p>'}
       <p class="hint">Der direkte Import aus Trade Republic oder comdirect ist vorbereitet, aber noch nicht aktiv. Jede Buchung merkt sich ihre Herkunft.</p></details>
   </div>`;
@@ -622,7 +625,8 @@ const symField = (kind, sym) => `<div class="f2"><div class="f"><label>Art</labe
 function formTx(t, key) {
   const e = t || {}, [k0, s0] = key ? key.split(':') : [e.kind || 'stock', e.symbol || ''];
   openSheet(sheetTop(t ? 'Buchung ändern' : 'Kauf oder Verkauf') + `<section class="card"><form id="f-tx" data-id="${esc(e.id || '')}">
-    <div class="f"><label>Vorgang</label><select name="type">${opt('buy', 'Kauf', e.type || 'buy')}${opt('sell', 'Verkauf', e.type)}</select></div>${symField(k0, s0)}
+    <div class="f"><label>Vorgang</label><select name="type">${opt('buy', 'Kauf', e.type || 'buy')}${opt('sell', 'Verkauf', e.type)}</select></div>
+    ${depots().length > 1 ? `<div class="f"><label>Depot</label><select name="depot">${depots().map(d => opt(d.id, d.name, t ? depOf(e) : (S.dep !== 'all' ? S.dep : 'main'))).join('')}</select></div>` : ''}${symField(k0, s0)}
     <div class="f2"><div class="f"><label>Datum</label><input type="date" name="date" required value="${esc(e.date || new Date().toISOString().slice(0, 10))}"></div>
     <div class="f"><label>Stückzahl</label><input name="qty" required inputmode="decimal" placeholder="10" value="${e.qty ?? ''}"></div></div>
     <div class="f2"><div class="f"><label>Preis je Stück</label><input name="price" required inputmode="decimal" placeholder="150,00" value="${e.price ?? ''}"></div>
@@ -685,6 +689,7 @@ document.addEventListener('click', async ev => {
   else if (act === 'mode') { S.mode = Object.keys(MODES).find(k => MODES[k] === v) || 'positionen'; render(); }
   else if (act === 'hm') { S.hm = v; render(); }
   else if (act === 'cmp') { S.cmp = v; render(); }
+  else if (act === 'dep') { setDep(v); render(); }
   else if (act === 'alloc') { S.alloc = v; render(); }
   else if (act === 'secb') { S.secb = v; render(); }
   else if (act === 'grokcopy') { // Kopieren und Öffnen im selben Tipp, sonst blockt Safari das neue Fenster
@@ -741,8 +746,11 @@ document.addEventListener('submit', async ev => {
     const qty = numIn(d.qty), price = numIn(d.price), fee = numIn(d.fee) || 0;
     if (!(qty > 0) || !(price >= 0)) return toast('Stückzahl und Preis prüfen');
     const t = {id: f.dataset.id || uid(), type: d.type, kind, symbol, date: d.date, qty, price, currency: d.currency, fee, note: d.note.trim(), source: 'manual'};
-    if (d.type === 'sell') { const p = calc().pos.find(x => x.key === keyOf(kind, symbol)), old = S.pf.transactions.find(x => x.id === t.id);
-      if (!p || p.qty + (old && old.type === 'sell' ? old.qty : 0) < qty - 1e-9) return toast('So viele Stück hast du nicht im Bestand'); }
+    if (d.depot) t.depot = d.depot;
+    if (d.type === 'sell') { const keep = S.dep; setDep(t.depot || 'main');   // Bestand im Depot der Buchung prüfen
+      const p = calc().pos.find(x => x.key === keyOf(kind, symbol)), old = S.pf.transactions.find(x => x.id === t.id);
+      setDep(keep);
+      if (!p || p.qty + (old && old.type === 'sell' ? old.qty : 0) < qty - 1e-9) return toast('So viele Stück hast du in diesem Depot nicht'); }
     const i = S.pf.transactions.findIndex(x => x.id === t.id);
     if (i >= 0) S.pf.transactions[i] = Object.assign({}, S.pf.transactions[i], t); else S.pf.transactions.push(t);
   } else if (f.id === 'f-watch') {

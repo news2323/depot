@@ -447,3 +447,7 @@ input:focus,select:focus{border-color:var(--accent);background:var(--surface)}
   .strip>div{min-width:108px;padding:9px 12px}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Teildepots */
+.depbar{display:flex;margin:0 0 14px}
+.depbar .seg button{padding-left:14px;padding-right:14px}
