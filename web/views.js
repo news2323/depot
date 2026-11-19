@@ -386,7 +386,9 @@ function flowBlock(key) {
 // Watchlist am Handy als Liste im Stil von Krypto-Apps (Jakobs Wunsch vom 19.11.2026): Punkte, Logo, Kürzel mit Marktwert,
 // Kurs, rechts der 7-Tage-Verlauf mit der Tagesänderung. Sortierung teilt sich den Zustand mit der Tabelle.
 const LCOL = [COL.score, {id: 'day', label: 'Heute', num: true, sort: COL.day.sort}, {id: 'w7', label: '7 Tage', num: true, sort: r => { const s = (S.market.spark || {})[r.key], p = A(r.key).price; return s && s[0] && p != null ? p / s[0] - 1 : null; }},
-  {id: 'mcap', label: 'Marktwert', num: true, sort: r => { const v = mcapOf(r.key); return v ? v / (isCoin(r.key) ? (fxNow('USD') || 1) : 1) : null; }}, COL.name];
+  {id: 'mcap', label: 'Marktwert', num: true, sort: r => { const v = mcapOf(r.key); return v ? v / (isCoin(r.key) ? (fxNow('USD') || 1) : 1) : null; }},
+  {id: 'name', label: 'Name', sort: r => shortName(r.key).toLowerCase()}];
+const tick = key => { const s = key.split(':')[1]; return /^\d/.test(s) ? s : s.split('.')[0]; };   // Kürzel ohne Börsenendung (1211.HK bleibt)
 function watchList(id, rows, def) {
   const {st, col, rows: rs} = sortRows(id, LCOL, rows, def);
   if (!rs.length) return '<p class="empty">Keine Titel in dieser Auswahl.</p>';
@@ -394,10 +396,10 @@ function watchList(id, rows, def) {
   return sorter + `<div class="wl">${rs.map(({key}) => { const a = A(key), ch = a.change_pct, r = ratingOf(key);
     return `<button class="wl-row" data-act="open" data-key="${esc(key)}">
       <span class="wl-sc${r == null ? ' none' : ' t' + tierOf(r)}" title="${r == null ? 'keine Punkte' : r + ' von 10 Punkten'}">${r == null ? '–' : r}</span>${logo(key)}
-      <span class="wl-nm"><b>${esc(key.split(':')[1])}</b><small>${esc(mcapTxt(key) || nameOf(key))}</small></span>
+      <span class="wl-nm"><b>${esc(shortName(key))}</b><small>${esc([shortName(key) === tick(key) ? '' : tick(key), mcapTxt(key) || ((isFund(key) || isCommodity(key)) && issuerOf(key)) || ''].filter(Boolean).join(' · '))}</small></span>
       <span class="wl-px num">${px(key, a.price)}</span>
       <span class="wl-ch">${spark7(key)}<small class="num ${ch == null ? 'muted' : ch >= 0 ? 'pos' : 'neg'}">${ch == null ? '–' : (ch >= 0 ? '▲ ' : '▼ ') + nf(Math.abs(ch), 2) + ' %'}</small></span></button>`; }).join('')}</div>
-    <p class="wl-hint">Links die Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet. Rechts der Verlauf über 7 Tage und die Änderung heute. Antippen für die Gründe.</p>`;
+    <p class="wl-hint">Links die Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet. Rechts der Verlauf über 7 Tage (gestrichelt: Stand vor 7 Tagen) und die Änderung heute. Antippen für die Gründe. · Version ${esc(APP_V)}</p>`;
 }
 function vWatch() {
   const wl = S.pf.watchlist || [], al = S.pf.alerts || [], st = S.state.alerts || {}, f = fltOn('watch');

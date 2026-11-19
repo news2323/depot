@@ -189,6 +189,31 @@ function ratingOf(key) { const v = D(key).valuation; return !v || v.score == nul
 const tierOf = r => r == null ? null : r <= 2 ? 0 : r <= 4 ? 1 : r <= 6 ? 2 : r <= 8 ? 3 : 4;
 const isFund = key => !isCoin(key) && (A(key).type === 'ETF' || /\b(ETF|ETC|UCITS)\b/i.test(A(key).name || D(key).name || ''));
 const nameOf = key => A(key).name || D(key).name || key.split(':')[1];
+/* Umgangssprachlicher Name (Jakobs Wunsch vom 19.11.2026): „Apple“ statt „Apple Inc.“ oder AAPL, Kürzel nur, wo man sie so sagt
+   (AMD, SAP, UBS). Firmenzusätze werden abgeschnitten, einige Namen fest vorgegeben. ETFs nach ihrem Index bzw. Thema. */
+const SHORT = {'stock:GOOGL': 'Google', 'stock:GOOG': 'Google', 'stock:AMD': 'AMD', 'stock:MC.PA': 'LVMH', 'stock:LHA.DE': 'Lufthansa',
+  'stock:1211.HK': 'BYD', 'stock:HIMS': 'Hims & Hers', 'stock:BMNR': 'Bitmine', 'stock:ANT': 'Anthropic', 'stock:IBM': 'IBM',
+  'stock:TSM': 'TSMC', 'stock:BRK-B': 'Berkshire Hathaway', 'stock:BRK-A': 'Berkshire Hathaway'};
+const FUND_THEME = [[/MSCI World/i, 'MSCI World'], [/NASDAQ[- ]?100/i, 'Nasdaq 100'], [/S&P 500/i, 'S&P 500'], [/All[- ]World/i, 'All-World'],
+  [/Emerging Markets/i, 'Schwellenländer'], [/Gold/i, 'Gold'], [/Silver|Silber/i, 'Silber'], [/Commodit/i, 'Rohstoffe'],
+  [/Clean Energy/i, 'Saubere Energie'], [/Electric Vehicles/i, 'Elektroautos'], [/Asia Pacific Ex Japan/i, 'Asien-Pazifik'], [/DAX/i, 'DAX'],
+  [/Europe|Stoxx/i, 'Europa'], [/Semiconductor/i, 'Halbleiter'], [/Bitcoin/i, 'Bitcoin']];
+const ISSUERS = ['iShares', 'Amundi', 'Lyxor', 'Xtrackers', 'Vanguard', 'SPDR', 'Invesco', 'WisdomTree', 'VanEck', 'HSBC', 'UBS', 'Franklin', 'Global X'];
+const issuerOf = key => ISSUERS.find(w => nameOf(key).toLowerCase().includes(w.toLowerCase())) || '';
+function shortName(key) {
+  if (SHORT[key]) return SHORT[key];
+  const sym = key.split(':')[1], name = nameOf(key);
+  if (!name || name === sym) return sym;
+  if (isCoin(key)) return name.replace(/\s+(Finance|Protocol|Network|Token|Coin)$/i, '');
+  if (isFund(key) || isCommodity(key)) { const t = FUND_THEME.find(([re]) => re.test(name)); if (t) return t[1]; }
+  let n = name.replace(/^The\s+/i, '').split(/\s+-\s+/)[0], prev;
+  do {
+    prev = n;
+    n = n.replace(/[,.]?\s+(Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?|Ltd\.?|Limited|plc|SE|AG|N\.V\.|NV|S\.A\.?|SA|A\/S|PBC|Holdings?|Group|Global|International|Technologies|Technology|Platforms|Internet|UCITS|ETF|ETC|and)$/i, '').replace(/[,\s]+$/, '');
+  } while (n !== prev && n.length > 2);
+  n = n.replace(/\.com$/i, '');
+  return n.split(' ').map(w => w.length > 4 && w === w.toUpperCase() && /[A-Z]/.test(w) ? w[0] + w.slice(1).toLowerCase() : w).join(' ') || sym;
+}
 function priceAt(key, day) {
   const h = D(key).hist;
   if (!h || !h.d.length) return A(key).price ?? null;
@@ -418,7 +443,7 @@ async function loadLogos() {
   if (S.logos) return;
   try { S.logos = (await store.get('logos.json')) || {}; } catch (e) { S.logos = {}; }
   S.logoDark = {};
-  // Helle Logos auf durchsichtigem Grund (weiße Schrift) brauchen einen dunklen Kreis, alle anderen einen weißen
+  // Logos frei stehend wie in Broker-Apps; nur wo ein freigestelltes Logo im aktuellen Farbschema verschwinden würde, ein Hintergrund
   await Promise.all(Object.entries(S.logos).map(async ([key, v]) => {
     if (!v || !v.img) return;
     try {
@@ -427,28 +452,41 @@ async function loadLogos() {
       const cx = cv.getContext('2d'); cx.drawImage(im, 0, 0, 24, 24);
       const px = cx.getImageData(0, 0, 24, 24).data; let clear = 0, n = 0, lum = 0;
       for (let i = 0; i < px.length; i += 4) { if (px[i + 3] < 100) { clear++; continue; } n++; lum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]; }
-      if (clear > 576 * 0.15 && n && lum / n > 215) S.logoDark[key] = true;
+      // op: Bild mit eigenem Hintergrund (wie ein App-Symbol); tl/td: freigestelltes helles bzw. dunkles Logo
+      S.logoDark[key] = clear > 576 * 0.15 && n ? (lum / n > 200 ? 'tl' : lum / n < 70 ? 'td' : 'tm') : 'op';
     } catch (e) { /* Bild nicht lesbar: weißer Kreis */ }
   }));
   document.querySelectorAll('.lg[data-key]').forEach(el => { const h = logoImg(el.dataset.key); if (h) el.innerHTML = h; });
 }
-const logoImg = key => { const x = ((S.logos || {})[key] || {}).img; return x && /^data:image\//.test(x) ? `<img src="${x}" alt="" loading="lazy"${(S.logoDark || {})[key] ? ' class="dk"' : ''}>` : ''; };
+const logoImg = key => { const x = ((S.logos || {})[key] || {}).img; return x && /^data:image\//.test(x) ? `<img src="${x}" alt="" loading="lazy" class="${(S.logoDark || {})[key] || 'op'}">` : ''; };
 const logo = key => `<span class="lg" data-key="${esc(key)}">${logoImg(key) || `<b>${esc(String(key.split(':')[1] || '?').replace(/[^A-Z0-9]/gi, '').slice(0, 1))}</b>`}</span>`;
-// 7 Tage aus Stundenkursen (market.json → spark, stündlich erneuert), dazu der aktuelle Kurs; Fläche mit Verlauf wie in Krypto-Apps
+// 7 Tage aus Stundenkursen (market.json → spark, stündlich erneuert), dazu der aktuelle Kurs. Gestaltet wie in Börsen-Apps:
+// geglättete Kurve (Mittel über Zeitblöcke, weiche Bögen), Fläche mit Farbverlauf, gestrichelte Linie beim Stand von vor 7 Tagen,
+// Punkt am aktuellen Kurs. Grün oder rot nach der Änderung über die 7 Tage.
 let sparkN = 0;
 function spark7(key) {
   const s = (S.market.spark || {})[key];
   if (!s || s.length < 5) return spark(key, 7);
-  const c = s.slice(), live = A(key).price;
+  let c = s.slice(); const live = A(key).price;
   if (live != null && !A(key).error) c.push(live);
-  const lo = Math.min(...c), hi = Math.max(...c), W = 96, H = 34, k = (W - 2) / (c.length - 1);
-  const y = v => hi === lo ? H / 2 : 2 + (1 - (v - lo) / (hi - lo)) * (H - 5);
-  const pts = c.map((v, i) => [(1 + i * k).toFixed(1), y(v).toFixed(1)]);
-  const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ' ' + p[1]).join('');
-  const up = c[c.length - 1] >= c[0], col = `var(--${up ? 'up' : 'down'})`, id = 'sg' + (++sparkN);
-  return `<svg class="spark7" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="${col}" stop-opacity=".28"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
-    <path d="${d}L${pts[pts.length - 1][0]} ${H}L${pts[0][0]} ${H}Z" fill="url(#${id})" stroke="none"/><path d="${d}" fill="none" style="stroke:${col}"/></svg>`;
+  const first = c[0], last = c[c.length - 1], N = 34;
+  if (c.length > N) { const st = c.length / N; c = Array.from({length: N}, (_, b) => { const seg = c.slice(Math.floor(b * st), Math.max(Math.floor((b + 1) * st), Math.floor(b * st) + 1)); return seg.reduce((a, x) => a + x, 0) / seg.length; }); }
+  c[0] = first; c[c.length - 1] = last;
+  const W = 66, H = 22, x0 = 1, x1 = W - 4, lo = Math.min(...c, first), hi = Math.max(...c, first);
+  const y = v => hi === lo ? H / 2 : 2.5 + (1 - (v - lo) / (hi - lo)) * (H - 6);
+  const P = c.map((v, i) => [x0 + i * (x1 - x0) / (c.length - 1), y(v)]);
+  const cl = v => Math.max(1, Math.min(H - 1, v)).toFixed(1);
+  let d = `M${P[0][0].toFixed(1)} ${P[0][1].toFixed(1)}`;
+  for (let i = 0; i < P.length - 1; i++) {      // Catmull-Rom als Bézier-Bögen
+    const a = P[i - 1] || P[i], b = P[i], e = P[i + 1], f = P[i + 2] || e;
+    d += `C${(b[0] + (e[0] - a[0]) / 6).toFixed(1)} ${cl(b[1] + (e[1] - a[1]) / 6)} ${(e[0] - (f[0] - b[0]) / 6).toFixed(1)} ${cl(e[1] - (f[1] - b[1]) / 6)} ${e[0].toFixed(1)} ${e[1].toFixed(1)}`;
+  }
+  const up = last >= first, col = `var(--${up ? 'up' : 'down'})`, id = 'sg' + (++sparkN), yb = y(first).toFixed(1), E = P[P.length - 1];
+  return `<svg class="spark7" viewBox="0 0 ${W} ${H}" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${col}" stop-opacity=".34"/><stop offset=".85" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
+    <line x1="${x0}" x2="${x1}" y1="${yb}" y2="${yb}" class="base"/>
+    <path d="${d}L${x1} ${H}L${x0} ${H}Z" fill="url(#${id})" stroke="none"/><path d="${d}" class="ln" style="stroke:${col}"/>
+    <circle cx="${E[0].toFixed(1)}" cy="${E[1].toFixed(1)}" r="3.4" style="fill:${col}" opacity=".22"/><circle cx="${E[0].toFixed(1)}" cy="${E[1].toFixed(1)}" r="1.7" style="fill:${col}"/></svg>`;
 }
 // Marktwert kurz, in der Anzeigewährung (Aktien in Euro, Coins in Dollar)
 function mcapOf(key) {

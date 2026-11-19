@@ -481,11 +481,17 @@ input:focus,select:focus{border-color:var(--accent);background:var(--surface)}
 @media (max-width:1000px){.riskgrid{grid-template-columns:1fr 1fr}.riskgrid>div:last-child{grid-column:1/-1}}
 @media (max-width:640px){.riskgrid{grid-template-columns:1fr;gap:14px}}
 
-/* Watchlist am Handy: Liste wie in Krypto-Apps, kompakt */
+/* Watchlist am Handy: Liste wie in Broker- und Krypto-Apps. Logo klein und frei stehend, Name deutlich, rechts 7 Tage */
 .wl-narrow{display:none}
 .lg{display:inline-grid;place-items:center;flex:none;width:40px;height:40px;border-radius:50%;overflow:hidden;background:var(--surface3);color:var(--ink2);font-weight:700;font-size:16px}
-.lg img{width:100%;height:100%;object-fit:cover;display:block;background:#fff}
-.lg img.dk{background:#1d1f24}
+.lg img{width:100%;height:100%;object-fit:contain;display:block}
+.lg:has(img){background:none;border-radius:0}
+.lg img.op{border-radius:22%}
+.lg img.tl{background:var(--lg-tl)}.lg img.td{background:var(--lg-td)}
+.lg img.tl,.lg img.td{border-radius:22%;padding:8%}
+:root{--lg-tl:#1d1f24;--lg-td:transparent}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--lg-tl:transparent;--lg-td:#fff}}
+:root[data-theme="dark"]{--lg-tl:transparent;--lg-td:#fff}
 @media(max-width:759px){
   .wl-wide{display:none}.wl-narrow{display:block}
   .wl-sort{margin:2px 0 4px}
@@ -493,19 +499,21 @@ input:focus,select:focus{border-color:var(--accent);background:var(--surface)}
   .wl-sort .seg button{flex:1 1 auto;padding:5px 4px}
   .wl-hint{font-size:12px;color:var(--ink3);margin:8px 0 0}
   .wl{margin:0 -4px}
-  .wl-row{display:grid;grid-template-columns:18px 30px minmax(0,1fr) auto 66px;align-items:center;column-gap:10px;width:100%;padding:9px 4px;text-align:left;border-bottom:1px solid var(--line)}
+  .wl-row{display:grid;grid-template-columns:16px 24px minmax(0,1fr) auto 62px;align-items:center;column-gap:10px;width:100%;padding:12px 4px;text-align:left;border-bottom:1px solid var(--line)}
   .wl-row:last-child{border-bottom:0}
   .wl-row:active{background:var(--surface2)}
-  .wl-row .lg{width:30px;height:30px;font-size:12px}
-  .wl-sc{font-size:14px;font-weight:600;color:var(--ink3);text-align:center;font-variant-numeric:tabular-nums}
+  .wl-row .lg{width:24px;height:24px;font-size:11px;border-radius:7px}
+  .wl-sc{font-size:13px;font-weight:600;color:var(--ink3);text-align:center;font-variant-numeric:tabular-nums}
   .wl-sc.t0,.wl-sc.t1{color:var(--down)}.wl-sc.t3,.wl-sc.t4{color:var(--up)}
   .wl-nm{min-width:0}
-  .wl-nm b{display:block;font-size:12.5px;font-weight:600;letter-spacing:.01em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .wl-nm small{display:block;font-size:10.5px;color:var(--ink3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .wl-px{font-size:12.5px;font-weight:600;color:var(--ink);text-align:right;white-space:nowrap}
-  .wl-ch{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
-  .wl-ch .spark7,.wl-ch .spark{width:66px;height:22px}
-  .spark7 path{stroke-width:1.25;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
-  .wl-ch small{font-size:10.5px;font-weight:600;white-space:nowrap}
+  .wl-nm b{display:block;font-size:15px;font-weight:650;letter-spacing:-.005em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wl-nm small{display:block;font-size:12px;font-weight:500;color:var(--ink3);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wl-px{font-size:14px;font-weight:600;color:var(--ink);text-align:right;white-space:nowrap}
+  .wl-ch{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+  .wl-ch .spark7,.wl-ch .spark{width:62px;height:21px}
+  .spark7{overflow:visible}
+  .spark7 .ln{fill:none;stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round}
+  .spark7 .base{stroke:var(--ink3);stroke-width:.7;stroke-dasharray:1.5 2;opacity:.6}
+  .wl-ch small{font-size:12px;font-weight:650;white-space:nowrap}
 }
-@media(max-width:380px){.wl-row{grid-template-columns:16px 28px minmax(0,1fr) auto 58px;column-gap:8px}.wl-row .lg{width:28px;height:28px}.wl-ch .spark7,.wl-ch .spark{width:58px}}
+@media(max-width:380px){.wl-row{grid-template-columns:14px 22px minmax(0,1fr) auto 56px;column-gap:9px}.wl-row .lg{width:22px;height:22px}.wl-ch .spark7,.wl-ch .spark{width:56px}.wl-nm b{font-size:14px}.wl-px{font-size:13px}}
