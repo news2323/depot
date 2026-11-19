@@ -507,6 +507,126 @@ function perfStats() {
   return {periods: out, vol, maxDD: r.length > 20 ? dd * 100 : null, beta: vm > 0 && r.length > 60 ? cov / vm : null, since: bc.d[0]};
 }
 
+/* ---------------------------------------------------------------- Risiko in Euro
+   Alles für die heutigen Positionen (backcast) bzw. je Position aus Wochenrenditen (Wochen statt Tage, weil Börsen in
+   Europa, den USA und der Devisenmarkt zu verschiedenen Zeiten schließen). Szenarien über Betas je Position:
+   Aktienmarkt (S&P 500 in Dollar) und Dollar (Wert eines Dollars in Euro) gemeinsam geschätzt, Coins gegen Bitcoin. */
+const dayIso = d => new Date(d * DAY).toISOString().slice(0, 10);
+function ols2(y, x1, x2) {
+  const n = y.length, m = a => a.reduce((s, v) => s + v, 0) / n, my = m(y), m1 = m(x1), m2 = m(x2);
+  let s11 = 0, s22 = 0, s12 = 0, s1y = 0, s2y = 0;
+  for (let i = 0; i < n; i++) { const a = x1[i] - m1, b = x2[i] - m2, c = y[i] - my; s11 += a * a; s22 += b * b; s12 += a * b; s1y += a * c; s2y += b * c; }
+  const det = s11 * s22 - s12 * s12;
+  return det > 0 ? [(s22 * s1y - s12 * s2y) / det, (s11 * s2y - s12 * s1y) / det] : [null, null];
+}
+function ols1(y, x) {
+  const n = y.length, my = y.reduce((s, v) => s + v, 0) / n, mx = x.reduce((s, v) => s + v, 0) / n;
+  let sxx = 0, sxy = 0; for (let i = 0; i < n; i++) { sxx += (x[i] - mx) ** 2; sxy += (x[i] - mx) * (y[i] - my); }
+  return sxx > 0 ? sxy / sxx : null;
+}
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function riskStats() {
+  const c = calc();
+  if (c.risk !== undefined) return c.risk;
+  const bc = backcast(), V = c.value, end = todayDay();
+  if (!bc || bc.d.length < 60 || !(V > 0)) return (c.risk = null);
+  const at = day => seriesAt(bc, day);
+  const r = {};
+  // Abstand zum Hoch der letzten 12 Monate
+  let pk = -1, pkDay = null;
+  for (let i = Math.max(0, bc.d.length - 366); i < bc.d.length; i++) if (bc.v[i] > pk) { pk = bc.v[i]; pkDay = bc.d[i]; }
+  r.fromHigh = {pct: (bc.v[bc.v.length - 1] / pk - 1) * 100, eur: bc.v[bc.v.length - 1] - pk, day: pkDay};
+  // Schlechter Tag: jeder 20. Handelstag im letzten Jahr war mindestens so schlecht (Wochenenden ohne Kurse ausgelassen)
+  const dr = [];
+  let worstDay = {v: 0, day: null};
+  for (let i = Math.max(1, bc.d.length - 365); i < bc.d.length; i++) {
+    const dow = (bc.d[i] + 4) % 7;
+    if (dow === 0 || dow === 6) continue;
+    let j = i - 1; while (j > 0 && [0, 6].includes((bc.d[j] + 4) % 7)) j--;
+    if (bc.v[j] > 0) { const x = bc.v[i] / bc.v[j] - 1; dr.push(x); if (x < worstDay.v) worstDay = {v: x, day: bc.d[i]}; }
+  }
+  const q05 = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length * 0.05)] : null; };
+  r.badDay = dr.length > 100 ? q05(dr) * V : null;
+  if (dr.length > 100) { const m = dr.reduce((a, x) => a + x, 0) / dr.length; r.vol = Math.sqrt(dr.reduce((a, x) => a + (x - m) ** 2, 0) / dr.length) * Math.sqrt(252) * 100; }
+  r.worstDay = worstDay.day ? {eur: worstDay.v * V, pct: worstDay.v * 100, day: worstDay.day} : null;
+  // Schlechter Monat (30 Tage): aus allen 30-Tage-Abschnitten der Rückrechnung, dazu der schlechteste im letzten Jahr
+  const mr = [];
+  let worstMonth = {v: 0, day: null};
+  for (let i = 30; i < bc.d.length; i++) if (bc.v[i - 30] > 0) {
+    const x = bc.v[i] / bc.v[i - 30] - 1; mr.push(x);
+    if (bc.d[i] > end - 365 && x < worstMonth.v) worstMonth = {v: x, day: bc.d[i]};
+  }
+  r.badMonth = mr.length > 200 ? q05(mr) * V : null;
+  r.worstMonth = worstMonth.day ? {eur: worstMonth.v * V, pct: worstMonth.v * 100, day: worstMonth.day} : null;
+  // Größter Rückgang über die ganze Rückrechnung und wie lange die Erholung dauerte
+  let peak = bc.v[0], peakD = bc.d[0], best = {dd: 0};
+  for (let i = 1; i < bc.d.length; i++) {
+    if (bc.v[i] > peak) { peak = bc.v[i]; peakD = bc.d[i]; }
+    const dd = bc.v[i] / peak - 1;
+    if (dd < best.dd) best = {dd, peakD, peakV: peak, troughD: bc.d[i]};
+  }
+  if (best.peakD != null) {
+    const k = bc.d.findIndex((d, i) => d > best.troughD && bc.v[i] >= best.peakV);
+    r.maxDD = {pct: best.dd * 100, eur: best.dd * V, peak: best.peakD, trough: best.troughD, back: k >= 0 ? bc.d[k] : null, since: bc.d[0]};
+  }
+  // Betas je Position aus Wochenrenditen der letzten drei Jahre (Coins: ein Jahr)
+  const sp = (S.daily.bench || {}).SP500, btc = (S.daily.bench || {}).BTC;
+  const raw = (b, day) => { if (!b) return null; const i = bisect(b.d, day); return i < 0 ? null : b.c[i]; };
+  const usdEur = day => 1 / (fxAt('USD', day) || 1);
+  const wk = n => Array.from({length: n + 1}, (_, i) => end - 7 * (n - i));
+  const pos = c.held.filter(p => p.value > 0).map(p => {
+    const h = D(p.key).hist, coin = isCoin(p.key), weeks = wk(coin ? 52 : 156);
+    const o = {key: p.key, symbol: p.symbol, v: p.value, coin, cls: assetClass(p.key), bMkt: null, bUsd: null, bBtc: null, est: false};
+    if (h && h.d.length > 2) {
+      const pe = day => { if (day < h.d[0]) return null; const pr = day === end && p.price != null ? p.price : priceAt(p.key, day); return pr == null ? null : pr / (fxAt(p.cur, day) || 1); };
+      const y = [], x1 = [], x2 = [], xb = [], yu = [];
+      for (let i = 1; i < weeks.length; i++) {
+        const a = pe(weeks[i - 1]), b = pe(weeks[i]), s0 = raw(sp, weeks[i - 1]), s1 = raw(sp, weeks[i]), f0 = usdEur(weeks[i - 1]), f1 = usdEur(weeks[i]);
+        if (!a || !b || !s0 || !s1) continue;
+        y.push(b / a - 1); x1.push(s1 / s0 - 1); x2.push(f1 / f0 - 1);
+        if (coin) { const c0 = raw(btc, weeks[i - 1]), c1 = raw(btc, weeks[i]); xb.push(c0 && c1 ? c1 / c0 - 1 : 0); yu.push((b * f0) / (a * f1) - 1); }
+      }
+      if (y.length >= (coin ? 20 : 40)) {
+        const [b1, b2] = ols2(y, x1, x2); o.bMkt = b1 == null ? null : clamp(b1, -1, 3); o.bUsd = b2 == null ? null : clamp(b2, -0.5, 1.5);
+        if (coin) { const b = ols1(yu, xb); o.bBtc = b == null ? null : clamp(b, 0, 3); }
+      }
+    }
+    // Ohne genug Verlauf (z. B. neu an der Börse): Faustwerte, als geschätzt markiert
+    if (o.bMkt == null) { o.bMkt = coin ? 0.5 : o.cls === 'Rohstoffe' ? 0.2 : 1; o.est = true; }
+    if (o.bUsd == null) { o.bUsd = coin || curOf(p.key) === 'USD' ? 1 : 0; o.est = true; }
+    if (coin && o.bBtc == null) { o.bBtc = p.symbol === 'BTC' ? 1 : 1.5; o.est = true; }
+    return o;
+  });
+  const scen = (label, f, top = true) => { const parts = pos.map(o => ({o, x: f(o)})).filter(z => z.x).sort((a, b) => a.x - b.x);
+    const sum = parts.reduce((s, z) => s + z.x, 0); return {label, eur: sum, pct: sum / V * 100, top: top ? parts.slice(0, 3) : []}; };
+  r.scen = [
+    scen('Aktienmarkt −10 %', o => o.v * o.bMkt * -0.10),
+    scen('Aktienmarkt −25 %', o => o.v * o.bMkt * -0.25, false),
+    ...(pos.some(o => o.coin) ? [scen('Bitcoin −30 %', o => o.coin ? o.v * o.bBtc * -0.30 : 0)] : []),
+    scen('Dollar −10 % zum Euro', o => o.v * o.bUsd * -0.10)];
+  r.usdShare = pos.reduce((s, o) => s + o.v * o.bUsd, 0) / V * 100;
+  r.beta = pos.reduce((s, o) => s + o.v * o.bMkt, 0) / V;
+  r.est = pos.filter(o => o.est).map(o => o.symbol);
+  // Klumpen
+  const cls = {}; pos.forEach(o => { cls[o.cls] = (cls[o.cls] || 0) + o.v; });
+  r.classes = Object.entries(cls).map(([name, v]) => ({name, pct: v / V * 100}));
+  const stocks = c.held.filter(p => p.value > 0 && assetClass(p.key) === 'Aktien');
+  r.topStock = stocks[0] ? {symbol: stocks[0].symbol, key: stocks[0].key, pct: stocks[0].weight, half: -stocks[0].value / 2} : null;
+  r.top5 = stocks.slice(0, 5).reduce((s, p) => s + p.weight, 0);
+  const mix = sectorMix(c), wb = ((S.daily.sector_bench || {})['MSCI World']) || {};
+  const sec = Object.entries(mix.by).sort((a, b) => b[1] - a[1])[0];
+  r.topSector = sec && mix.eq ? {name: SECTOR_DE[sec[0]] || sec[0], pct: sec[1] / V * 100, ofEq: sec[1] / mix.eq * 100, world: wb[sec[0]] != null ? wb[sec[0]] * 100 : null} : null;
+  // Was demnächst ansteht oder auffällt
+  const held = new Map(c.held.filter(p => p.value > 0).map(p => [p.key, p]));
+  r.earnings = (S.digest.calendar || []).filter(e => e.category === 'Earnings' && held.has(e.key) && isoToDay(e.date) >= end && isoToDay(e.date) <= end + 21)
+    .map(e => ({symbol: e.symbol, key: e.key, date: e.date, pct: held.get(e.key).weight}));
+  const pick = f => { const l = c.held.filter(p => p.value > 0 && f(p)); return {pct: l.reduce((s, p) => s + p.weight, 0), list: l.map(p => p.symbol)}; };
+  r.expensive = pick(p => { const x = ratingOf(p.key); return x != null && x <= 3; });
+  r.estDown = pick(p => { const f = D(p.key).fund; if (!f) return false; const v = f.est_chg_90d != null ? f.est_chg_90d : (f.est_eps != null && f.est_eps_90d ? (f.est_eps - f.est_eps_90d) / Math.abs(f.est_eps_90d) * 100 : null); return v != null && v <= -5; });
+  r.losers = pick(p => p.pnlPct != null && p.pnlPct <= -20);
+  return (c.risk = r);
+}
+
 /* ---------------------------------------------------------------- Börsenzeiten */
 function marketState(tz, open, close) {
   const f = new Intl.DateTimeFormat('en-GB', {timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false}).formatToParts(new Date());

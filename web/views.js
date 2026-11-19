@@ -181,6 +181,48 @@ function attribution(c) {
       <span class="v num ${up ? 'pos' : 'neg'}">${eurS(p.dayEur)}</span></button>`; };
   return `<div class="attr">${ups.map(row).join('')}${ups.length && dns.length ? '<hr>' : ''}${dns.map(row).join('')}</div>`;
 }
+// Risiko in Euro: Rückschläge, Szenarien, Klumpen und was ansteht (riskStats in app.js)
+const CLASS_COL = {Aktien: 'var(--s1)', ETFs: 'var(--s3)', Krypto: 'var(--s4)', Rohstoffe: 'var(--s7)'};
+function riskCard(c) {
+  const r = riskStats();
+  if (!r) return card('Risiko', 'Für deine heutigen Positionen', '<p class="empty">Kommt mit der nächsten täglichen Aktualisierung.</p>', '', 'span12');
+  const row = (l, v, note = '', cls = 'neg') => `<div class="rk"><span class="l">${l}${note ? `<small>${note}</small>` : ''}</span><span class="v num ${cls}">${v}</span></div>`;
+  const e0 = v => v == null ? '–' : (v >= 0 ? '+' : '−') + nf(Math.abs(v), 0) + ' €';
+  const months = (a, b) => { const m = Math.round((b - a) / 30.44); return m < 1 ? 'unter einem Monat' : m === 1 ? 'einem Monat' : m + ' Monaten'; };
+  const pc = v => nf(v, v < 1 ? 1 : 0) + ' %';
+  const syms = l => l.slice(0, 4).map(esc).join(', ') + (l.length > 4 ? ` und ${l.length - 4} weitere` : '');
+  const fh = r.fromHigh, dd = r.maxDD;
+  const loss = `<div class="rkhead"><div class="eyebrow">Abstand zum Hoch</div>
+      <div class="big num ${fh.pct < -0.5 ? 'neg' : ''}">${fh.pct < -0.5 ? pctS(fh.pct, 1) : 'auf dem Hoch'}</div>
+      <div class="small muted">${fh.pct < -0.5 ? `${e0(fh.eur)} seit dem Hoch am ${dateDe(dayIso(fh.day))}` : 'höchster Stand der letzten 12 Monate'}</div></div>
+    ${row('Schlechter Tag', e0(r.badDay), 'jeder 20. Handelstag war mindestens so schlecht')}
+    ${r.worstDay ? row('Schlechtester Tag', e0(r.worstDay.eur), `${dateDe(dayIso(r.worstDay.day))}, ${pctS(r.worstDay.pct, 1)}`) : ''}
+    ${row('Schlechter Monat', e0(r.badMonth), 'jeder 20. Monat war mindestens so schlecht')}
+    ${r.worstMonth ? row('Schlechtester Monat', e0(r.worstMonth.eur), `30 Tage bis ${dateDe(dayIso(r.worstMonth.day))}, ${pctS(r.worstMonth.pct, 1)}`) : ''}
+    ${dd ? row(`Größter Rückgang seit ${new Date(dd.since * DAY).getFullYear()}`, pctS(dd.pct, 1),
+      `heute ${e0(dd.eur)} · ${dateDe(dayIso(dd.peak))} bis ${dateDe(dayIso(dd.trough))} · ${dd.back ? 'wieder erholt nach ' + months(dd.trough, dd.back) : 'noch nicht wieder erreicht'}`) : ''}`;
+  const scen = r.scen.map(s => `<div class="rk"><span class="l">${s.label}${s.top.length ? `<small>am meisten: ${s.top.map(z => `${esc(z.o.symbol)} ${e0(z.x)}`).join(' · ')}</small>` : ''}</span>
+    <span class="v num neg">${e0(s.eur)}<small>${pctS(s.pct, 1)}</small></span></div>`).join('');
+  const what = `${scen}${row('Dollar-Anteil', nf(r.usdShare, 0) + ' %', 'wie stark dein Depot am Dollar hängt, auch über ETFs', '')}
+    <p class="hint">Geschätzt aus dem Verhalten jeder Position in den letzten drei Jahren (Coins: einem Jahr).${r.est.length ? ` Ohne genug Verlauf, deshalb Faustwert: ${syms(r.est)}.` : ''}</p>`;
+  const mixBar = `<div class="mixbar">${r.classes.map(k => `<i style="width:${k.pct}%;background:${CLASS_COL[k.name] || 'var(--s0)'}" title="${k.name} ${nf(k.pct, 0)} %"></i>`).join('')}</div>
+    <div class="mixlg">${r.classes.map(k => `<span><b style="background:${CLASS_COL[k.name] || 'var(--s0)'}"></b>${k.name} ${nf(k.pct, 0)} %</span>`).join('')}</div>`;
+  const ts = r.topStock, sec = r.topSector;
+  const lump = `${mixBar}
+    ${ts ? row(`Größte Einzelaktie: ${esc(ts.symbol)}`, e0(ts.half), `${nf(ts.pct, 1)} % vom Depot · so viel kostet es, wenn sie sich halbiert`) : ''}
+    ${row('Fünf größte Einzelaktien', nf(r.top5, 0) + ' %', 'vom Depot', '')}
+    ${sec ? row(`Größte Branche: ${esc(sec.name)}`, nf(sec.ofEq, 0) + ' %', `deiner Aktien und Aktien-ETFs${sec.world != null ? ` · in der Welt (MSCI World) ${nf(sec.world, 0)} %` : ''}`, sec.world != null && sec.ofEq > sec.world + 10 ? 'neg' : '') : ''}`;
+  const soon = [
+    r.earnings.length ? row('Quartalszahlen in 3 Wochen', pc(r.earnings.reduce((s, e) => s + e.pct, 0)), r.earnings.map(e => `${esc(e.symbol)} ${dateDe(e.date).replace(/ \d{4}$/, '')}`).join(' · '), '') : '',
+    r.expensive.list.length ? row('Nach Punkten teuer (1 bis 3)', pc(r.expensive.pct), syms(r.expensive.list), '') : '',
+    r.estDown.list.length ? row('Gewinnschätzung gesenkt', pc(r.estDown.pct), syms(r.estDown.list) + ' · um 5 % oder mehr in 90 Tagen', '') : '',
+    r.losers.list.length ? row('Mehr als 20 % im Minus', pc(r.losers.pct), syms(r.losers.list), '') : ''].join('');
+  return card('Risiko', 'Für deine heutigen Positionen, in Euro', `<div class="riskgrid">
+    <div><p class="sh">Was ein Rückschlag kostet</p>${loss}</div>
+    <div><p class="sh">Wenn …</p>${what}</div>
+    <div><p class="sh">Klumpen</p>${lump}${soon ? `<p class="sh">Im Blick behalten</p>${soon}` : ''}</div></div>
+    <p class="hint">Rückschläge: die heutigen Positionen mit den Kursen der Vergangenheit zurückgerechnet${r.vol != null ? ` · Schwankung ${nf(r.vol, 1)} % pro Jahr` : ''} · Beta ${nf(r.beta, 2)} zum S&amp;P 500 (bei 1 bewegt sich das Depot wie der Markt). Vergangene Schwankungen sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p>`, '', 'span12');
+}
 // Angst und Gier: Aktienmarkt (eigene Berechnung nach CNN-Vorbild, update.market_fg) und Krypto (alternative.me)
 function fgCard() {
   const m = S.daily.market_fg, k = S.daily.crypto_fg;
@@ -200,8 +242,6 @@ function vHome(c) {
     Krypto-Flows und Nachkauf-Zonen kommen automatisch dazu.</p><div class="btnrow"><button class="btn" data-act="addtx">Ersten Kauf eintragen</button>
     <button class="btn ghost" data-act="addwatch">Titel beobachten</button></div>`)}</div>`;
   const ps = perfStats(), ap = S.analysis.portfolio;
-  const stocks = c.held.filter(p => assetClass(p.key) === 'Aktien' || p.kind === 'crypto'), topOne = stocks[0];
-  const top5 = c.held.slice(0, 5).reduce((s, p) => s + p.weight, 0);
   const cal = (S.digest.calendar || []).filter(e => isMine(e) || e.category === 'Fed' || e.category === 'Makro').slice(0, 6);
   const alloc = S.alloc || 'Anlageklasse', hm = S.hm || 'Heute';
   const perf = ps ? `<div class="eyebrow" style="margin-top:18px">Wertentwicklung der heutigen Positionen</div><div class="perf">${ps.periods.map(x => `<div><div class="l">${x.label}</div><div class="v num ${sign(x.v)}">${x.v == null ? '–' : pctS(x.v, 1)}</div><div class="b num">${x.b == null ? '&nbsp;' : 'S&amp;P ' + pctS(x.b, 1)}</div></div>`).join('')}</div>` : '';
@@ -224,12 +264,9 @@ function vHome(c) {
         <div><span class="l">Dividenden pro Jahr<small>erwartet, brutto</small></span><span class="v num">${eur(c.divYear, 0)}<small class="muted">${c.value ? nf(c.divYear / c.value * 100, 2) + ' % Rendite' : ''}</small></span></div>
         <div><span class="l">Positionen</span><span class="v num">${c.held.length}<small class="muted">${CLASS_ORDER.map(k => [k, c.held.filter(p => assetClass(p.key) === k).length]).filter(x => x[1]).map(x => x[1] + ' ' + x[0]).join(' · ')}</small></span></div></div>`)}
       ${fgCard()}
-      ${card('Risiko', 'Heutige Positionen, letztes Jahr', `<div class="stats">
-        ${stat('Schwankung', ps && ps.vol != null ? nf(ps.vol, 1) + ' %' : '–', 'pro Jahr')}${stat('Größter Rückgang', ps && ps.maxDD != null ? nf(ps.maxDD, 1) + ' %' : '–', 'vom Hoch', 'neg')}
-        ${stat('Beta', ps && ps.beta != null ? nf(ps.beta, 2) : '–', 'zum S&P 500')}${stat('Krypto-Anteil', nf(c.cryptoShare || 0, 1) + ' %')}
-        ${stat('Größte Einzelposition', topOne ? nf(topOne.weight, 1) + ' %' : '–', topOne ? esc(topOne.symbol) + ' · ohne ETFs' : '')}${stat('Fünf größte', nf(top5, 0) + ' %', 'vom Depot')}</div>`)}
       ${card('Beitrag heute', 'Wer den Tag bewegt hat, in Euro', attribution(c))}
     </div>
+    ${riskCard(c)}
     ${card('Allokation', '', allocation(c, alloc), seg('alloc', ['Anlageklasse', 'Sektor', 'Währung'], alloc), 'span7')}
     ${card('Nächste Termine', 'Deine Titel, Fed und Konjunktur', cal.length ? calCompact(cal) + `<div class="btnrow" style="margin-top:10px"><button class="btn sm ghost" data-act="tab" data-v="cal">Alle Termine</button></div>` : '<p class="empty">Keine Termine bekannt.</p>', '', 'span5')}
     ${ap ? `<details class="card fold span12"><summary><div><h2>Einschätzung der Recherche</h2><p class="sub">${esc(ap.headline)} · ${esc(ago(ap.at))}</p></div><span class="chev"></span></summary>
