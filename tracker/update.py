@@ -327,6 +327,13 @@ def run_daily(store):
         if key in out:
             out[key]["reddit"] = b
     crypto_fg = sources.crypto_fear_greed()
+    # Angst und Gier am Aktienmarkt: eigene Berechnung (CNN sperrt Skripte), aus Yahoo-Kursen
+    fg_hist = {}
+    for sym in ("^GSPC", "^VIX", "SPY", "TLT", "HYG", "IEF", "RSP"):
+        h = sources.stock_history(sym, "2y")
+        if h:
+            fg_hist[sym] = (h["d"], h["c"])
+    market_fg = analytics.market_fear_greed(fg_hist)
     # Branchen der großen Indizes als Vergleich für die Sektoren des Depots (über die ETFs URTH und SPY)
     sector_bench = {}
     for name, sym in SECTOR_BENCH:
@@ -340,7 +347,7 @@ def run_daily(store):
             h = sources.fx_history(cur, rng)
             if h:
                 fx[cur] = h
-    store.put("daily.json", {"updated": now_iso(), "assets": out, "bench": bench, "sector_bench": sector_bench, "crypto_fg": crypto_fg, "fx": fx,
+    store.put("daily.json", {"updated": now_iso(), "assets": out, "bench": bench, "sector_bench": sector_bench, "crypto_fg": crypto_fg, "market_fg": market_fg, "fx": fx,
                              "sources": sources.STATUS})
     log("Tagesdaten: %d von %d Titeln mit Verlauf" % (len(out), len(assets)))
 

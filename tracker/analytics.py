@@ -419,3 +419,71 @@ def move_read(chg, valuation, kind="stock"):
     return ("Der Kurs fällt von hohem Bewertungsniveau, günstig ist die Aktie dadurch noch nicht." if dear else
             "Rücksetzer bei günstiger Bewertung." if cheap else
             "Die Bewertung war fair, der Rückgang macht die Aktie etwas günstiger.")
+
+
+# ----------------------------------------------------------------- Angst und Gier (Aktienmarkt, eigene Berechnung)
+FG_PARTS = (
+    ("momentum", "Schwung", "S&P 500 gegenüber seinem 125-Tage-Schnitt"),
+    ("vola", "Schwankung", "VIX gegenüber seinem 50-Tage-Schnitt (hoch = Angst)"),
+    ("haven", "Sichere Häfen", "Aktien gegen Staatsanleihen, Rendite 20 Tage"),
+    ("junk", "Ramschanleihen", "Hochzinsanleihen gegen Staatsanleihen, Rendite 20 Tage"),
+    ("breadth", "Marktbreite", "durchschnittliche Aktie: gleichgewichteter S&P 500 gegenüber seinem 50-Tage-Schnitt"),
+)
+
+
+def fg_label(v):
+    return "Extreme Angst" if v < 25 else "Angst" if v < 45 else "Neutral" if v <= 55 else "Gier" if v <= 75 else "Extreme Gier"
+
+
+def market_fear_greed(hist, window=252):
+    """Angst-und-Gier-Index nach dem Vorbild von CNN aus frei verfügbaren Kursen. hist: Kürzel -> (Tage, Schlusskurse).
+    Jeder Baustein wird mit seinem eigenen letzten Jahr verglichen (Rang 0 bis 100), der Index ist der Schnitt."""
+    need = ("^GSPC", "^VIX", "SPY", "TLT", "HYG", "IEF", "RSP")
+    if any(not hist.get(s) or len(hist[s][0]) < 200 for s in need):
+        return None
+    days = sorted(set.intersection(*(set(hist[s][0]) for s in need)))
+    px = {s: dict(zip(*hist[s])) for s in need}
+    c = {s: [px[s][d] for d in days] for s in need}
+
+    def ma(xs, i, n):
+        return sum(xs[i - n + 1:i + 1]) / n if i >= n - 1 else None
+
+    def ret(xs, i, n=20):
+        return xs[i] / xs[i - n] - 1 if i >= n and xs[i - n] else None
+
+    raw = {k: [] for k, _, _ in FG_PARTS}
+    for i in range(len(days)):
+        m = ma(c["^GSPC"], i, 125)
+        raw["momentum"].append(c["^GSPC"][i] / m - 1 if m else None)
+        m = ma(c["^VIX"], i, 50)
+        raw["vola"].append(-(c["^VIX"][i] / m - 1) if m else None)
+        a, b = ret(c["SPY"], i), ret(c["TLT"], i)
+        raw["haven"].append(a - b if a is not None and b is not None else None)
+        a, b = ret(c["HYG"], i), ret(c["IEF"], i)
+        raw["junk"].append(a - b if a is not None and b is not None else None)
+        m = ma(c["RSP"], i, 50)
+        raw["breadth"].append(c["RSP"][i] / m - 1 if m else None)
+
+    def score(i):
+        parts = {}
+        for k, xs in raw.items():
+            if xs[i] is None:
+                return None
+            hist_k = [x for x in xs[max(0, i - window + 1):i + 1] if x is not None]
+            if len(hist_k) < 60:
+                return None
+            parts[k] = round(100 * sum(1 for x in hist_k if x < xs[i]) / (len(hist_k) - 1)) if len(hist_k) > 1 else 50
+        return parts
+
+    def at(back):
+        i = len(days) - 1 - back
+        p = score(i) if i >= 0 else None
+        return (round(sum(p.values()) / len(p)), p) if p else (None, None)
+
+    v, parts = at(0)
+    if v is None:
+        return None
+    week, _ = at(5)
+    month, _ = at(21)
+    return {"value": v, "label": fg_label(v), "week": week, "month": month, "day": day_to_iso(days[-1]),
+            "parts": [{"key": k, "name": n, "about": a, "value": parts[k], "label": fg_label(parts[k])} for k, n, a in FG_PARTS]}

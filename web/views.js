@@ -181,6 +181,19 @@ function attribution(c) {
       <span class="v num ${up ? 'pos' : 'neg'}">${eurS(p.dayEur)}</span></button>`; };
   return `<div class="attr">${ups.map(row).join('')}${ups.length && dns.length ? '<hr>' : ''}${dns.map(row).join('')}</div>`;
 }
+// Angst und Gier: Aktienmarkt (eigene Berechnung nach CNN-Vorbild, update.market_fg) und Krypto (alternative.me)
+function fgCard() {
+  const m = S.daily.market_fg, k = S.daily.crypto_fg;
+  if (!m && !k) return '';
+  const gauge = (title, v, label, sub) => `<div class="fgbox"><div class="l">${title}</div><div class="v num">${v}<span>${esc(label)}</span></div>
+    <div class="fgbar" role="img" aria-label="${v} von 100"><b style="left:${Math.max(0, Math.min(100, v))}%"></b></div><div class="fgax"><span>Angst</span><span>Gier</span></div>
+    ${sub ? `<div class="n">${sub}</div>` : ''}</div>`;
+  const parts = m ? `<div class="fgparts">${m.parts.map(p => `<div title="${esc(p.about)}"><span class="pn">${esc(p.name)}</span><span class="pb"><i style="width:${p.value}%"></i></span><span class="pv num">${p.value}</span></div>`).join('')}</div>` : '';
+  return card('Angst und Gier', 'Stimmung am Markt, 0 bis 100', `<div class="fggrid">
+    ${m ? gauge('Aktien', m.value, m.label, [m.week != null ? 'vor einer Woche ' + m.week : '', m.month != null ? 'vor einem Monat ' + m.month : ''].filter(Boolean).join(' · ')) : ''}
+    ${k ? gauge('Krypto', k.value, FG_DE[k.label] || k.label, k.prev != null ? 'gestern ' + k.prev : '') : ''}</div>
+    ${parts}<p class="hint">Aktien: eigene Berechnung nach dem Vorbild von CNN aus fünf Bausteinen, jeder mit seinem letzten Jahr verglichen. Krypto: alternative.me. Ein Stimmungsbild, kein Kaufsignal.</p>`);
+}
 function vHome(c) {
   if (!c.txs.length) return `<div class="grid">${card('Willkommen', 'Trag deine ersten Käufe ein, dann rechnet das Dashboard los.',
     `<p class="body">Du gibst Aktien und Coins mit Kaufdatum, Stückzahl und Preis ein. Kurse, Dividenden, Quartalstermine,
@@ -210,6 +223,7 @@ function vHome(c) {
         <div><span class="l">Realisiert<small>aus Verkäufen</small></span><span class="v num ${sign(c.realized)}">${eurS(c.realized)}</span></div>
         <div><span class="l">Dividenden pro Jahr<small>erwartet, brutto</small></span><span class="v num">${eur(c.divYear, 0)}<small class="muted">${c.value ? nf(c.divYear / c.value * 100, 2) + ' % Rendite' : ''}</small></span></div>
         <div><span class="l">Positionen</span><span class="v num">${c.held.length}<small class="muted">${CLASS_ORDER.map(k => [k, c.held.filter(p => assetClass(p.key) === k).length]).filter(x => x[1]).map(x => x[1] + ' ' + x[0]).join(' · ')}</small></span></div></div>`)}
+      ${fgCard()}
       ${card('Risiko', 'Heutige Positionen, letztes Jahr', `<div class="stats">
         ${stat('Schwankung', ps && ps.vol != null ? nf(ps.vol, 1) + ' %' : '–', 'pro Jahr')}${stat('Größter Rückgang', ps && ps.maxDD != null ? nf(ps.maxDD, 1) + ' %' : '–', 'vom Hoch', 'neg')}
         ${stat('Beta', ps && ps.beta != null ? nf(ps.beta, 2) : '–', 'zum S&P 500')}${stat('Krypto-Anteil', nf(c.cryptoShare || 0, 1) + ' %')}

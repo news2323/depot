@@ -451,3 +451,14 @@ input:focus,select:focus{border-color:var(--accent);background:var(--surface)}
 /* Teildepots */
 .depbar{display:flex;margin:0 0 14px}
 .depbar .seg button{padding-left:14px;padding-right:14px}
+
+/* Angst und Gier in der Übersicht */
+.fggrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fggrid .fgbox .v{font-size:24px}
+.fgparts{margin-top:12px;display:grid;gap:6px}
+.fgparts>div{display:grid;grid-template-columns:110px 1fr 28px;align-items:center;gap:8px;font-size:12.5px}
+.fgparts .pn{color:var(--ink2)}
+.fgparts .pb{height:5px;border-radius:3px;background:var(--surface3);overflow:hidden}
+.fgparts .pb i{display:block;height:100%;border-radius:3px;background:var(--ink3)}
+.fgparts .pv{text-align:right;color:var(--ink2)}
+@media (max-width:420px){.fggrid{grid-template-columns:1fr}}
