@@ -144,6 +144,25 @@ async function autoRefresh() {
   S.auto = false; spin(false);
 }
 
+/* Neue Version der Seite: Browser und Home-Bildschirm-Apps heben index.html bis zu 10 Minuten (iOS oft länger) auf.
+   Beim Öffnen und Zurückkehren die aktuelle Fassung ohne Zwischenspeicher holen; ist sie neuer, mit eigener Adresse neu laden
+   (eine neue Adresse umgeht jeden Zwischenspeicher). Je Version nur ein Versuch, damit nichts in Schleife lädt. */
+const APP_V = (((document.currentScript || {}).src || '').match(/[?&]v=(\w+)/) || [])[1] || 'dev';
+let verAt = 0;
+async function checkVersion() {
+  if (APP_V === 'dev' || LOCAL || Date.now() - verAt < 6e4) return;
+  verAt = Date.now();
+  try {
+    const r = await fetch('index.html?t=' + Date.now(), {cache: 'no-store'});
+    const v = ((await r.text()).match(/app\.js\?v=(\w+)/) || [])[1];
+    if (!v || v === APP_V || v === 'dev') return;
+    let tried = ''; try { tried = sessionStorage.getItem('depot_v') || ''; } catch (e) { /* egal */ }
+    if (tried === v) return;
+    try { sessionStorage.setItem('depot_v', v); } catch (e) { /* egal */ }
+    location.replace(location.pathname + '?v=' + v + location.hash);
+  } catch (e) { /* offline: alte Fassung bleibt */ }
+}
+
 /* ---------------------------------------------------------------- Rechnen */
 function bisect(arr, x) { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] <= x) lo = m + 1; else hi = m; } return lo - 1; }
 const fxNow = cur => cur === 'EUR' ? 1 : ((S.market.fx || {})[cur] || null);

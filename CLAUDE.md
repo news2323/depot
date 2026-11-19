@@ -16,7 +16,7 @@ Aktien- und Krypto-Tracker mit Dashboard im Stil des Börsen-Newsletters (Apple-
 - Dividenden pro Jahr: Yahoo-`dividendRate`, sonst die letzten Zahlungen eines vollen Jahres nach erkanntem Rhythmus (`analytics.dividend_info`), kein starres 365-Tage-Fenster.
   Auf `localhost` spricht sie mit `server.py`, sonst über die GitHub-API mit dem privaten Daten-Repo.
 - `server.py` lokaler Server (`--data <ordner> --port <n>` für Tests mit Beispieldaten).
-- `.github/workflows/` `kurse.yml` (geplant: `update loop 50`, prüft 50 Min. lang alle 5 Min., weil GitHub geplante Läufe nur alle 40 bis 150 Min. startet; aus der App: `fast` in eigener Concurrency-Gruppe), `analyse.yml` (täglich), `seite.yml` (Pages aus `web/`, ersetzt `?v=dev` in `index.html` durch den Commit, damit Browser nach Updates nicht alte Dateien nutzen).
+- `.github/workflows/` `kurse.yml` (geplant: `update loop 50`, prüft 50 Min. lang alle 5 Min., weil GitHub geplante Läufe nur alle 40 bis 150 Min. startet; aus der App: `fast` in eigener Concurrency-Gruppe), `analyse.yml` (täglich), `seite.yml` (Pages aus `web/`, ersetzt `?v=dev` in `index.html` durch den Commit, damit Browser nach Updates nicht alte Dateien nutzen; dazu prüft `checkVersion` in `app.js` beim Öffnen und Zurückkehren, ob `index.html` eine neuere Version nennt, und lädt dann mit `?v=` neu, weil iOS die Startseite der Home-Bildschirm-App länger aufhebt).
 - `newsletter_baustein.py` Karte „Dein Depot“ zum Einfügen in Jakobs Newsletter.
 
 ## Datendateien (`data/`)

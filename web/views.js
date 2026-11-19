@@ -863,10 +863,10 @@ document.addEventListener('mouseover', ev => {
 document.addEventListener('mouseleave', ev => { if (ev.target.classList && ev.target.classList.contains('alloc')) { ev.target.querySelectorAll('path').forEach(p => p.style.opacity = ''); const dc = ev.target.querySelector('.dc'); dc.innerHTML = `<span class="n">${esc(dc.dataset.defN)}</span><b class="num">${esc(dc.dataset.defV)}</b>`; } }, true);
 document.addEventListener('click', ev => { const q = $('#qres'); if (q && !ev.target.closest('.search')) q.hidden = true; });
 let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawCharts, 150); });
-document.addEventListener('visibilitychange', async () => { if (document.hidden || !S.pf) return; if (Date.now() - (S.loaded || 0) > 6e4 && $('#sheet').hidden && !S.auto) { await loadAll(); S.loaded = Date.now(); render(); } autoRefresh(); });
+document.addEventListener('visibilitychange', async () => { if (document.hidden) return; checkVersion(); if (!S.pf) return; if (Date.now() - (S.loaded || 0) > 6e4 && $('#sheet').hidden && !S.auto) { await loadAll(); S.loaded = Date.now(); render(); } autoRefresh(); });
 (async function start() {
   if (!LOCAL && !cfg) return render();
   $('#app').innerHTML = '<div class="wrap"><p class="empty">Lade Depot …</p></div>';
   await loadAll(); S.loaded = Date.now(); render();
-  autoRefresh(); loadLogos();
+  autoRefresh(); loadLogos(); checkVersion();
 })();
