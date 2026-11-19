@@ -327,8 +327,22 @@ function drawCharts() {
   const el = $('#ch-asset');
   if (el) {
     const key = el.dataset.key, h = D(key).hist, c2 = calc();
-    if (h && h.d.length > 1) {
-      const from = h.d[h.d.length - 1] - RANGES[S.assetRange || '1J'];
+    const wk = (S.market.spark || {})[key], wt = (S.market.spark_t || {})[key];
+    if ((S.assetRange || '1J') === '1W' && wk && wt && wt.length === wk.length && wk.length > 4) {
+      // Woche aus Stundenkursen (market.json → spark, spark_t), dazu der aktuelle Kurs
+      const times = wt.map(x => x * 3600000), vals = wk.slice(), live = A(key).price;
+      if (live != null && !A(key).error && Date.now() > times[times.length - 1] - 1800000) { vals.push(live); times.push(Math.max(Date.now(), times[times.length - 1] + 1)); }
+      const pts = vals.map((v, i) => [i, toShow(key, v)]), lo = Math.min(...pts.map(p => p[1])), hi = Math.max(...pts.map(p => p[1])), near = y => y > lo - (hi - lo) && y < hi + (hi - lo);
+      const p = c2.pos.find(x => x.key === key), hl = [];
+      const avg = p && p.qty > 1e-12 ? (showCur(key) === 'EUR' ? p.cost / p.qty : p.avgNative) : null;
+      if (avg && near(avg)) hl.push({y: avg, label: 'Dein Einstand ' + money(avg, showCur(key)), color: 'var(--accent)'});
+      (D(key).levels || []).slice(0, 2).forEach(l => { const y = toShow(key, l.price); if (near(y)) hl.push({y, label: 'Nachkauf-Zone ' + px(key, l.price), color: 'var(--up)'}); });
+      const mk = c2.txs.filter(t => t.key === key && t.day * 864e5 >= times[0]).map(t => { const i = times.findIndex(x => x >= t.day * 864e5);
+        return i < 0 ? null : {x: i, y: pts[i][1], color: t.type === 'buy' ? 'var(--up)' : 'var(--down)', title: `${t.type === 'buy' ? 'Kauf' : 'Verkauf'} ${nf(t.qty, 4)} zu ${money(t.price, t.currency)}`}; }).filter(Boolean);
+      const up = pts[pts.length - 1][1] >= pts[0][1];
+      lineChart(el, [{name: shortName(key), color: up ? 'var(--up)' : 'var(--down)', area: true, pts}], {fmt: v => money(v, showCur(key)), hlines: hl, markers: mk, height: 230, label: 'Kursverlauf der letzten 7 Tage', times});
+    } else if (h && h.d.length > 1) {
+      const from = h.d[h.d.length - 1] - (RANGES[S.assetRange || '1J'] || 7);
       const pts = h.d.map((x, i) => [x, toShow(key, h.c[i], x)]).filter(p => p[0] >= from);
       const p = c2.pos.find(x => x.key === key), hl = [];
       const avg = p && p.qty > 1e-12 ? (showCur(key) === 'EUR' ? p.cost / p.qty : p.avgNative) : null;
@@ -654,7 +668,7 @@ function vAsset(key) {
   const ir = safeUrl((ai || {}).ir_url) || safeUrl(f.ir_website) || safeUrl(f.website);
   let h = sheetTop(`<span class="ahead">${logo(key)}<span><small>${esc(tick(key))} · ${esc(assetClass(key))}</small>${esc(shortName(key))}</span></span>`,
     [nameOf(key) !== shortName(key) ? nameOf(key) : '', SECTOR_DE[f.sector] || f.sector, f.industry].filter(Boolean).map(esc).join(' · '));
-  h += `<section class="card"><div class="pricehead"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="p num">${px(key, a.price)}</span> ${pill(a.change_pct)} ${v ? score(key) : ''}</div>${seg('arange', ['3M', '1J', '3J', 'Max'], S.assetRange || '1J')}</div>
+  h += `<section class="card"><div class="pricehead"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="p num">${px(key, a.price)}</span> ${pill(a.change_pct)} ${v ? score(key) : ''}</div>${seg('arange', ['1W', '1M', '3M', '1J', '3J', 'Max'], S.assetRange || '1J')}</div>
     <div class="chart" id="ch-asset" data-key="${esc(key)}"></div>
     <div class="tiles">${tile('1 Monat', pctS(t.perf_1m, 1), '', sign(t.perf_1m))}${tile('1 Jahr', pctS(t.perf_1y, 1), '', sign(t.perf_1y))}
     ${tile('52-Wochen-Spanne', t.low52 ? px(key, t.low52) + ' – ' + px(key, t.high52) : '–')}${tile('Abstand zum Hoch', t.from_high != null ? nf(t.from_high, 1) + ' %' : '–')}</div></section>`;

@@ -886,28 +886,36 @@ def _sig(x, n=5):
 
 
 def spark_7d(kind, sym):
-    """Stundenkurse der letzten 7 Tage (Aktien: Handelsstunden), höchstens etwa 90 Punkte."""
+    """Stundenkurse der letzten 7 Tage (Aktien: Handelsstunden), höchstens etwa 90 Punkte.
+    Gibt (Stunden seit 1970, Schlusskurse) zurück; die Stunde ist das Ende des Zeitabschnitts."""
     now = int(time.time())
+    t = c = None
     if kind == "crypto":
         r = _try("Binance Spot", "%s/klines?symbol=%sUSDT&interval=1h&limit=168" % (BINANCE_SPOT, sym))
-        c = [fnum(k[4]) for k in r] if isinstance(r, list) and len(r) > 24 else None
-        if not c:
+        if isinstance(r, list) and len(r) > 24:
+            t, c = [int(k[0] // 3600000) + 1 for k in r], [fnum(k[4]) for k in r]
+        else:
             r = _try("Hyperliquid", "https://api.hyperliquid.xyz/info", body={
                 "type": "candleSnapshot", "req": {"coin": sym, "interval": "1h", "startTime": (now - 7 * 86400) * 1000, "endTime": now * 1000}})
-            c = [fnum(k["c"]) for k in r] if isinstance(r, list) and len(r) > 24 else None
+            if isinstance(r, list) and len(r) > 24:
+                t, c = [int(k["t"] // 3600000) + 1 for k in r], [fnum(k["c"]) for k in r]
         if not c:
             return None
-        c = c[::2] if len(c) > 100 else c
+        if len(c) > 100:
+            t, c = t[::2], c[::2]
     else:
         r = _try("Yahoo Kurse", "https://query1.finance.yahoo.com/v8/finance/chart/%s?period1=%d&period2=%d&interval=1h" % (
             urllib.parse.quote(sym), now - 7 * 86400, now))
         try:
-            c = [x for x in r["chart"]["result"][0]["indicators"]["quote"][0]["close"] if x]
+            ts, cs = r["chart"]["result"][0]["timestamp"], r["chart"]["result"][0]["indicators"]["quote"][0]["close"]
         except (TypeError, KeyError, IndexError):
             return None
-        if len(c) < 5:
+        pairs = [(int(a // 3600) + 1, b) for a, b in zip(ts, cs) if b]
+        if len(pairs) < 5:
             return None
-    return [_sig(x) for x in c if x]
+        t, c = [p[0] for p in pairs], [p[1] for p in pairs]
+    pairs = [(a, _sig(b)) for a, b in zip(t, c) if b]
+    return [p[0] for p in pairs], [p[1] for p in pairs]
 
 
 def coin_meta(symbols):
@@ -930,11 +938,12 @@ def coin_spark(symbols):
         return {}
     r = _try("CoinGecko", "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&sparkline=true&symbols=" +
              ",".join(sorted(s.lower() for s in symbols)), timeout=30)
-    best = {}
+    best, now_h = {}, int(time.time() // 3600)
     for x in r or []:
         s, c = str(x.get("symbol") or "").upper(), ((x.get("sparkline_in_7d") or {}).get("price") or [])
         if s and len(c) > 24 and (s not in best or (x.get("market_cap") or 0) > best[s][0]):
-            best[s] = (x.get("market_cap") or 0, [_sig(v) for v in c[::2] if v])
+            c = [v for v in c[::2] if v]   # CoinGecko: Stundenwerte bis jetzt, ohne Zeitangabe
+            best[s] = (x.get("market_cap") or 0, ([now_h - 2 * (len(c) - 1 - k) for k in range(len(c))], [_sig(v) for v in c]))
     return {s: v[1] for s, v in best.items()}
 
 

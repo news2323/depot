@@ -64,8 +64,8 @@ def run_fast(store):
     for sym in list(oi_mem):
         if asset_key("crypto", sym) not in assets:
             del oi_mem[sym]
-    spark, spark_at = refresh_spark(assets, old_market)
-    store.put("market.json", {"updated": now_iso(), "fx": fx, "assets": out, "indices": indices, "spark": spark, "spark_at": spark_at,
+    spark, spark_t, spark_at = refresh_spark(assets, old_market)
+    store.put("market.json", {"updated": now_iso(), "fx": fx, "assets": out, "indices": indices, "spark": spark, "spark_t": spark_t, "spark_at": spark_at,
                               "sources": sources.STATUS})
     store.put("state.json", state)
     log("Kurse: %d Titel, %d ohne Daten, %d Alerts ausgelöst, %d Bewegungen gemeldet" % (
@@ -76,20 +76,25 @@ SPARK_EVERY = 55 * 60   # 7-Tage-Verlauf (Stundenkurse) für die Watchlist am Ha
 
 
 def refresh_spark(assets, old_market):
-    """7-Tage-Verlauf je Titel. Fällig einmal pro Stunde, neue Titel sofort; bei Fehlern bleibt der alte Verlauf."""
-    old, at = old_market.get("spark") or {}, old_market.get("spark_at") or 0
+    """7-Tage-Verlauf je Titel (Kurse und Stunden). Fällig einmal pro Stunde, neue Titel sofort; bei Fehlern bleibt der alte."""
+    old, old_t, at = old_market.get("spark") or {}, old_market.get("spark_t") or {}, old_market.get("spark_at") or 0
     due = time.time() - at > SPARK_EVERY
-    out = {}
+    out, out_t = {}, {}
     for key, a in assets.items():
-        if due or key not in old:
-            c = sources.spark_7d(a["kind"], a["symbol"])
-            out[key] = c or old.get(key)
-        else:
+        if due or key not in old or key not in old_t:
+            r = sources.spark_7d(a["kind"], a["symbol"])
+            if r:
+                out_t[key], out[key] = r
+                continue
+        if key in old:
             out[key] = old[key]
-    missing = [a["symbol"] for k, a in assets.items() if a["kind"] == "crypto" and not out.get(k)]
-    for sym, c in sources.coin_spark(missing).items():
-        out[asset_key("crypto", sym)] = c
-    return {k: v for k, v in out.items() if v}, int(time.time()) if due else at
+            if key in old_t:
+                out_t[key] = old_t[key]
+    missing = [a["symbol"] for k, a in assets.items() if a["kind"] == "crypto" and (k not in out or k not in out_t)]
+    for sym, (t, c) in sources.coin_spark(missing).items():
+        out_t[asset_key("crypto", sym)], out[asset_key("crypto", sym)] = t, c
+    out_t = {k: v for k, v in out_t.items() if k in out and len(v) == len(out[k])}
+    return out, out_t, int(time.time()) if due else at
 
 
 MARKET_STRIP = [("^GSPC", "S&P 500"), ("^NDX", "Nasdaq 100"), ("^GDAXI", "DAX"), ("^STOXX50E", "Euro Stoxx 50"),

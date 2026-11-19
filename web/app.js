@@ -380,9 +380,11 @@ function lineChart(host, series, opt = {}) {
       `<text class="ax num" x="${W - pr + 8}" y="${sy(v) + 4}">${esc(fmt(v))}</text>`;
   }
   const span = x1 - x0, n = Math.min(5, Math.max(2, Math.floor(W / 110)));
+  // opt.times: Stundenkurse (x = laufende Nummer, gleichmäßig verteilt; Nächte und Wochenenden ohne Handel fallen weg)
+  const T = opt.times, WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
   for (let i = 0; i <= n; i++) {
-    const x = x0 + span * i / n, dt = dayToDate(Math.round(x));
-    const lab = span > 500 ? `${MON_K[dt.getUTCMonth()]} ${String(dt.getUTCFullYear()).slice(2)}` : `${dt.getUTCDate()}. ${MON_K[dt.getUTCMonth()]}`;
+    const x = x0 + span * i / n, dt = T ? new Date(T[Math.min(T.length - 1, Math.max(0, Math.round(x)))]) : dayToDate(Math.round(x));
+    const lab = T ? `${WD[dt.getDay()]} ${dt.getDate()}.` : span > 500 ? `${MON_K[dt.getUTCMonth()]} ${String(dt.getUTCFullYear()).slice(2)}` : `${dt.getUTCDate()}. ${MON_K[dt.getUTCMonth()]}`;
     g += `<text class="ax" x="${sx(x)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === n ? 'end' : 'middle'}">${lab}</text>`;
   }
   const used = [];   // Beschriftungen dicht beieinander liegender Linien nicht übereinander schreiben
@@ -418,7 +420,9 @@ function lineChart(host, series, opt = {}) {
       if (j + 1 < xs.length && Math.abs(xs[j + 1] - x) < Math.abs(xs[j] - x)) j++;
       const p = s.pts[j], dot = el.querySelector('.dot' + i);
       dot.setAttribute('cx', sx(p[0])); dot.setAttribute('cy', sy(p[1])); dot.setAttribute('visibility', 'visible');
-      if (cx == null) { cx = sx(p[0]); const dt = dayToDate(p[0]); html = `<b>${dt.getUTCDate()}. ${MON[dt.getUTCMonth()]} ${dt.getUTCFullYear()}</b>`; }
+      if (cx == null) { cx = sx(p[0]);
+        if (T) { const dt = new Date(T[p[0]]); html = `<b>${WD[dt.getDay()]}, ${dt.getDate()}. ${MON[dt.getMonth()]}, ${String(dt.getHours()).padStart(2, '0')}:00 Uhr</b>`; }
+        else { const dt = dayToDate(p[0]); html = `<b>${dt.getUTCDate()}. ${MON[dt.getUTCMonth()]} ${dt.getUTCFullYear()}</b>`; } }
       html += `<br><i style="background:${s.color}"></i>${esc(s.name)}: <b>${esc((s.fmt || fmt)(p[1]))}</b>`;
     });
     xh.setAttribute('x1', cx); xh.setAttribute('x2', cx); xh.setAttribute('visibility', 'visible');
