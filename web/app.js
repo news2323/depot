@@ -193,7 +193,7 @@ const nameOf = key => A(key).name || D(key).name || key.split(':')[1];
    (AMD, SAP, UBS). Firmenzusätze werden abgeschnitten, einige Namen fest vorgegeben. ETFs nach ihrem Index bzw. Thema. */
 const SHORT = {'stock:GOOGL': 'Google', 'stock:GOOG': 'Google', 'stock:AMD': 'AMD', 'stock:MC.PA': 'LVMH', 'stock:LHA.DE': 'Lufthansa',
   'stock:1211.HK': 'BYD', 'stock:HIMS': 'Hims & Hers', 'stock:BMNR': 'Bitmine', 'stock:ANT': 'Anthropic', 'stock:IBM': 'IBM',
-  'stock:TSM': 'TSMC', 'stock:BRK-B': 'Berkshire Hathaway', 'stock:BRK-A': 'Berkshire Hathaway'};
+  'stock:TSM': 'TSMC', 'stock:BRK-B': 'Berkshire', 'stock:BRK-A': 'Berkshire'};
 const FUND_THEME = [[/MSCI World/i, 'MSCI World'], [/NASDAQ[- ]?100/i, 'Nasdaq 100'], [/S&P 500/i, 'S&P 500'], [/All[- ]World/i, 'All-World'],
   [/Emerging Markets/i, 'Schwellenländer'], [/Gold/i, 'Gold'], [/Silver|Silber/i, 'Silber'], [/Commodit/i, 'Rohstoffe'],
   [/Clean Energy/i, 'Saubere Energie'], [/Electric Vehicles/i, 'Elektroautos'], [/Asia Pacific Ex Japan/i, 'Asien-Pazifik'], [/DAX/i, 'DAX'],
@@ -714,7 +714,7 @@ function riskStats() {
     scen('Dollar −10 % zum Euro', o => o.v * o.bUsd * -0.10)];
   r.usdShare = pos.reduce((s, o) => s + o.v * o.bUsd, 0) / V * 100;
   r.beta = pos.reduce((s, o) => s + o.v * o.bMkt, 0) / V;
-  r.est = pos.filter(o => o.est).map(o => o.symbol);
+  r.est = pos.filter(o => o.est).map(o => shortName(o.key));
   // Klumpen
   const cls = {}; pos.forEach(o => { cls[o.cls] = (cls[o.cls] || 0) + o.v; });
   r.classes = Object.entries(cls).map(([name, v]) => ({name, pct: v / V * 100}));
@@ -728,7 +728,7 @@ function riskStats() {
   const held = new Map(c.held.filter(p => p.value > 0).map(p => [p.key, p]));
   r.earnings = (S.digest.calendar || []).filter(e => e.category === 'Earnings' && held.has(e.key) && isoToDay(e.date) >= end && isoToDay(e.date) <= end + 21)
     .map(e => ({symbol: e.symbol, key: e.key, date: e.date, pct: held.get(e.key).weight}));
-  const pick = f => { const l = c.held.filter(p => p.value > 0 && f(p)); return {pct: l.reduce((s, p) => s + p.weight, 0), list: l.map(p => p.symbol)}; };
+  const pick = f => { const l = c.held.filter(p => p.value > 0 && f(p)); return {pct: l.reduce((s, p) => s + p.weight, 0), list: l.map(p => shortName(p.key))}; };
   r.expensive = pick(p => { const x = ratingOf(p.key); return x != null && x <= 3; });
   r.estDown = pick(p => { const f = D(p.key).fund; if (!f) return false; const v = f.est_chg_90d != null ? f.est_chg_90d : (f.est_eps != null && f.est_eps_90d ? (f.est_eps - f.est_eps_90d) / Math.abs(f.est_eps_90d) * 100 : null); return v != null && v <= -5; });
   r.losers = pick(p => p.pnlPct != null && p.pnlPct <= -20);

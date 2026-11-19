@@ -88,12 +88,20 @@ const typeOf = key => isCoin(key) ? 'Krypto' : isFund(key) ? 'ETFs' : 'Aktien';
 const flt = (id, opts) => { const cur = (S.flt || {})[id] || opts[0]; return `<div class="seg">${opts.map(o => `<button data-act="flt" data-id="${id}" data-v="${o}" class="${o === cur ? 'on' : ''}">${o}</button>`).join('')}</div>`; };
 const fltOn = (id, def = 'Alle') => (S.flt || {})[id] || def;
 
+// Neuer Stil überall (Jakobs Wunsch vom 19.11.2026): Logo, umgangssprachlicher Name, darunter Kürzel und Marktwert bzw. Anbieter
+const tick = key => { const s = key.split(':')[1]; return /^\d/.test(s) ? s : s.split('.')[0]; };   // Kürzel ohne Börsenendung (1211.HK bleibt)
+const subLine = (key, extra) => [shortName(key) === tick(key) ? '' : tick(key), extra != null ? extra : (mcapTxt(key) || ((isFund(key) || isCommodity(key)) && issuerOf(key)) || '')].filter(Boolean).join(' · ');
+const nameCell = (key, extra) => `<div class="nm">${logo(key)}<div class="nmt"><b>${esc(shortName(key))}</b><small>${esc(subLine(key, extra))}</small></div></div>`;
+const tag = key => `<span class="tg">${logo(key)}<b>${esc(shortName(key))}</b></span>`;   // klein, in Zeilen und Fließtext
+const chgA = v => v == null || isNaN(v) ? '<span class="muted">–</span>' : `<span class="num chga ${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '▲' : '▼'} ${nf(Math.abs(v), 2)} %</span>`;
+const w7 = key => { const s = (S.market.spark || {})[key], p = A(key).price; return s && s[0] && p != null ? (p / s[0] - 1) * 100 : null; };
+const keyBySym = sym => allTracked().find(k => k.split(':')[1] === sym) || 'stock:' + sym;
 const COL = {
   score: {id: 'score', label: 'Punkte', cls: 'c-score', num: true, sort: r => ratingOf(r.key), html: r => score(r.key)},
-  name: {id: 'name', label: 'Titel', cls: 'c-name', sort: r => r.key.split(':')[1], html: r => `<span class="sym">${esc(r.key.split(':')[1])}</span><div class="ts">${esc(nameOf(r.key))}</div>`},
-  spark: {id: 'spark', label: '30 Tage', cls: 'c-spark hm', html: r => spark(r.key)},
+  name: {id: 'name', label: 'Titel', cls: 'c-name', sort: r => shortName(r.key).toLowerCase(), html: r => nameCell(r.key, r.p ? `${nf(r.p.qty, r.p.qty % 1 ? 2 : 0)} Stück` : undefined)},
+  spark: {id: 'w7', label: '7 Tage', cls: 'c-spark hm', num: true, sort: r => w7(r.key), html: r => `<div class="spk">${spark7(r.key)}<small class="num ${sign(w7(r.key))}">${w7(r.key) == null ? '' : pctS(w7(r.key), 1)}</small></div>`},
   price: {id: 'price', label: 'Kurs', cls: 'r hm', html: r => `<span class="num">${px(r.key, A(r.key).price)}</span>`},
-  day: {id: 'day', label: 'Heute', cls: 'r', num: true, sort: r => A(r.key).change_pct, html: r => chg(A(r.key).change_pct)},
+  day: {id: 'day', label: 'Heute', cls: 'r', num: true, sort: r => A(r.key).change_pct, html: r => chgA(A(r.key).change_pct)},
   m1: {id: 'm1', label: '1 Monat', cls: 'r hm', num: true, sort: r => (D(r.key).tech || {}).perf_1m, html: r => chg((D(r.key).tech || {}).perf_1m, 1)},
   rng: {id: 'rng', label: '52 Wochen', cls: 'r hm', num: true, sort: r => { const t = D(r.key).tech || {}, p = A(r.key).price; return t.high52 > t.low52 && p != null ? (p - t.low52) / (t.high52 - t.low52) : null; }, html: r => rangeBar(r.key)},
   zone: {id: 'zone', label: 'Nachkauf-Zone', cls: 'r hm', num: true, sort: r => { const l = zoneOf(r.key); return l ? l.price / A(r.key).price - 1 : null; }, html: r => { const l = zoneOf(r.key); return l ? `<div class="num">${px(r.key, l.price)}</div><div class="ts num">${nf((l.price / A(r.key).price - 1) * 100, 1)} %</div>` : '<span class="ts">–</span>'; }},
@@ -179,7 +187,7 @@ function attribution(c) {
   const dns = ps.filter(p => p.dayEur < 0).sort((a, b) => a.dayEur - b.dayEur).slice(0, 5);
   const mx = Math.max(...ups.concat(dns).map(p => Math.abs(p.dayEur))) || 1;
   const row = p => { const w = Math.abs(p.dayEur) / mx * 100, up = p.dayEur >= 0;
-    return `<button data-act="open" data-key="${esc(p.key)}" title="${esc(p.name)}: ${pctS(p.dayPct)}"><span class="sym">${esc(p.symbol)}</span>
+    return `<button data-act="open" data-key="${esc(p.key)}" title="${esc(p.name)}: ${pctS(p.dayPct)}">${tag(p.key)}
       <span class="dv"><span>${up ? '' : `<i style="width:${w}%;background:var(--down)"></i>`}</span><span>${up ? `<i style="width:${w}%;background:var(--up)"></i>` : ''}</span></span>
       <span class="v num ${up ? 'pos' : 'neg'}">${eurS(p.dayEur)}</span></button>`; };
   return `<div class="attr">${ups.map(row).join('')}${ups.length && dns.length ? '<hr>' : ''}${dns.map(row).join('')}</div>`;
@@ -204,7 +212,7 @@ function riskCard(c) {
     ${r.worstMonth ? row('Schlechtester Monat', e0(r.worstMonth.eur), `30 Tage bis ${dateDe(dayIso(r.worstMonth.day))}, ${pctS(r.worstMonth.pct, 1)}`) : ''}
     ${dd ? row(`Größter Rückgang seit ${new Date(dd.since * DAY).getFullYear()}`, pctS(dd.pct, 1),
       `heute ${e0(dd.eur)} · ${dateDe(dayIso(dd.peak))} bis ${dateDe(dayIso(dd.trough))} · ${dd.back ? 'wieder erholt nach ' + months(dd.trough, dd.back) : 'noch nicht wieder erreicht'}`) : ''}`;
-  const scen = r.scen.map(s => `<div class="rk"><span class="l">${s.label}${s.top.length ? `<small>am meisten: ${s.top.map(z => `${esc(z.o.symbol)} ${e0(z.x)}`).join(' · ')}</small>` : ''}</span>
+  const scen = r.scen.map(s => `<div class="rk"><span class="l">${s.label}${s.top.length ? `<small>am meisten: ${s.top.map(z => `${esc(shortName(z.o.key))} ${e0(z.x)}`).join(' · ')}</small>` : ''}</span>
     <span class="v num neg">${e0(s.eur)}<small>${pctS(s.pct, 1)}</small></span></div>`).join('');
   const what = `${scen}${row('Dollar-Anteil', nf(r.usdShare, 0) + ' %', 'wie stark dein Depot am Dollar hängt, auch über ETFs', '')}
     <p class="hint">Geschätzt aus dem Verhalten jeder Position in den letzten drei Jahren (Coins: einem Jahr).${r.est.length ? ` Ohne genug Verlauf, deshalb Faustwert: ${syms(r.est)}.` : ''}</p>`;
@@ -212,11 +220,11 @@ function riskCard(c) {
     <div class="mixlg">${r.classes.map(k => `<span><b style="background:${CLASS_COL[k.name] || 'var(--s0)'}"></b>${k.name} ${nf(k.pct, 0)} %</span>`).join('')}</div>`;
   const ts = r.topStock, sec = r.topSector;
   const lump = `${mixBar}
-    ${ts ? row(`Größte Einzelaktie: ${esc(ts.symbol)}`, e0(ts.half), `${nf(ts.pct, 1)} % vom Depot · so viel kostet es, wenn sie sich halbiert`) : ''}
+    ${ts ? row(`Größte Einzelaktie: ${esc(shortName(ts.key))}`, e0(ts.half), `${nf(ts.pct, 1)} % vom Depot · so viel kostet es, wenn sie sich halbiert`) : ''}
     ${row('Fünf größte Einzelaktien', nf(r.top5, 0) + ' %', 'vom Depot', '')}
     ${sec ? row(`Größte Branche: ${esc(sec.name)}`, nf(sec.ofEq, 0) + ' %', `deiner Aktien und Aktien-ETFs${sec.world != null ? ` · in der Welt (MSCI World) ${nf(sec.world, 0)} %` : ''}`, sec.world != null && sec.ofEq > sec.world + 10 ? 'neg' : '') : ''}`;
   const soon = [
-    r.earnings.length ? row('Quartalszahlen in 3 Wochen', pc(r.earnings.reduce((s, e) => s + e.pct, 0)), r.earnings.map(e => `${esc(e.symbol)} ${dateDe(e.date).replace(/ \d{4}$/, '')}`).join(' · '), '') : '',
+    r.earnings.length ? row('Quartalszahlen in 3 Wochen', pc(r.earnings.reduce((s, e) => s + e.pct, 0)), r.earnings.map(e => `${esc(shortName(e.key))} ${dateDe(e.date).replace(/ \d{4}$/, '')}`).join(' · '), '') : '',
     r.expensive.list.length ? row('Nach Punkten teuer (1 bis 3)', pc(r.expensive.pct), syms(r.expensive.list), '') : '',
     r.estDown.list.length ? row('Gewinnschätzung gesenkt', pc(r.estDown.pct), syms(r.estDown.list) + ' · um 5 % oder mehr in 90 Tagen', '') : '',
     r.losers.list.length ? row('Mehr als 20 % im Minus', pc(r.losers.pct), syms(r.losers.list), '') : ''].join('');
@@ -274,7 +282,7 @@ function vHome(c) {
     ${card('Nächste Termine', 'Deine Titel, Fed und Konjunktur', cal.length ? calCompact(cal) + `<div class="btnrow" style="margin-top:10px"><button class="btn sm ghost" data-act="tab" data-v="cal">Alle Termine</button></div>` : '<p class="empty">Keine Termine bekannt.</p>', '', 'span5')}
     ${ap ? `<details class="card fold span12"><summary><div><h2>Einschätzung der Recherche</h2><p class="sub">${esc(ap.headline)} · ${esc(ago(ap.at))}</p></div><span class="chev"></span></summary>
       <div class="grid half"><div><p class="body">${esc(ap.summary)}</p>${(ap.risks || []).length ? `<p class="sh">Risiken</p><ul class="dots">${ap.risks.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}</div>
-      ${(ap.buy_candidates || []).length ? `<div><p class="sh" style="margin-top:0">Nachkauf-Kandidaten</p><div class="rows">${ap.buy_candidates.map(b => `<div class="row"><div class="l"><div class="t"><span class="sym" style="margin:0;color:var(--ink)">${esc(b.symbol)}</span><span>${esc(b.level)}</span></div><div class="x">${esc(b.reason)}</div></div></div>`).join('')}</div></div>` : ''}</div>
+      ${(ap.buy_candidates || []).length ? `<div><p class="sh" style="margin-top:0">Nachkauf-Kandidaten</p><div class="rows">${ap.buy_candidates.map(b => `<div class="row"><div class="l"><div class="t">${tag(keyBySym(b.symbol))}<span>${esc(b.level)}</span></div><div class="x">${esc(b.reason)}</div></div></div>`).join('')}</div></div>` : ''}</div>
       <p class="hint">Recherche von Claude. Keine Anlageberatung.</p></details>` : ''}
   </div>`;
 }
@@ -313,7 +321,7 @@ function drawCharts() {
       const t = val == null ? 0 : Math.max(-1, Math.min(1, val / lim)), k = Math.round(Math.pow(Math.abs(t), 0.75) * 100);
       const cls = [t >= 0 ? 'u' : 'd', k > 50 ? 'strong' : '', r.w < 58 || r.h < 40 ? 'xs' : '', r.w < 30 || r.h < 20 ? 'xxs' : ''].join(' ');
       return `<button data-act="open" data-key="${esc(p.key)}" class="${cls}" style="left:${(r.x + 1).toFixed(1)}px;top:${(r.y + 1).toFixed(1)}px;width:${Math.max(0, r.w - 2).toFixed(1)}px;height:${Math.max(0, r.h - 2).toFixed(1)}px;--k:${k}%"
-        title="${esc(p.symbol)} · ${esc(p.name)}: ${pctS(val, 2)} · ${nf(p.weight, 1)} % vom Depot"><span class="s">${esc(p.symbol)}</span><span><span class="p num">${pctS(val, 2)}</span><br><span class="w num">${nf(p.weight, 1)} %</span></span></button>`;
+        title="${esc(p.symbol)} · ${esc(p.name)}: ${pctS(val, 2)} · ${nf(p.weight, 1)} % vom Depot"><span class="s">${esc(r.w > 92 ? shortName(p.key) : p.symbol)}</span><span><span class="p num">${pctS(val, 2)}</span><br><span class="w num">${nf(p.weight, 1)} %</span></span></button>`;
     }).join('');
   }
   const el = $('#ch-asset');
@@ -345,11 +353,12 @@ function vDepot(c) {
     <section class="card"><div class="toolbar"><div>${flt('depot', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
       <div class="sumline">Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet · Spalten per Klick sortieren, Zeile antippen für die Gründe.</div>
       <button class="btn" data-act="addtx">Kauf oder Verkauf</button></div>
-      ${c.held.length ? tbl('depot', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.value, COL.pnl, COL.weight, COL.rng], rows, ['value', -1]) : '<p class="empty">Trag oben deinen ersten Kauf ein.</p>'}</section>
+      ${c.held.length ? `<div class="wl-wide">${tbl('depot', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.value, COL.pnl, COL.weight, COL.rng], rows, ['value', -1])}</div>
+      <div class="wl-narrow">${posList('depot', rows, ['value', -1])}</div>` : '<p class="empty">Trag oben deinen ersten Kauf ein.</p>'}</section>
     ${divCard(c)}
     <details class="card fold"><summary><div><h2>Buchungen</h2><p class="sub">${txs.length} eingetragene Käufe und Verkäufe</p></div><span class="chev"></span></summary>
       ${txs.length ? `<div class="rows">${txs.map(t => `<button class="row" data-act="edittx" data-id="${esc(t.id)}"><div class="l">
-      <div class="t"><span class="sym" style="margin:0;color:inherit">${esc(t.symbol)}</span><span>${t.type === 'buy' ? 'Kauf' : 'Verkauf'}${t.source && t.source !== 'manual' ? ' · ' + esc(t.source) : ''}${depots().length > 1 && S.dep === 'all' ? ' · ' + esc(depName(depOf(t))) : ''}</span></div><div class="m num">${dateDe(t.date)} · ${nf(t.qty, t.qty % 1 ? 4 : 0)} × ${money(t.price, t.currency)}</div></div>
+      <div class="t">${tag(t.key)}<span>${t.type === 'buy' ? 'Kauf' : 'Verkauf'}${t.source && t.source !== 'manual' ? ' · ' + esc(t.source) : ''}${depots().length > 1 && S.dep === 'all' ? ' · ' + esc(depName(depOf(t))) : ''}</span></div><div class="m num">${dateDe(t.date)} · ${nf(t.qty, t.qty % 1 ? 4 : 0)} × ${money(t.price, t.currency)}</div></div>
       <div class="r"><span class="chip ${t.type === 'buy' ? 'good' : 'bad'}">${t.type === 'buy' ? '−' : '+'}${money(t.qty * t.price, t.currency)}</span></div></button>`).join('')}</div>` : '<p class="empty">Noch keine Buchungen.</p>'}
       <p class="hint">Der direkte Import aus Trade Republic oder comdirect ist vorbereitet, aber noch nicht aktiv. Jede Buchung merkt sich ihre Herkunft.</p></details>
   </div>`;
@@ -361,7 +370,7 @@ const estChg = f => { const v = f.est_chg_90d != null ? f.est_chg_90d : (f.est_e
 function divCard(c) {
   const divs = c.held.filter(p => D(p.key).div && D(p.key).div.annual);
   return card('Dividenden', `Erwartet pro Jahr: ${eur(c.divYear)} brutto`, divs.length ? `<div class="rows tight two">${divs.sort((a, b) => (b.divYear || 0) - (a.divYear || 0)).map(p => { const d = D(p.key).div; return `<button class="row" data-act="open" data-key="${esc(p.key)}"><div class="l">
-      <div class="t"><span class="sym" style="margin:0;color:inherit">${esc(p.symbol)}</span><span>${nf(d.yield_pct, 2)} % Rendite</span></div><div class="m num">${px(p.key, d.annual)} je Aktie · ${d.per_year || '–'}× jährlich${d.next_ex ? ' · Ex-Tag ' + dateDe(d.next_ex) + (d.next_ex_estimated ? ' (geschätzt)' : '') : ''}</div></div>
+      <div class="t">${tag(p.key)}<span>${nf(d.yield_pct, 2)} % Rendite</span></div><div class="m num">${px(p.key, d.annual)} je Aktie · ${d.per_year || '–'}× jährlich${d.next_ex ? ' · Ex-Tag ' + dateDe(d.next_ex) + (d.next_ex_estimated ? ' (geschätzt)' : '') : ''}</div></div>
       <div class="r"><div class="v num">${eur(p.divYear)}</div><span class="muted tiny">pro Jahr</span></div></button>`; }).join('')}</div>` : '<p class="empty">Keine Dividendentitel im Depot.</p>');
 }
 
@@ -370,7 +379,7 @@ function flowBlock(key) {
   const sp = (f.spot || {})[w], fu = (f.fut || {})[w], ch = w === '4' ? f.px_chg_4h : a.change_pct;
   const dv = r => { const p = Math.min(Math.abs(r || 0) / 0.12, 1) * 100; return `<div class="div2"><span>${r < 0 ? `<i style="width:${p}%;background:var(--down)"></i>` : ''}</span><span>${r >= 0 ? `<i style="width:${p}%;background:var(--up)"></i>` : ''}</span></div>`; };
   const fund = Object.entries(f.funding || {}).map(([v, x]) => `${esc(v)} ${nf(x, 4)} %`).join(' · ');
-  return `<div><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><div style="font-size:15px;font-weight:600"><span class="sym">${esc(sym)}</span> <span class="muted" style="font-weight:400">${esc(a.name || '')}</span></div>
+  return `<div><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><div style="font-size:15px;font-weight:600">${tag(key)}</div>
     <div class="muted small num">${money(a.price, 'USD')} · ${pctS(ch)} in ${w} Std.</div></div>${rd ? `<span class="chip ${toneClass(rd.tone)}">${esc(rd.label)}</span>` : ''}</div>
     ${rd ? `<p class="body" style="margin-top:8px">${esc(rd.text)}</p>` : ''}
     <div class="flowgrid">${sp ? `<span>Spot-Käufe</span>${dv(sp.ratio)}<span class="v num">${pctS(sp.ratio * 100, 1)}</span>` : ''}
@@ -388,19 +397,26 @@ function flowBlock(key) {
 const LCOL = [COL.score, {id: 'day', label: 'Heute', num: true, sort: COL.day.sort}, {id: 'w7', label: '7 Tage', num: true, sort: r => { const s = (S.market.spark || {})[r.key], p = A(r.key).price; return s && s[0] && p != null ? p / s[0] - 1 : null; }},
   {id: 'mcap', label: 'Marktwert', num: true, sort: r => { const v = mcapOf(r.key); return v ? v / (isCoin(r.key) ? (fxNow('USD') || 1) : 1) : null; }},
   {id: 'name', label: 'Name', sort: r => shortName(r.key).toLowerCase()}];
-const tick = key => { const s = key.split(':')[1]; return /^\d/.test(s) ? s : s.split('.')[0]; };   // Kürzel ohne Börsenendung (1211.HK bleibt)
-function watchList(id, rows, def) {
-  const {st, col, rows: rs} = sortRows(id, LCOL, rows, def);
+// Liste am Handy (Watchlist und Positionen): Punkte, Logo, Name mit Unterzeile, Kurs bzw. Wert, rechts 7 Tage und heute
+function listView(id, cols, rows, def, o) {
+  const {st, col, rows: rs} = sortRows(id, cols, rows, def);
   if (!rs.length) return '<p class="empty">Keine Titel in dieser Auswahl.</p>';
-  const sorter = `<div class="wl-sort"><div class="seg">${LCOL.map(c => `<button data-act="sort" data-id="${id}" data-v="${c.id}" data-num="${c.num ? 1 : 0}" class="${c.id === col.id ? 'on' : ''}">${c.label}${c.id === col.id ? (st[1] < 0 ? ' ↓' : ' ↑') : ''}</button>`).join('')}</div></div>`;
-  return sorter + `<div class="wl">${rs.map(({key}) => { const a = A(key), ch = a.change_pct, r = ratingOf(key);
+  const sorter = `<div class="wl-sort"><div class="seg">${cols.map(c => `<button data-act="sort" data-id="${id}" data-v="${c.id}" data-num="${c.num ? 1 : 0}" class="${c.id === col.id ? 'on' : ''}">${c.label}${c.id === col.id ? (st[1] < 0 ? ' ↓' : ' ↑') : ''}</button>`).join('')}</div></div>`;
+  return sorter + `<div class="wl">${rs.map(row => { const key = row.key, r = ratingOf(key);
     return `<button class="wl-row" data-act="open" data-key="${esc(key)}">
       <span class="wl-sc${r == null ? ' none' : ' t' + tierOf(r)}" title="${r == null ? 'keine Punkte' : r + ' von 10 Punkten'}">${r == null ? '–' : r}</span>${logo(key)}
-      <span class="wl-nm"><b>${esc(shortName(key))}</b><small>${esc([shortName(key) === tick(key) ? '' : tick(key), mcapTxt(key) || ((isFund(key) || isCommodity(key)) && issuerOf(key)) || ''].filter(Boolean).join(' · '))}</small></span>
-      <span class="wl-px num">${px(key, a.price)}</span>
-      <span class="wl-ch">${spark7(key)}<small class="num ${ch == null ? 'muted' : ch >= 0 ? 'pos' : 'neg'}">${ch == null ? '–' : (ch >= 0 ? '▲ ' : '▼ ') + nf(Math.abs(ch), 2) + ' %'}</small></span></button>`; }).join('')}</div>
-    <p class="wl-hint">Links die Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet. Rechts der Verlauf über 7 Tage (gestrichelt: Stand vor 7 Tagen) und die Änderung heute. Antippen für die Gründe. · Version ${esc(APP_V)}</p>`;
+      <span class="wl-nm"><b>${esc(shortName(key))}</b><small>${esc(o.sub ? o.sub(row) : subLine(key))}</small></span>
+      <span class="wl-px num">${o.mid(row)}</span>
+      <span class="wl-ch">${spark7(key)}${chgA(A(key).change_pct).replace('chga', 'chga sm')}</span></button>`; }).join('')}</div>
+    <p class="wl-hint">${o.hint || ''}Links die Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet. Rechts der Verlauf über 7 Tage (gestrichelt: Stand vor 7 Tagen) und die Änderung heute. Antippen für die Gründe. · Version ${esc(APP_V)}</p>`;
 }
+const watchList = (id, rows, def) => listView(id, LCOL, rows, def, {mid: r => px(r.key, A(r.key).price)});
+const PCOL = [COL.score, {id: 'day', label: 'Heute', num: true, sort: COL.day.sort}, {id: 'value', label: 'Wert', num: true, sort: r => r.p.value},
+  {id: 'pnl', label: 'Gewinn', num: true, sort: r => r.p.pnlPct}, {id: 'name', label: 'Name', sort: r => shortName(r.key).toLowerCase()}];
+const posList = (id, rows, def) => listView(id, PCOL, rows, def, {
+  sub: r => [shortName(r.key) === tick(r.key) ? '' : tick(r.key), nf(r.p.weight, 1) + ' %'].filter(Boolean).join(' · '),
+  mid: r => `${eur(r.p.value, 0)}<small class="${sign(r.p.pnl)}" title="${r.p.pnl == null ? '' : eurS(r.p.pnl)}">${r.p.pnl == null ? '–' : pctS(r.p.pnlPct, 1)}</small>`,
+  hint: 'Mitte: Wert und Gewinn seit Kauf in Prozent. '});
 function vWatch() {
   const wl = S.pf.watchlist || [], al = S.pf.alerts || [], st = S.state.alerts || {}, f = fltOn('watch');
   const rows = wl.map(w => ({key: keyOf(w.kind, w.symbol)})).filter(r => f === 'Alle' || typeOf(r.key) === f);
@@ -411,7 +427,7 @@ function vWatch() {
       <div class="wl-narrow">${watchList('watch', rows, ['name', 1])}</div>` : '<p class="empty">Noch nichts auf der Watchlist.</p>'}</section>
     <div class="grid half">
     ${card('Alerts', 'Push aufs Handy, sobald eine Schwelle erreicht ist', (al.length ? `<div class="rows tight">${al.map(a => { const fd = st[a.id];
-      return `<div class="row"><div class="l"><div class="t"><span class="sym" style="margin:0;color:inherit">${esc(a.symbol)}</span><span>${esc(alertText(a))}</span></div>
+      return `<div class="row"><div class="l"><div class="t">${tag(keyOf(a.kind, a.symbol))}<span>${esc(alertText(a))}</span></div>
       <div class="m">${fd ? 'Ausgelöst ' + esc(ago(fd.fired)) : 'Aktiv'}${a.note ? ' · ' + esc(a.note) : ''}</div></div>
       <div class="r" style="display:flex;gap:6px;align-items:center"><span class="chip ${fd ? 'warn' : 'good'}">${fd ? 'ausgelöst' : 'aktiv'}</span>
       ${fd ? `<button class="btn sm ghost" data-act="rearm" data-id="${esc(a.id)}">Wieder scharf</button>` : ''}<button class="xbtn" data-act="delalert" data-id="${esc(a.id)}" title="Löschen">×</button></div></div>`; }).join('')}</div>` : '<p class="empty">Noch keine Alerts.</p>')
@@ -469,7 +485,7 @@ const ICOL = {
   last: {id: 'ilast', label: 'Zuletzt', cls: 'r hm', sort: r => ((ins(r.key).rows || [])[0] || {}).d || null, html: r => { const x = (ins(r.key).rows || [])[0];
     return x ? `<div class="num">${dShort(x.d)}</div><div class="ts">${x.type === 'buy' ? 'Kauf' : 'Verkauf'}</div>` : '<span class="ts">–</span>'; }},
 };
-const insRow = (key, r, sym) => `<${sym ? `button data-act="open" data-key="${esc(key)}"` : 'div'} class="row"><div class="l"><div class="t">${sym ? `<span class="sym" style="margin:0;color:inherit">${esc(key.split(':')[1])}</span>` : ''}<span${sym ? '' : ' style="margin:0;color:var(--ink)"'}>${esc(r.who)}</span></div>
+const insRow = (key, r, sym) => `<${sym ? `button data-act="open" data-key="${esc(key)}"` : 'div'} class="row"><div class="l"><div class="t">${sym ? tag(key) : ''}<span${sym ? '' : ' style="margin:0;color:var(--ink)"'}>${esc(r.who)}</span></div>
   <div class="m">${esc(roleDe(r.role))} · ${dateDe(r.d)}${r.shares ? ` · <span class="num">${nf(r.shares, 0)}</span> Aktien` : ''}</div></div>
   <div class="r"><span class="chip ${r.type === 'buy' ? 'good' : 'bad'}">${r.type === 'buy' ? 'Kauf' : 'Verkauf'}</span><div class="v num" style="margin-top:3px">${amt(key, r.value)}</div></div></${sym ? 'button' : 'div'}>`;
 
@@ -485,7 +501,7 @@ function sectorCard(c) {
       return `<details><summary title="${esc(SECTOR_DE[r.s] || r.s)}: du ${pct(r.me)}${r.ix != null ? `, ${esc(bn)} ${pct(r.ix)}` : ''}"><span class="nm">${esc(SECTOR_DE[r.s] || r.s)}</span>
         <span class="sbar"><i style="width:${(r.me / mx * 100).toFixed(1)}%"></i>${r.ix != null ? `<b style="left:${(r.ix / mx * 100).toFixed(1)}%"></b>` : ''}</span>
         <span class="r num">${pct(r.me)}</span><span class="r num muted">${pct(r.ix)}</span><span class="r num">${diff(r)}<span class="hm"> Pkt.</span></span></summary>
-        ${parts.length ? `<div class="secparts">${parts.slice(0, 10).map(p => `<button data-act="open" data-key="${esc(p.key)}"><span class="sym">${esc(p.key.split(':')[1])}</span><span class="ts">${esc(nameOf(p.key))}${p.via ? ' · über den ETF' : ''}</span><span class="num">${eur(p.v, 0)}</span></button>`).join('')}
+        ${parts.length ? `<div class="secparts">${parts.slice(0, 10).map(p => `<button data-act="open" data-key="${esc(p.key)}">${tag(p.key)}<span class="ts">${p.via ? 'über den ETF' : esc(tick(p.key))}</span><span class="num">${eur(p.v, 0)}</span></button>`).join('')}
           ${parts.length > 10 ? `<p class="hint">und ${parts.length - 10} weitere</p>` : ''}</div>` : '<p class="hint" style="margin:0 0 10px">In deinem Depot nicht vertreten.</p>'}</details>`; }).join('')}</div>`;
   const out = Object.entries(m.outside).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${nf(v / m.total * 100, 1)} %`).join(', ');
   const legend = `<div class="seclegend"><span><i class="me"></i>Dein Depot</span>${bn ? `<span><i class="ix"></i>${esc(bn)}</span>` : ''}</div>`;
@@ -606,13 +622,15 @@ function calList(events) {
     return `<div class="day"><div class="badge ${d === today ? 'today' : ''}"><div class="w">${d === today ? 'Heute' : WT[dt.getDay()]}</div><div class="d">${dt.getDate()}</div><div class="mo">${MON_K[dt.getMonth()]}</div></div>
     <div style="min-width:0">${by[d].map(e => { const [cls, lab] = CAT[e.category] || ['', e.category];
       return `<div class="ev ${e.market ? '' : 'mine'}"><div class="meta"><span class="chip ${cls}">${esc(lab)}</span>${e.time ? `<span class="tiny muted num">${esc(e.time)}${/^\d/.test(e.time) ? ' Uhr' : ''}</span>` : ''}${e.estimated ? '<span class="tiny muted">geschätzt</span>' : ''}${e.market ? '' : '<span class="tiny mine-tag">dein Titel</span>'}</div>
-      <div class="ti">${esc(e.title)}${e.expected ? ` <span class="muted">· für dich etwa ${fxNow(e.currency) ? eur(e.expected / fxNow(e.currency)) : money(e.expected, e.currency)} brutto</span>` : ''}</div></div>`; }).join('')}</div></div>`; }).join('')}</div>`;
+      <div class="ti">${calTitle(e)}${e.expected ? ` <span class="muted">· für dich etwa ${fxNow(e.currency) ? eur(e.expected / fxNow(e.currency)) : money(e.expected, e.currency)} brutto</span>` : ''}</div></div>`; }).join('')}</div></div>`; }).join('')}</div>`;
 }
+// Eigene Titel im Kalender mit Logo und Kurznamen statt „Apple Inc.: …“
+const calTitle = e => { const own = e.key && A(e.key).name; return own && /:/.test(e.title) ? `${logo(e.key)}${esc(shortName(e.key) + e.title.slice(e.title.indexOf(':')))}` : esc(e.title); };
 function calCompact(events) {
   const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   return `<div class="calc">${events.map(e => { const dt = new Date(e.date + 'T12:00:00'), [cls, lab] = CAT[e.category] || ['', e.category];
     return `<div class="${e.market ? '' : 'mine'}"><span class="dt num ${e.date === today ? 'today' : ''}">${e.date === today ? 'Heute' : WT[dt.getDay()] + ' ' + dt.getDate() + '.' + (dt.getMonth() + 1) + '.'}</span>
-      <span class="chip ${cls}">${esc(lab)}</span><span class="ti" title="${esc(e.title)}">${esc(e.title.replace(/: Quartalszahlen$/, ''))}${e.time ? ` <span class="muted">· ${esc(e.time)}</span>` : ''}</span></div>`; }).join('')}</div>`;
+      <span class="chip ${cls}">${esc(lab)}</span><span class="ti" title="${esc(e.title)}">${calTitle(Object.assign({}, e, {title: e.title.replace(/: Quartalszahlen$/, '')}))}${e.time ? ` <span class="muted">· ${esc(e.time)}</span>` : ''}</span></div>`; }).join('')}</div>`;
 }
 function vCal() {
   const all = S.digest.calendar || [], f = S.calFilter;
@@ -634,7 +652,8 @@ function vAsset(key) {
   const [kind, sym] = key.split(':'), cur = curOf(key), f = d.fund || {}, t = d.tech || {}, v = d.valuation, dv = d.div;
   const watched = (S.pf.watchlist || []).some(w => keyOf(w.kind, w.symbol) === key);
   const ir = safeUrl((ai || {}).ir_url) || safeUrl(f.ir_website) || safeUrl(f.website);
-  let h = sheetTop(`<span class="sym" style="font-size:13px;color:var(--ink3);display:block;margin-bottom:2px">${esc(sym)} · ${esc(assetClass(key))}</span>${esc(nameOf(key))}`, [SECTOR_DE[f.sector] || f.sector, f.industry].filter(Boolean).map(esc).join(' · '));
+  let h = sheetTop(`<span class="ahead">${logo(key)}<span><small>${esc(tick(key))} · ${esc(assetClass(key))}</small>${esc(shortName(key))}</span></span>`,
+    [nameOf(key) !== shortName(key) ? nameOf(key) : '', SECTOR_DE[f.sector] || f.sector, f.industry].filter(Boolean).map(esc).join(' · '));
   h += `<section class="card"><div class="pricehead"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="p num">${px(key, a.price)}</span> ${pill(a.change_pct)} ${v ? score(key) : ''}</div>${seg('arange', ['3M', '1J', '3J', 'Max'], S.assetRange || '1J')}</div>
     <div class="chart" id="ch-asset" data-key="${esc(key)}"></div>
     <div class="tiles">${tile('1 Monat', pctS(t.perf_1m, 1), '', sign(t.perf_1m))}${tile('1 Jahr', pctS(t.perf_1y, 1), '', sign(t.perf_1y))}
@@ -849,10 +868,10 @@ document.addEventListener('focusout', ev => { if (ev.target.id === 'q' && !ev.ta
 document.addEventListener('input', ev => {
   if (ev.target.id !== 'q') return;
   const q = ev.target.value.trim().toLowerCase(), box = $('#qres');
-  const hits = !q ? [] : allTracked().filter(k => k.split(':')[1].toLowerCase().includes(q) || nameOf(k).toLowerCase().includes(q))
+  const hits = !q ? [] : allTracked().filter(k => k.split(':')[1].toLowerCase().includes(q) || nameOf(k).toLowerCase().includes(q) || shortName(k).toLowerCase().includes(q))
     .sort((a, b) => (b.split(':')[1].toLowerCase().startsWith(q) - a.split(':')[1].toLowerCase().startsWith(q))).slice(0, 8);
   box.hidden = !q;
-  box.innerHTML = hits.length ? hits.map(k => `<button data-act="open" data-key="${esc(k)}"><span class="sym" style="min-width:64px">${esc(k.split(':')[1])}</span><span class="ts">${esc(nameOf(k))}</span>${chg(A(k).change_pct, 1)}</button>`).join('') : '<p class="empty" style="padding:10px 12px">Kein Titel gefunden. Neue Titel fügst du in der Watchlist hinzu.</p>';
+  box.innerHTML = hits.length ? hits.map(k => `<button data-act="open" data-key="${esc(k)}">${logo(k)}<span class="ts"><b>${esc(shortName(k))}</b> <span class="muted">${esc(tick(k))}</span></span>${chgA(A(k).change_pct)}</button>`).join('') : '<p class="empty" style="padding:10px 12px">Kein Titel gefunden. Neue Titel fügst du in der Watchlist hinzu.</p>';
 });
 // Kuchendiagramm: Anteil des Segments in der Mitte zeigen, solange der Zeiger darauf liegt
 document.addEventListener('mouseover', ev => {
