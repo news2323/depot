@@ -353,7 +353,7 @@ function vDepot(c) {
     <section class="card"><div class="toolbar"><div>${flt('depot', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
       <div class="sumline">Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet · Spalten per Klick sortieren, Zeile antippen für die Gründe.</div>
       <button class="btn" data-act="addtx">Kauf oder Verkauf</button></div>
-      ${c.held.length ? `<div class="wl-wide">${tbl('depot', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.value, COL.pnl, COL.weight, COL.rng], rows, ['value', -1])}</div>
+      ${c.held.length ? `<div class="wl-wide">${tbl('depot', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.value, COL.pnl, COL.weight], rows, ['value', -1])}</div>
       <div class="wl-narrow">${posList('depot', rows, ['value', -1])}</div>` : '<p class="empty">Trag oben deinen ersten Kauf ein.</p>'}</section>
     ${divCard(c)}
     <details class="card fold"><summary><div><h2>Buchungen</h2><p class="sub">${txs.length} eingetragene Käufe und Verkäufe</p></div><span class="chev"></span></summary>
@@ -423,7 +423,7 @@ function vWatch() {
   return `<div class="grid">
     <section class="card"><div class="toolbar"><div>${flt('watch', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
       <div class="sumline"><b>${rows.length}</b> Titel beobachtet<span class="hm"> · Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet · Zeile antippen für die Gründe</span></div><button class="btn" data-act="addwatch">Titel hinzufügen</button></div>
-      ${wl.length ? `<div class="wl-wide">${tbl('watch', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.m1, COL.rng, COL.zone], rows, ['name', 1])}</div>
+      ${wl.length ? `<div class="wl-wide">${tbl('watch', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.m1, COL.zone], rows, ['name', 1])}</div>
       <div class="wl-narrow">${watchList('watch', rows, ['name', 1])}</div>` : '<p class="empty">Noch nichts auf der Watchlist.</p>'}</section>
     <div class="grid half">
     ${card('Alerts', 'Push aufs Handy, sobald eine Schwelle erreicht ist', (al.length ? `<div class="rows tight">${al.map(a => { const fd = st[a.id];
