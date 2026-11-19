@@ -20,7 +20,8 @@ def run_fast(store):
     pf = store.get("portfolio.json") or empty_portfolio()
     state = store.get("state.json") or {}
     assets = tracked_assets(pf)
-    old = (store.get("market.json") or {}).get("assets") or {}
+    old_market = store.get("market.json") or {}
+    old = old_market.get("assets") or {}
     out, currencies = {}, set()
     oi_mem = state.setdefault("oi", {})
     now = time.time()
@@ -53,7 +54,7 @@ def run_fast(store):
         if t.get("currency"):
             currencies.add(t["currency"])
     fx = {"EUR": 1.0}
-    old_fx = (store.get("market.json") or {}).get("fx") or {}
+    old_fx = old_market.get("fx") or {}
     for cur in sorted(currencies | {"USD"}):
         if cur != "EUR":
             fx[cur] = sources.fx_rate(cur) or old_fx.get(cur)
@@ -63,10 +64,32 @@ def run_fast(store):
     for sym in list(oi_mem):
         if asset_key("crypto", sym) not in assets:
             del oi_mem[sym]
-    store.put("market.json", {"updated": now_iso(), "fx": fx, "assets": out, "indices": indices, "sources": sources.STATUS})
+    spark, spark_at = refresh_spark(assets, old_market)
+    store.put("market.json", {"updated": now_iso(), "fx": fx, "assets": out, "indices": indices, "spark": spark, "spark_at": spark_at,
+                              "sources": sources.STATUS})
     store.put("state.json", state)
     log("Kurse: %d Titel, %d ohne Daten, %d Alerts ausgelöst, %d Bewegungen gemeldet" % (
         len(out), sum(1 for q in out.values() if q.get("error")), fired, moved))
+
+
+SPARK_EVERY = 55 * 60   # 7-Tage-Verlauf (Stundenkurse) für die Watchlist am Handy: höchstens stündlich neu
+
+
+def refresh_spark(assets, old_market):
+    """7-Tage-Verlauf je Titel. Fällig einmal pro Stunde, neue Titel sofort; bei Fehlern bleibt der alte Verlauf."""
+    old, at = old_market.get("spark") or {}, old_market.get("spark_at") or 0
+    due = time.time() - at > SPARK_EVERY
+    out = {}
+    for key, a in assets.items():
+        if due or key not in old:
+            c = sources.spark_7d(a["kind"], a["symbol"])
+            out[key] = c or old.get(key)
+        else:
+            out[key] = old[key]
+    missing = [a["symbol"] for k, a in assets.items() if a["kind"] == "crypto" and not out.get(k)]
+    for sym, c in sources.coin_spark(missing).items():
+        out[asset_key("crypto", sym)] = c
+    return {k: v for k, v in out.items() if v}, int(time.time()) if due else at
 
 
 MARKET_STRIP = [("^GSPC", "S&P 500"), ("^NDX", "Nasdaq 100"), ("^GDAXI", "DAX"), ("^STOXX50E", "Euro Stoxx 50"),
@@ -327,6 +350,13 @@ def run_daily(store):
         if key in out:
             out[key]["reddit"] = b
     crypto_fg = sources.crypto_fear_greed()
+    # Coins: Marktwert und Rang von CoinGecko; Logos aller Titel einmal holen und im privaten Daten-Repo ablegen
+    meta = sources.coin_meta([a["symbol"] for a in assets.values() if a["kind"] == "crypto"])
+    for key, a in assets.items():
+        m = meta.get(a["symbol"]) if a["kind"] == "crypto" else None
+        if m and key in out:
+            out[key]["mcap"], out[key]["rank"] = m.get("mcap"), m.get("rank")
+    update_logos(store, assets, out, meta)
     # Angst und Gier am Aktienmarkt: eigene Berechnung (CNN sperrt Skripte), aus Yahoo-Kursen
     fg_hist = {}
     for sym in ("^GSPC", "^VIX", "SPY", "TLT", "HYG", "IEF", "RSP"):
@@ -353,6 +383,33 @@ def run_daily(store):
 
 
 SECTOR_BENCH = (("MSCI World", "URTH"), ("S&P 500", "SPY"))
+
+
+def update_logos(store, assets, out, meta):
+    """logos.json: je Titel ein kleines Bild als data-URI. Vorhandene bleiben 60 Tage, fehlende werden nach 7 Tagen neu versucht.
+    So lädt die App keine Bilder von fremden Servern und verrät dort nicht, welche Titel im Depot stehen."""
+    logos = store.get("logos.json") or {}
+    today = datetime.date.today()
+    changed = False
+    for key, a in assets.items():
+        have = logos.get(key) or {}
+        try:
+            age = (today - datetime.date.fromisoformat(have.get("at", "2000-01-01"))).days
+        except ValueError:
+            age = 999
+        if have and age < (60 if have.get("img") else 7):
+            continue
+        d = out.get(key) or {}
+        img = sources.logo(a["kind"], a["symbol"], d.get("name") or a.get("name") or "", (d.get("fund") or {}).get("website") or "",
+                           (meta.get(a["symbol"]) or {}).get("image") if a["kind"] == "crypto" else None)
+        logos[key] = {"img": img or have.get("img"), "at": today.isoformat()}
+        changed = True
+    for key in [k for k in logos if k not in assets]:
+        del logos[key]
+        changed = True
+    if changed:
+        store.put("logos.json", logos)
+    log("Logos: %d von %d" % (sum(1 for v in logos.values() if v.get("img")), len(assets)))
 
 
 def _perf_6m(h, crypto):

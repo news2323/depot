@@ -877,3 +877,102 @@ def market_calendar(own_symbols=(), days=7):
                     "title": "Börsengang: %s (%s), %s, Volumen %s" % (_firm(row.get("companyName")), row.get("proposedTickerSymbol"),
                                                                         row.get("proposedExchange") or "", size)})
     return out
+
+
+# ----------------------------------------------------------------- Watchlist am Handy: 7-Tage-Verlauf, Logos, Marktwert von Coins
+def _sig(x, n=5):
+    """Auf n gültige Stellen runden (spart Platz in market.json)."""
+    return float("%.*g" % (n, x)) if x else x
+
+
+def spark_7d(kind, sym):
+    """Stundenkurse der letzten 7 Tage (Aktien: Handelsstunden), höchstens etwa 90 Punkte."""
+    now = int(time.time())
+    if kind == "crypto":
+        r = _try("Binance Spot", "%s/klines?symbol=%sUSDT&interval=1h&limit=168" % (BINANCE_SPOT, sym))
+        c = [fnum(k[4]) for k in r] if isinstance(r, list) and len(r) > 24 else None
+        if not c:
+            r = _try("Hyperliquid", "https://api.hyperliquid.xyz/info", body={
+                "type": "candleSnapshot", "req": {"coin": sym, "interval": "1h", "startTime": (now - 7 * 86400) * 1000, "endTime": now * 1000}})
+            c = [fnum(k["c"]) for k in r] if isinstance(r, list) and len(r) > 24 else None
+        if not c:
+            return None
+        c = c[::2] if len(c) > 100 else c
+    else:
+        r = _try("Yahoo Kurse", "https://query1.finance.yahoo.com/v8/finance/chart/%s?period1=%d&period2=%d&interval=1h" % (
+            urllib.parse.quote(sym), now - 7 * 86400, now))
+        try:
+            c = [x for x in r["chart"]["result"][0]["indicators"]["quote"][0]["close"] if x]
+        except (TypeError, KeyError, IndexError):
+            return None
+        if len(c) < 5:
+            return None
+    return [_sig(x) for x in c if x]
+
+
+def coin_meta(symbols):
+    """Marktwert, Rang und Logo-Adresse je Coin von CoinGecko (ein Abruf). Bei gleichem Kürzel zählt der größte Marktwert."""
+    if not symbols:
+        return {}
+    r = _try("CoinGecko", "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&symbols=" +
+             ",".join(sorted(s.lower() for s in symbols)), timeout=30)
+    out = {}
+    for x in r or []:
+        s = str(x.get("symbol") or "").upper()
+        if s and (s not in out or (x.get("market_cap") or 0) > (out[s].get("mcap") or 0)):
+            out[s] = {"mcap": x.get("market_cap"), "rank": x.get("market_cap_rank"), "image": x.get("image")}
+    return out
+
+
+def coin_spark(symbols):
+    """Ersatz für Coins ohne Stundenkurse bei Binance und Hyperliquid: 7-Tage-Verlauf von CoinGecko (ein Abruf)."""
+    if not symbols:
+        return {}
+    r = _try("CoinGecko", "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&sparkline=true&symbols=" +
+             ",".join(sorted(s.lower() for s in symbols)), timeout=30)
+    best = {}
+    for x in r or []:
+        s, c = str(x.get("symbol") or "").upper(), ((x.get("sparkline_in_7d") or {}).get("price") or [])
+        if s and len(c) > 24 and (s not in best or (x.get("market_cap") or 0) > best[s][0]):
+            best[s] = (x.get("market_cap") or 0, [_sig(v) for v in c[::2] if v])
+    return {s: v[1] for s, v in best.items()}
+
+
+def _image(url, limit=40000):
+    """Bild als data-URI, oder None (zu groß, kein Bild, Fehler)."""
+    import base64
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as f:
+            ctype = (f.headers.get("Content-Type") or "").split(";")[0].strip()
+            b = f.read(limit + 1)
+    except Exception:
+        return None
+    if not ctype.startswith("image/") or len(b) > limit or len(b) < 300:
+        return None
+    return "data:%s;base64,%s" % (ctype, base64.b64encode(b).decode("ascii"))
+
+
+# Anbieter-Logos für ETFs ohne eigenes Bild: ein bekannter Fonds desselben Anbieters
+ISSUER_LOGO = (("iShares", "EUNL.DE"), ("Amundi", "LYYA.DE"), ("Lyxor", "LYYA.DE"), ("Xtrackers", "XDWD.DE"),
+               ("Vanguard", "VWCE.DE"), ("SPDR", "SPY"), ("Invesco", "IVZ"), ("HSBC", "HSBC"), ("WisdomTree", "WT"))
+
+
+def logo(kind, sym, name="", website="", coin_image=None):
+    """Logo als data-URI: Coins von CoinGecko, Aktien und ETFs von Financial Modeling Prep, sonst Favicon der Firmenseite."""
+    if kind == "crypto":
+        return _image(coin_image.replace("/large/", "/small/")) if coin_image else None
+    # Große Bilder (über 16 KB) überspringen: dann lieber das kleinere Favicon der Firmenseite
+    img = _image("https://financialmodelingprep.com/image-stock/%s.png" % urllib.parse.quote(sym), 16000)
+    if img:
+        return img
+    dom = re.sub(r"^https?://(www\.)?", "", website or "").split("/")[0]
+    img = _image("https://www.google.com/s2/favicons?domain=%s&sz=128" % urllib.parse.quote(dom), 16000) if dom else None
+    if img:
+        return img
+    for word, proxy in ISSUER_LOGO:
+        if word.lower() in (name or "").lower():
+            img = _image("https://financialmodelingprep.com/image-stock/%s.png" % proxy, 16000)
+            if img:
+                return img
+    return _image("https://financialmodelingprep.com/image-stock/%s.png" % urllib.parse.quote(sym))

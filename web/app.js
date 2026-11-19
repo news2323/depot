@@ -392,6 +392,57 @@ function niceStep(raw) {
 const legend = items => `<div class="legend">${items.map(s => `<span><i class="${s.dash ? 'dash' : ''}" style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')}</div>`;
 const RANGES = {'1M': 30, '3M': 91, '6M': 182, '1J': 365, '3J': 1096, 'Max': 1e6};
 
+/* ---------------------------------------------------------------- Logos und 7-Tage-Verlauf (Watchlist am Handy)
+   Logos liegen als data-URI in logos.json im privaten Daten-Repo (holt der Tageslauf), damit der Browser keine fremden
+   Bildserver fragt. Einmal pro Seitenaufruf nachgeladen; vorhandene Platzhalter werden danach ersetzt. */
+async function loadLogos() {
+  if (S.logos) return;
+  try { S.logos = (await store.get('logos.json')) || {}; } catch (e) { S.logos = {}; }
+  S.logoDark = {};
+  // Helle Logos auf durchsichtigem Grund (weiße Schrift) brauchen einen dunklen Kreis, alle anderen einen weißen
+  await Promise.all(Object.entries(S.logos).map(async ([key, v]) => {
+    if (!v || !v.img) return;
+    try {
+      const im = new Image(); im.src = v.img; await im.decode();
+      const cv = document.createElement('canvas'); cv.width = cv.height = 24;
+      const cx = cv.getContext('2d'); cx.drawImage(im, 0, 0, 24, 24);
+      const px = cx.getImageData(0, 0, 24, 24).data; let clear = 0, n = 0, lum = 0;
+      for (let i = 0; i < px.length; i += 4) { if (px[i + 3] < 100) { clear++; continue; } n++; lum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]; }
+      if (clear > 576 * 0.15 && n && lum / n > 215) S.logoDark[key] = true;
+    } catch (e) { /* Bild nicht lesbar: weißer Kreis */ }
+  }));
+  document.querySelectorAll('.lg[data-key]').forEach(el => { const h = logoImg(el.dataset.key); if (h) el.innerHTML = h; });
+}
+const logoImg = key => { const x = ((S.logos || {})[key] || {}).img; return x && /^data:image\//.test(x) ? `<img src="${x}" alt="" loading="lazy"${(S.logoDark || {})[key] ? ' class="dk"' : ''}>` : ''; };
+const logo = key => `<span class="lg" data-key="${esc(key)}">${logoImg(key) || `<b>${esc(String(key.split(':')[1] || '?').replace(/[^A-Z0-9]/gi, '').slice(0, 1))}</b>`}</span>`;
+// 7 Tage aus Stundenkursen (market.json → spark, stündlich erneuert), dazu der aktuelle Kurs; Fläche mit Verlauf wie in Krypto-Apps
+let sparkN = 0;
+function spark7(key) {
+  const s = (S.market.spark || {})[key];
+  if (!s || s.length < 5) return spark(key, 7);
+  const c = s.slice(), live = A(key).price;
+  if (live != null && !A(key).error) c.push(live);
+  const lo = Math.min(...c), hi = Math.max(...c), W = 96, H = 34, k = (W - 2) / (c.length - 1);
+  const y = v => hi === lo ? H / 2 : 2 + (1 - (v - lo) / (hi - lo)) * (H - 5);
+  const pts = c.map((v, i) => [(1 + i * k).toFixed(1), y(v).toFixed(1)]);
+  const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ' ' + p[1]).join('');
+  const up = c[c.length - 1] >= c[0], col = `var(--${up ? 'up' : 'down'})`, id = 'sg' + (++sparkN);
+  return `<svg class="spark7" viewBox="0 0 ${W} ${H}" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${col}" stop-opacity=".28"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
+    <path d="${d}L${pts[pts.length - 1][0]} ${H}L${pts[0][0]} ${H}Z" fill="url(#${id})" stroke="none"/><path d="${d}" fill="none" style="stroke:${col}"/></svg>`;
+}
+// Marktwert kurz, in der Anzeigewährung (Aktien in Euro, Coins in Dollar)
+function mcapOf(key) {
+  const v = isCoin(key) ? D(key).mcap : (D(key).fund || {}).market_cap;
+  return v ? toShow(key, v) : null;
+}
+function mcapTxt(key) {
+  const v = mcapOf(key); if (!v) return null;
+  const [d, u] = v >= 1e12 ? [1e12, 'Bio.'] : v >= 1e9 ? [1e9, 'Mrd.'] : [1e6, 'Mio.'];
+  const x = v / d;
+  return nf(x, x >= 100 ? 0 : x >= 10 ? 1 : 2) + ' ' + u + ' ' + (CUR[showCur(key)] || showCur(key));
+}
+
 /* ---------------------------------------------------------------- Mini-Verlauf (Sparkline) */
 function spark(key, n = 30) {
   const h = D(key).hist;

@@ -101,10 +101,13 @@ const COL = {
   pnl: {id: 'pnl', label: 'Gewinn', cls: 'r hm', num: true, sort: r => r.p.pnlPct, html: r => `<div class="num ${sign(r.p.pnl)}">${eurS(r.p.pnl)}</div><div class="ts num">${pctS(r.p.pnlPct, 1)}</div>`},
   weight: {id: 'weight', label: 'Anteil', cls: 'r hm', num: true, sort: r => r.p.weight, html: r => `<div class="wbar2"><span><i style="width:${Math.min(100, r.p.weight * 2.5)}%"></i></span><b class="num">${nf(r.p.weight, 1)} %</b></div>`},
 };
-function tbl(id, cols, rows, def) {
+function sortRows(id, cols, rows, def) {
   const st = (S.sort || {})[id] || def, col = cols.find(c => c.id === st[0] && c.sort) || cols.find(c => c.sort);
   const val = r => { const x = col.sort(r); return x == null || (typeof x === 'number' && isNaN(x)) ? null : x; };
-  rows = [...rows].sort((a, b) => { const x = val(a), y = val(b); if (x == null || y == null) return (x == null) - (y == null); return (typeof x === 'string' ? x.localeCompare(y) : x - y) * st[1]; });
+  return {st, col, rows: [...rows].sort((a, b) => { const x = val(a), y = val(b); if (x == null || y == null) return (x == null) - (y == null); return (typeof x === 'string' ? x.localeCompare(y) : x - y) * st[1]; })};
+}
+function tbl(id, cols, rows, def) {
+  let st, col; ({st, col, rows} = sortRows(id, cols, rows, def));
   if (!rows.length) return '<p class="empty">Keine Titel in dieser Auswahl.</p>';
   return `<div class="tblwrap"><table class="tbl"><thead><tr>${cols.map(c => `<th class="${c.cls || ''}${c.sort ? ' s' : ''}${col.id === c.id ? ' on' : ''}"${c.sort ? ` data-act="sort" data-id="${id}" data-v="${c.id}" data-num="${c.num ? 1 : 0}"` : ''}>${c.label}${col.id === c.id ? `<span class="ar">${st[1] < 0 ? '↓' : '↑'}</span>` : ''}</th>`).join('')}</tr></thead>
     <tbody>${rows.map(r => `<tr data-act="open" data-key="${esc(r.key)}" tabindex="0">${cols.map(c => `<td class="${c.cls || ''}">${c.html(r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -380,13 +383,30 @@ function flowBlock(key) {
 }
 
 /* ---------------------------------------------------------------- Watchlist und Alerts */
+// Watchlist am Handy als Liste im Stil von Krypto-Apps (Jakobs Wunsch vom 19.11.2026): Punkte, Logo, Kürzel mit Marktwert,
+// Kurs, rechts der 7-Tage-Verlauf mit der Tagesänderung. Sortierung teilt sich den Zustand mit der Tabelle.
+const LCOL = [COL.score, {id: 'day', label: 'Heute', num: true, sort: COL.day.sort}, {id: 'w7', label: '7 Tage', num: true, sort: r => { const s = (S.market.spark || {})[r.key], p = A(r.key).price; return s && s[0] && p != null ? p / s[0] - 1 : null; }},
+  {id: 'mcap', label: 'Marktwert', num: true, sort: r => { const v = mcapOf(r.key); return v ? v / (isCoin(r.key) ? (fxNow('USD') || 1) : 1) : null; }}, COL.name];
+function watchList(id, rows, def) {
+  const {st, col, rows: rs} = sortRows(id, LCOL, rows, def);
+  if (!rs.length) return '<p class="empty">Keine Titel in dieser Auswahl.</p>';
+  const sorter = `<div class="wl-sort"><div class="seg">${LCOL.map(c => `<button data-act="sort" data-id="${id}" data-v="${c.id}" data-num="${c.num ? 1 : 0}" class="${c.id === col.id ? 'on' : ''}">${c.label}${c.id === col.id ? (st[1] < 0 ? ' ↓' : ' ↑') : ''}</button>`).join('')}</div></div>`;
+  return sorter + `<div class="wl">${rs.map(({key}) => { const a = A(key), ch = a.change_pct, r = ratingOf(key);
+    return `<button class="wl-row" data-act="open" data-key="${esc(key)}">
+      <span class="wl-sc${r == null ? ' none' : ' t' + tierOf(r)}" title="${r == null ? 'keine Punkte' : r + ' von 10 Punkten'}">${r == null ? '–' : r}</span>${logo(key)}
+      <span class="wl-nm"><b>${esc(key.split(':')[1])}</b><small>${esc(mcapTxt(key) || nameOf(key))}</small></span>
+      <span class="wl-px num">${px(key, a.price)}</span>
+      <span class="wl-ch">${spark7(key)}<small class="num ${ch == null ? 'muted' : ch >= 0 ? 'pos' : 'neg'}">${ch == null ? '–' : (ch >= 0 ? '▲ ' : '▼ ') + nf(Math.abs(ch), 2) + ' %'}</small></span></button>`; }).join('')}</div>
+    <p class="wl-hint">Links die Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet. Rechts der Verlauf über 7 Tage und die Änderung heute. Antippen für die Gründe.</p>`;
+}
 function vWatch() {
   const wl = S.pf.watchlist || [], al = S.pf.alerts || [], st = S.state.alerts || {}, f = fltOn('watch');
   const rows = wl.map(w => ({key: keyOf(w.kind, w.symbol)})).filter(r => f === 'Alle' || typeOf(r.key) === f);
   return `<div class="grid">
     <section class="card"><div class="toolbar"><div>${flt('watch', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
-      <div class="sumline"><b>${rows.length}</b> Titel beobachtet · Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet · Zeile antippen für die Gründe</div><button class="btn" data-act="addwatch">Titel hinzufügen</button></div>
-      ${wl.length ? tbl('watch', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.m1, COL.rng, COL.zone], rows, ['name', 1]) : '<p class="empty">Noch nichts auf der Watchlist.</p>'}</section>
+      <div class="sumline"><b>${rows.length}</b> Titel beobachtet<span class="hm"> · Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet · Zeile antippen für die Gründe</span></div><button class="btn" data-act="addwatch">Titel hinzufügen</button></div>
+      ${wl.length ? `<div class="wl-wide">${tbl('watch', [COL.score, COL.name, COL.spark, COL.price, COL.day, COL.m1, COL.rng, COL.zone], rows, ['name', 1])}</div>
+      <div class="wl-narrow">${watchList('watch', rows, ['name', 1])}</div>` : '<p class="empty">Noch nichts auf der Watchlist.</p>'}</section>
     <div class="grid half">
     ${card('Alerts', 'Push aufs Handy, sobald eine Schwelle erreicht ist', (al.length ? `<div class="rows tight">${al.map(a => { const fd = st[a.id];
       return `<div class="row"><div class="l"><div class="t"><span class="sym" style="margin:0;color:inherit">${esc(a.symbol)}</span><span>${esc(alertText(a))}</span></div>
@@ -848,5 +868,5 @@ document.addEventListener('visibilitychange', async () => { if (document.hidden 
   if (!LOCAL && !cfg) return render();
   $('#app').innerHTML = '<div class="wrap"><p class="empty">Lade Depot …</p></div>';
   await loadAll(); S.loaded = Date.now(); render();
-  autoRefresh();
+  autoRefresh(); loadLogos();
 })();
