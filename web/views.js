@@ -177,7 +177,7 @@ function cmpTable(c) {
     ${rows.map(r => `<tr class="${r[0] === 'Gesamt' ? 'sum' : ''}"><td><b>${r[0]}</b></td><td class="r num">${eur(r[1], 0)}</td><td class="r num"><b>${eur(r[2], 0)}</b><div class="ts ${sign(r[2] - r[1])}">${eurS0(r[2] - r[1])}</div></td>
       ${cell(r[3], r)}${cell(r[4], r)}</tr>`).join('')}</tbody></table></div>` : ''}
     <p class="hint">Zwei Szenarien: Jeder deiner Käufe geht am selben Tag mit demselben Euro-Betrag ganz in den S&P 500 bzw. ganz in Bitcoin, Verkäufe ziehen denselben Betrag wieder ab. „du“ ist dein Vorsprung (+) oder Rückstand (−). S&P 500 als Kursindex ohne Dividenden, alles in Euro.</p>
-    ${unknown.length ? `<div class="note"><b>${unknown.length} Buchungen ohne echtes Kaufdatum.</b> Die Positionen aus comdirect stehen mit dem ${uday} im Depot, weil das Kaufdatum fehlte. Für sie rechnet der Vergleich mit den Kursen von diesem Tag: Ihr Gewinn aus der Zeit davor erscheint deshalb als Vorsprung gegenüber dem Index. Mit den echten Kaufdaten wird der Vergleich genau.</div>` : ''}
+    ${unknown.length ? `<div class="note"><b>${unknown.length} Buchungen ohne echtes Kaufdatum.</b> Diese Positionen stehen mit dem ${uday} im Depot, weil das Kaufdatum fehlt. Für sie rechnet der Vergleich mit den Kursen von diesem Tag: Ihr Gewinn aus der Zeit davor erscheint deshalb als Vorsprung gegenüber dem Index. Mit den echten Kaufdaten wird der Vergleich genau.</div>` : ''}
     ${guessed.length ? `<p class="hint">${guessed.length} Kaufdaten aus comdirect sind geschätzt: der letzte Tag vor dem 18.11.2024, an dem der Kurs bei deinem Einstandskurs lag. Bei mehreren Käufen zu verschiedenen Preisen stimmt das nur ungefähr.</p>` : ''}`;
 }
 function attribution(c) {
