@@ -273,73 +273,6 @@ function fgCard() {
     ${k ? gauge('Krypto', k.value, FG_DE[k.label] || k.label, k.prev != null ? 'gestern ' + k.prev : '') : ''}</div>
     ${parts}<p class="hint">Aktien: eigene Berechnung nach dem Vorbild von CNN aus fünf Bausteinen, jeder mit seinem letzten Jahr verglichen. Krypto: alternative.me. Ein Stimmungsbild, kein Kaufsignal.</p>`, '', 'o5');
 }
-/* ---------------------------------------------------------------- Heute in 30 Sekunden und Im Blick
-   Jakobs Wunsch vom 21.11.2026: alles schneller verstehen. Zusammenfassung in Sätzen oben, darunter was Aufmerksamkeit braucht. */
-const trackedKeys = () => [...new Set([...calc().held.map(p => p.key), ...(S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol))])];
-function alertNear(a) {   // Abstand eines Kurs-Alerts in Prozent (in der Währung des Alerts), null wenn nicht berechenbar
-  const key = keyOf(a.kind, a.symbol), q = A(key), cur = a.currency || curOf(key);
-  if (q.price == null || q.error || !/^price_/.test(a.type)) return null;
-  let p = q.price;
-  if (cur !== curOf(key)) p = cur === 'EUR' ? p / (fxNow(curOf(key)) || 1) : curOf(key) === 'EUR' ? p * (fxNow(cur) || 1) : null;
-  if (!p || !a.value) return null;
-  return a.type === 'price_above' ? (a.value / p - 1) * 100 : (p / a.value - 1) * 100;
-}
-function radarItems(c) {
-  const out = [], st = S.state.alerts || {}, set = S.pf.settings || {}, today = todayDay();
-  for (const a of S.pf.alerts || []) {
-    if (st[a.id]) continue;
-    const d = alertNear(a);
-    if (d != null && d >= 0 && d <= 3) out.push({key: keyOf(a.kind, a.symbol), prio: 0, chip: ['warn', 'Alert'], text: `${esc(alertText(a))} · noch ${nf(d, 1)} %`});
-  }
-  const keys = trackedKeys();
-  keys.map(k => [k, A(k).change_pct]).filter(([k, v]) => v != null && Math.abs(v) >= (isCoin(k) ? set.move_crypto ?? 8 : set.move_stock ?? 5))
-    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 5)
-    .forEach(([k, v]) => out.push({key: k, prio: 1, chip: [v >= 0 ? 'good' : 'bad', 'Bewegung'], text: `${pctS(v, 1)} heute`}));
-  const heldK = new Set(c.held.map(p => p.key));
-  keys.forEach(k => { const l = zoneOf(k), p = A(k).price, r = ratingOf(k); if (!l || p == null) return; const d = (p / l.price - 1) * 100;
-    // nur eigene Positionen oder Watchlist-Titel mit mindestens 7 Punkten, und höchstens 2 % entfernt
-    if (d <= 2 && (heldK.has(k) || (r != null && r >= 7))) out.push({key: k, prio: 2, chip: ['', 'Nachkauf-Zone'], text: `${px(k, l.price)} · noch ${nf(d, 1)} % entfernt${ratingOf(k) != null ? ' · ' + ratingOf(k) + ' Punkte' : ''}`}); });
-  const held = new Set(c.held.map(p => p.key));
-  (S.digest.calendar || []).filter(e => e.key && keys.includes(e.key) && isoToDay(e.date) >= today && isoToDay(e.date) <= today + 7 && (e.category === 'Earnings' || (e.category === 'Dividende' && held.has(e.key))))
-    .forEach(e => { const dt = new Date(e.date + 'T12:00:00');
-      out.push({key: e.key, prio: 3, chip: ['blue', e.category === 'Earnings' ? 'Zahlen' : 'Dividende'], text: `${e.category === 'Earnings' ? 'Quartalszahlen' : 'Ex-Dividende'} ${isoToDay(e.date) === today ? 'heute' : WT[dt.getDay()] + ' ' + dt.getDate() + '.' + (dt.getMonth() + 1) + '.'}${e.time ? ' · ' + esc(e.time) : ''}`}); });
-  return out.sort((a, b) => a.prio - b.prio);
-}
-function radarCard(c) {
-  const it = radarItems(c);
-  const body = it.length ? `<div class="radar">${it.slice(0, 10).map(x => `<button data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<span class="rx">${x.text}</span><span class="chip ${x.chip[0]}">${x.chip[1]}</span></button>`).join('')}</div>
-    ${it.length > 10 ? `<p class="hint">und ${it.length - 10} weitere</p>` : ''}<p class="hint">Nähe einer Nachkauf-Zone ist ein Hinweis, kein Kaufgrund. Keine Anlageberatung.</p>`
-    : '<p class="empty">Gerade nichts Auffälliges: keine Alerts in der Nähe, keine starken Bewegungen, keine Termine in den nächsten 7 Tagen.</p>';
-  return card('Im Blick', 'Was gerade Aufmerksamkeit braucht', body, '', 'o2');
-}
-function briefCard(c, ps) {
-  const L = [], ix = sym => (S.market.indices || []).find(x => x.sym === sym) || {}, sp = ix('^GSPC').change_pct;
-  const name = k => `<b>${esc(shortName(k))}</b>`;
-  if (c.dayPct != null) {
-    const d = sp == null ? null : c.dayPct - sp;
-    L.push([c.dayPct >= 0 ? 'up' : 'down', `Dein Depot steht heute bei <b class="${sign(c.dayPct)}">${pctS(c.dayPct, 1)}</b> (${eurS0(c.dayEur)})${d == null ? '' : `, ${Math.abs(d) < 0.3 ? 'etwa wie der' : d > 0 ? 'besser als der' : 'schwächer als der'} S&amp;P 500 (${pctS(sp, 1)})`}.`]);
-  }
-  const wk = ps && ps.periods.find(x => x.label === '1 Woche');
-  if (wk && wk.v != null) L.push([wk.v >= 0 ? 'up' : 'down', `In 7 Tagen: <b class="${sign(wk.v)}">${pctS(wk.v, 1)}</b>${wk.b != null ? `, S&amp;P 500 ${pctS(wk.b, 1)}` : ''}.`]);
-  const mv = c.held.filter(p => p.dayEur != null && Math.abs(p.dayEur) >= 1).sort((a, b) => a.dayEur - b.dayEur);
-  if (mv.length) {
-    const dn = mv.filter(p => p.dayEur < 0).slice(0, 2), up = mv.filter(p => p.dayEur > 0).reverse().slice(0, 1);
-    L.push(['info', `${dn.length ? 'Am meisten gekostet hat ' + dn.map(p => `${name(p.key)} (${eurS0(p.dayEur)})`).join(' und ') : ''}${dn.length && up.length ? '; ' : ''}${up.length ? 'am meisten gebracht ' + up.map(p => `${name(p.key)} (${eurS0(p.dayEur)})`).join('') : ''}.`]);
-  }
-  const r = riskStats();
-  if (r && r.fromHigh.pct < -0.5) L.push(['down', `Das Depot liegt <b>${nf(-r.fromHigh.pct, 1)} %</b> unter seinem Hoch vom ${dateDe(dayIso(r.fromHigh.day))}.`]);
-  const fg = S.daily.market_fg, sm = (S.smart || {}).stocks;
-  if (fg) {
-    const g = sm && sm.groups ? sm.groups.filter(x => x.smart && x.action !== 'hält').map(x => `${x.label} ${x.action === 'kauft' ? 'kaufen zu' : 'verkaufen'}`) : [];
-    L.push(['info', `Stimmung am Aktienmarkt: <b>${esc(fg.label)}</b> (${fg.value} von 100)${g.length ? '. Am Terminmarkt: ' + g.join(', ') : ''}.`]);
-  }
-  const n = radarItems(c);
-  if (n.length) { const cnt = {}; n.forEach(x => cnt[x.chip[1]] = (cnt[x.chip[1]] || 0) + 1);
-    L.push(['warn', `Im Blick: ${Object.entries(cnt).map(([k, v]) => `${v}× ${k}`).join(', ')}. Details unter „Im Blick“.`]); }
-  if (!L.length) return '';
-  return `<section class="card brief span12 o0"><div class="head"><div><h2>Heute in 30 Sekunden</h2><p class="sub">Kurse ${esc(ago(S.market.updated))}</p></div></div>
-    <ul class="brief-l">${L.map(([ic, t]) => `<li class="${ic}"><i></i><span>${t}</span></li>`).join('')}</ul></section>`;
-}
 function vHome(c) {
   if (!c.txs.length) return `<div class="grid">${card('Willkommen', 'Trag deine ersten Käufe ein, dann rechnet das Dashboard los.',
     `<p class="body">Du gibst Aktien und Coins mit Kaufdatum, Stückzahl und Preis ein. Kurse, Dividenden, Quartalstermine,
@@ -349,7 +282,7 @@ function vHome(c) {
   const cal = (S.digest.calendar || []).filter(e => isMine(e) || e.category === 'Fed' || e.category === 'Makro').slice(0, 6);
   const alloc = S.alloc || 'Anlageklasse', hm = S.hm || 'Heute';
   const perf = ps ? `<div class="eyebrow" style="margin-top:18px">Wertentwicklung der heutigen Positionen</div><div class="perf">${ps.periods.map(x => `<div><div class="l">${x.label}</div><div class="v num ${sign(x.v)}">${x.v == null ? '–' : pctS(x.v, 1)}</div><div class="b num">${x.b == null ? '&nbsp;' : 'S&amp;P ' + pctS(x.b, 1)}</div></div>`).join('')}</div>` : '';
-  return `${depSeg() ? `<div class="depbar">${depSeg()}</div>` : ''}<div class="g12">${briefCard(c, ps)}<div class="colstack span8">
+  return `${depSeg() ? `<div class="depbar">${depSeg()}</div>` : ''}<div class="g12"><div class="colstack span8">
     <section class="card hero o1"><div class="herotop"><div><div class="eyebrow">${S.dep === 'all' ? 'Depotwert' : 'Depotwert · ' + esc(depName(S.dep))}</div><div class="nav-value num">${eur(c.value)}</div>
       <div class="chgrow">${pill(c.dayPct)}<span class="num ${sign(c.dayEur)}">${eurS(c.dayEur)}</span><span class="muted">heute</span></div></div>
       <div class="heroside"><div class="eyebrow">Gewinn offen</div><div class="num ${sign(c.pnl)}" style="font-size:20px;font-weight:650;margin-top:4px">${eurS(c.pnl)}</div><div class="small muted num">${pctS(c.pnlPct, 1)} auf ${eur(c.cost, 0)}</div></div></div>
@@ -361,7 +294,6 @@ function vHome(c) {
       <div class="scale"><span class="num">${hm === 'Heute' ? '−3 %' : '−50 %'}</span><i></i><span class="num">${hm === 'Heute' ? '+3 %' : '+50 %'}</span><span style="margin-left:auto">Krypto-Skala doppelt so weit</span></div>`, seg('hm', ['Heute', 'Seit Kauf'], hm), 'o4')}
     </div>
     <div class="colstack span4">
-      ${radarCard(c)}
       ${card('Beitrag heute', 'Wer den Tag bewegt hat, in Euro', attribution(c), '', 'o3')}
       ${card('Kennzahlen', '', `<div class="kpis">
         <div><span class="l">Gewinn offen</span><span class="v num ${sign(c.pnl)}">${eurS(c.pnl)}<small>${pctS(c.pnlPct, 1)}</small></span></div>
@@ -919,7 +851,7 @@ document.addEventListener('click', async ev => {
     window.open('https://grok.com/', '_blank', 'noopener'); }
   else if (act === 'groksave') { const t = ($('#grokans') || {}).value || '';
     try { const n = saveGrok(t, calc()); await savePf(`Stimmung für ${n} Titel gespeichert`); } catch (e) { toast(e.message || 'Speichern fehlgeschlagen', 4500); } }
-  else if (act === 'theme') { applyTheme(v === 'Hell' ? 'light' : v === 'Dunkel' ? 'dark' : ''); vSettings(); render(); }
+  else if (act === 'theme') { applyTheme(v === 'Hell' ? 'light' : v === 'Dunkel' ? 'dark' : 'system'); vSettings(); render(); }
   else if (act === 'searchopen') { const t = $('.top'); t.classList.add('searching'); $('#q').focus(); }
   else if (act === 'calf') { S.calFilter = v; render(); }
   else if (act === 'flowwin') { S.flowWin = v.startsWith('4') ? '4' : '24'; if (S.sheetKey) vAsset(S.sheetKey); else render(); }

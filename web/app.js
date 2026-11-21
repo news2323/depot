@@ -45,12 +45,13 @@ function toast(msg, ms = 2600) { const t = $('#toast'); t.textContent = msg; t.h
    Lokal (Mac): kleiner Server neben der Seite. Cloud: privates GitHub-Repo über die GitHub-API.
    Der Zugangsschlüssel bleibt nur in diesem Browser gespeichert. */
 const LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-// Darstellung: 'light', 'dark' oder leer (folgt dem System). Nur eine Bequemlichkeit pro Gerät.
+// Darstellung: 'light' (Standard seit Jakobs Wunsch vom 21.11.2026), 'dark' oder 'system'. Nur eine Bequemlichkeit pro Gerät.
 function applyTheme(t) {
-  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
-  try { if (t) localStorage.setItem('depot_theme', t); else localStorage.removeItem('depot_theme'); } catch (e) { /* egal */ }
+  t = t === 'dark' || t === 'system' ? t : 'light';
+  if (t === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('depot_theme', t); } catch (e) { /* egal */ }
 }
-try { applyTheme(localStorage.getItem('depot_theme') || ''); } catch (e) { /* egal */ }
+try { applyTheme(localStorage.getItem('depot_theme') || 'light'); } catch (e) { applyTheme('light'); }
 let cfg = null;
 try { cfg = JSON.parse(localStorage.getItem('depot_cfg') || 'null'); } catch (e) { cfg = null; }
 const b64 = s => { const b = new TextEncoder().encode(s); let o = ''; for (let i = 0; i < b.length; i += 0x8000) o += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(o); };
