@@ -83,6 +83,7 @@ an denen ein Nachkauf sinnvoll wäre, jeweils mit Begründung. Das ist eine Eins
 {STYLE}
 Struktur:
 {{"summary": "2–3 Sätze zur Lage des Unternehmens",
+ "business": {{"what": "1–2 einfache Sätze, was das Unternehmen tut", "money": "1–2 Sätze, womit es sein Geld verdient, mit groben Anteilen der Sparten"}},
  "verdict": "unterbewertet|fair|überbewertet", "score": 5, "confidence": "niedrig|mittel|hoch",
  "valuation_reasoning": "3–4 Sätze, warum",
  "last_quarter": {{"period": "z. B. Q3 2026", "date": "YYYY-MM-DD", "revenue": "", "revenue_growth": "", "eps": "", "vs_expectations": "", "guidance": "", "highlights": ["2–4 Punkte"], "source_url": ""}},
@@ -122,7 +123,7 @@ Das ist eine Einschätzung, keine Anlageberatung.
 
 {STYLE}
 Struktur:
-{{"summary": "2–3 Sätze", "verdict": "unterbewertet|fair|überbewertet", "score": 5, "confidence": "niedrig|mittel|hoch",
+{{"summary": "2–3 Sätze", "business": {{"what": "1–2 einfache Sätze, was das Projekt tut", "money": "1–2 Sätze, womit es Einnahmen erzielt und ob sie an Token-Halter gehen"}}, "verdict": "unterbewertet|fair|überbewertet", "score": 5, "confidence": "niedrig|mittel|hoch",
  "valuation_reasoning": "2–3 Sätze", "flow_comment": "2 Sätze zu Spot, Futures, Open Interest und Funding",
  "events": [{{"date": "YYYY-MM-DD", "title": ""}}],
  "buy_zones": [{{"price": 0.0, "reason": ""}}],

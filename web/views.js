@@ -234,6 +234,24 @@ function riskCard(c) {
     <div><p class="sh">Klumpen</p>${lump}${soon ? `<p class="sh">Im Blick behalten</p>${soon}` : ''}</div></div>
     <p class="hint">Rückschläge: die heutigen Positionen mit den Kursen der Vergangenheit zurückgerechnet${r.vol != null ? ` · Schwankung ${nf(r.vol, 1)} % pro Jahr` : ''} · Beta ${nf(r.beta, 2)} zum S&amp;P 500 (bei 1 bewegt sich das Depot wie der Markt). Vergangene Schwankungen sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p>`, '', 'span12');
 }
+// Smart Money / Dumb Money (eigene Berechnung, smart.json aus dem Tageslauf): Profis gegen Masse, Aktien oder Bitcoin
+function smartCard() {
+  const sm = S.smart || {}, which = sm[S.smk] ? S.smk : sm.stocks ? 'stocks' : 'btc', x = sm[which];
+  if (!x) return '';
+  const diff = x.smart - x.dumb;
+  const read = diff >= 30 ? ['good', 'Profis zuversichtlich, Masse vorsichtig. Solche Lagen waren in der Vergangenheit eher günstige Zeitpunkte.']
+    : diff <= -30 ? ['bad', 'Masse zuversichtlich, Profis vorsichtig. Solche Lagen gingen in der Vergangenheit öfter Rückschlägen voraus.']
+    : ['', 'Kein klares Signal: Profis und Masse liegen nicht weit auseinander.'];
+  const g = (t, v, prev, sub) => `<div class="fgbox"><div class="l">${t}</div><div class="v num">${v}<span>${v >= 70 ? 'zuversichtlich' : v <= 30 ? 'vorsichtig' : 'neutral'}</span></div>
+    <div class="fgbar" role="img" aria-label="${v} von 100"><b style="left:${v}%"></b></div><div class="fgax"><span>vorsichtig</span><span>zuversichtlich</span></div>
+    <div class="n">${sub}${prev != null ? ` · Vorwoche ${prev}` : ''}</div></div>`;
+  return card('Smart Money und Dumb Money', `Profis gegen Masse am Terminmarkt, 0 bis 100 · Stand ${dateDe(x.day)}`, `<div class="fggrid">
+    ${g('Smart Money', x.smart, (x.prev || {}).smart, 'Banken und Fondsgesellschaften')}${g('Dumb Money', x.dumb, (x.prev || {}).dumb, 'Kleinanleger und Stimmung')}</div>
+    <div class="note ${read[0]}" style="margin-top:12px">${read[1]}</div>
+    <div class="chart" id="ch-smart" style="margin-top:8px"></div><div id="lg-smart"></div>
+    <p class="hint">Eigene Berechnung aus der wöchentlichen Statistik der US-Terminmarktaufsicht CFTC (${which === 'btc' ? 'Bitcoin-Future' : 'E-mini-S&amp;P-500-Future'}): Smart Money = Netto-Position von Banken und Fondsgesellschaften, Dumb Money = Netto-Position der Kleinanleger, zur Hälfte gemischt mit Angst und Gier. Jeweils im Vergleich zu den letzten drei Jahren (0 = so vorsichtig wie nie, 100 = so zuversichtlich wie nie). Nicht der kostenpflichtige Index von Sentimentrader. Ein Stimmungsbild, kein Kaufsignal.</p>`,
+    seg('smk', ['Aktien', 'Bitcoin'], which === 'btc' ? 'Bitcoin' : 'Aktien'), 'span12');
+}
 // Angst und Gier: Aktienmarkt (eigene Berechnung nach CNN-Vorbild, update.market_fg) und Krypto (alternative.me)
 function fgCard() {
   const m = S.daily.market_fg, k = S.daily.crypto_fg;
@@ -278,6 +296,7 @@ function vHome(c) {
       ${card('Beitrag heute', 'Wer den Tag bewegt hat, in Euro', attribution(c))}
     </div>
     ${riskCard(c)}
+    ${smartCard()}
     ${card('Allokation', '', allocation(c, alloc), seg('alloc', ['Anlageklasse', 'Sektor', 'Währung'], alloc), 'span7')}
     ${card('Nächste Termine', 'Deine Titel, Fed und Konjunktur', cal.length ? calCompact(cal) + `<div class="btnrow" style="margin-top:10px"><button class="btn sm ghost" data-act="tab" data-v="cal">Alle Termine</button></div>` : '<p class="empty">Keine Termine bekannt.</p>', '', 'span5')}
     ${ap ? `<details class="card fold span12"><summary><div><h2>Einschätzung der Recherche</h2><p class="sub">${esc(ap.headline)} · ${esc(ago(ap.at))}</p></div><span class="chev"></span></summary>
@@ -311,6 +330,12 @@ function drawCharts() {
       lineChart('#ch-main', s, {fmt: v => nf(v, 0) + ' €', label: 'Depotwert seit Kauf im Vergleich mit gleichen Käufen', height: 260});
       $('#lg-main').innerHTML = legend(s);
     }
+  }
+  const chs = $('#ch-smart'), smx = (S.smart || {})[(S.smart || {})[S.smk] ? S.smk : 'stocks'];
+  if (chs && smx && smx.hist && smx.hist.length > 1) {
+    const s2 = [{name: 'Smart Money', color: 'var(--s1)', pts: smx.hist.map(h => [isoToDay(h[0]), h[1]])}, {name: 'Dumb Money', color: 'var(--s2)', pts: smx.hist.map(h => [isoToDay(h[0]), h[2]])}];
+    lineChart(chs, s2, {fmt: v => nf(v, 0), height: 200, label: 'Smart Money und Dumb Money, zwei Jahre', hlines: [{y: 50, label: '', color: 'var(--line2)'}]});
+    $('#lg-smart').innerHTML = legend(s2);
   }
   const tm = $('#tm');
   if (tm) {
@@ -660,6 +685,15 @@ function vCal() {
 function openSheet(html) { $('#sheet-box').innerHTML = html; $('#sheet').hidden = false; $('#sheet-box').scrollTop = 0; document.body.style.overflow = 'hidden'; }
 function closeSheet() { $('#sheet').hidden = true; document.body.style.overflow = ''; S.sheetKey = null; }
 const sheetTop = (title, sub) => `<div class="sheet-top"><div><h2>${title}</h2>${sub ? `<p class="muted small" style="margin:4px 0 0">${sub}</p>` : ''}</div><button class="xbtn" data-act="close">×</button></div>`;
+// Was die Firma (der Coin, der ETF) tut und womit sie Geld verdient: Recherche (analysis → business), sonst profiles.json, sonst Yahoo auf Englisch
+function profileCard(key) {
+  const b = (AI(key).claude || {}).business, pr = (S.profiles || {})[key], en = (D(key).fund || {}).summary_en;
+  const x = b && (b.what || b.money) ? b : pr && (pr.what || pr.money) ? pr : null;
+  const title = isCoin(key) ? 'Was ist das?' : isFund(key) || isCommodity(key) ? 'Was steckt drin?' : 'Was macht die Firma?';
+  if (x) return card(title, '', `<div class="prof">${x.what ? `<p><b>Was ${isCoin(key) ? 'es' : 'sie'} tut</b>${esc(x.what)}</p>` : ''}${x.money ? `<p><b>${isFund(key) || isCommodity(key) ? 'Wie es Ertrag bringt' : 'Womit ' + (isCoin(key) ? 'es' : 'sie') + ' Geld verdient'}</b>${esc(x.money)}</p>` : ''}</div>`);
+  if (en) return card(title, 'Beschreibung von Yahoo, auf Englisch. Die deutsche Fassung kommt mit der nächsten Recherche.', `<p class="body">${esc(en)}</p>`);
+  return '';
+}
 function vAsset(key) {
   S.sheetKey = key;
   const a = A(key), d = D(key), ai = AI(key).claude, gr = grokOf(key), c = calc(), p = c.pos.find(x => x.key === key && x.qty > 1e-12);
@@ -672,6 +706,7 @@ function vAsset(key) {
     <div class="chart" id="ch-asset" data-key="${esc(key)}"></div>
     <div class="tiles">${tile('1 Monat', pctS(t.perf_1m, 1), '', sign(t.perf_1m))}${tile('1 Jahr', pctS(t.perf_1y, 1), '', sign(t.perf_1y))}
     ${tile('52-Wochen-Spanne', t.low52 ? px(key, t.low52) + ' – ' + px(key, t.high52) : '–')}${tile('Abstand zum Hoch', t.from_high != null ? nf(t.from_high, 1) + ' %' : '–')}</div></section>`;
+  h += profileCard(key);
   if (v) { const r = ratingOf(key);
     h += `<section class="card rate"><div class="ratehead">${score(key, 'big')}<div class="ratemain"><div class="ratelabel">${esc(v.label)}</div><div class="muted small">${r == null ? '' : r + ' von 10 Punkten · '}${esc(v.basis)}</div>${meter(r)}</div>
       ${aiChip(ai) ? `<div class="rateai"><div class="tiny muted">Recherche</div>${aiChip(ai)}</div>` : ''}</div>
@@ -795,6 +830,7 @@ document.addEventListener('click', async ev => {
   else if (act === 'mode') { S.mode = Object.keys(MODES).find(k => MODES[k] === v) || 'positionen'; render(); }
   else if (act === 'hm') { S.hm = v; render(); }
   else if (act === 'cmp') { S.cmp = v; render(); }
+  else if (act === 'smk') { S.smk = v === 'Bitcoin' ? 'btc' : 'stocks'; render(); }
   else if (act === 'dep') { setDep(v); render(); }
   else if (act === 'alloc') { S.alloc = v; render(); }
   else if (act === 'secb') { S.secb = v; render(); }

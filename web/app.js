@@ -87,8 +87,10 @@ const emptyPf = () => ({version: 1, base_currency: 'EUR', transactions: [], watc
 async function loadAll() {
   S.loading = true; S.err = '';
   try {
-    const [pf, market, daily, analysis, digest, state] = await Promise.all(
-      ['portfolio.json', 'market.json', 'daily.json', 'analysis.json', 'digest.json', 'state.json'].map(n => store.get(n)));
+    const [pf, market, daily, analysis, digest, state, profiles, smart] = await Promise.all(
+      ['portfolio.json', 'market.json', 'daily.json', 'analysis.json', 'digest.json', 'state.json', 'profiles.json', 'smart.json']
+        .map(n => /^(profiles|smart)\.json$/.test(n) ? store.get(n).catch(() => null) : store.get(n)));   // nur die beiden Zusatzdateien dürfen fehlen
+    S.profiles = profiles || {}; S.smart = smart || null;
     S.pf = Object.assign(emptyPf(), pf || {});
     S.pf.settings = S.pf.settings || {};
     S.market = market || {}; S.daily = daily || {}; S.analysis = analysis || {}; S.digest = digest || {}; S.state = state || {};

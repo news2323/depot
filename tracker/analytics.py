@@ -485,5 +485,48 @@ def market_fear_greed(hist, window=252):
         return None
     week, _ = at(5)
     month, _ = at(21)
+    hist = [[day_to_iso(days[len(days) - 1 - b]), at(b)[0]] for b in range(0, min(len(days) - 1, 800), 5)]
     return {"value": v, "label": fg_label(v), "week": week, "month": month, "day": day_to_iso(days[-1]),
+            "hist": [h for h in reversed(hist) if h[1] is not None],
             "parts": [{"key": k, "name": n, "about": a, "value": parts[k], "label": fg_label(parts[k])} for k, n, a in FG_PARTS]}
+
+
+# ----------------------------------------------------------------- Smart Money / Dumb Money (eigene Berechnung)
+def _cot_index(vals, i, look=156):
+    """Stand im Vergleich zu den letzten drei Jahren: 0 = niedrigster, 100 = höchster Wert."""
+    win = [x for x in vals[max(0, i - look + 1):i + 1] if x is not None]
+    if len(win) < 26 or vals[i] is None:
+        return None
+    lo, hi = min(win), max(win)
+    return 50.0 if hi == lo else (vals[i] - lo) / (hi - lo) * 100
+
+
+def smart_dumb(rows, crowd):
+    """Smart Money: Banken und Fondsgesellschaften (Dealer und Asset Manager) netto, Anteil am offenen Interesse, als COT-Index.
+    Dumb Money: Kleinanleger (nicht meldepflichtig) netto als COT-Index, zur Hälfte gemischt mit der Stimmung (Angst und Gier).
+    rows: cftc_tff, älteste zuerst. crowd: {Datum: 0..100}. Gibt Stand, Vorwoche und ein Jahr Verlauf zurück."""
+    if len(rows) < 30:
+        return None
+    pro = [(r["dealer"] + r["asset"]) / r["oi"] for r in rows]
+    small = [r["small"] / r["oi"] for r in rows]
+    ck = sorted(crowd)
+
+    def crowd_at(d):
+        import bisect
+        j = bisect.bisect_right(ck, d) - 1
+        return crowd[ck[j]] if j >= 0 and (datetime.date.fromisoformat(d) - datetime.date.fromisoformat(ck[j])).days <= 10 else None
+
+    hist = []
+    for i, r in enumerate(rows):
+        s, k = _cot_index(pro, i), _cot_index(small, i)
+        if s is None or k is None:
+            continue
+        c = crowd_at(r["d"])
+        dumb = k if c is None else (k + c) / 2
+        hist.append([r["d"], round(s), round(dumb), round(k), None if c is None else round(c)])
+    if not hist:
+        return None
+    last = hist[-1]
+    return {"day": last[0], "smart": last[1], "dumb": last[2], "small": last[3], "crowd": last[4],
+            "prev": {"smart": hist[-2][1], "dumb": hist[-2][2]} if len(hist) > 1 else None,
+            "hist": [h[:3] for h in hist[-104:]]}

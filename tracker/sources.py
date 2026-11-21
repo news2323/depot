@@ -189,6 +189,7 @@ class YahooFundamentals:
             "earnings_date": earn[0] if earn else None,
             "sector": prof.get("sector"), "industry": prof.get("industry"),
             "website": prof.get("website"), "ir_website": prof.get("irWebsite"),
+            "summary_en": (prof.get("longBusinessSummary") or "")[:900] or None,
         }
         out.update(_eps_trend(d.get("earningsTrend")))
         extra = {"insider": _insider(d.get("insiderTransactions")),
@@ -985,3 +986,38 @@ def logo(kind, sym, name="", website="", coin_image=None):
             if img:
                 return img
     return _image("https://financialmodelingprep.com/image-stock/%s.png" % urllib.parse.quote(sym))
+
+
+# ----------------------------------------------------------------- Smart Money / Dumb Money
+CFTC_TFF = "https://publicreporting.cftc.gov/resource/gpe5-46if.json"   # Traders in Financial Futures, wöchentlich, frei
+COT_MARKETS = {"stocks": "13874A", "btc": "133741"}                       # E-mini S&P 500, Bitcoin (CME)
+
+
+def cftc_tff(code, weeks=170):
+    """Wöchentliche Positionen je Händlergruppe für einen Terminkontrakt, älteste zuerst."""
+    q = urllib.parse.urlencode({"$where": "cftc_contract_market_code='%s'" % code, "$order": "report_date_as_yyyy_mm_dd DESC",
+                                "$limit": str(weeks)})
+    r = _try("CFTC", CFTC_TFF + "?" + q, timeout=30)
+    out = []
+    for x in r or []:
+        n = lambda k: fnum(x.get(k)) or 0
+        oi = n("open_interest_all")
+        if not oi:
+            continue
+        out.append({"d": str(x.get("report_date_as_yyyy_mm_dd", ""))[:10], "oi": oi,
+                    "dealer": n("dealer_positions_long_all") - n("dealer_positions_short_all"),
+                    "asset": n("asset_mgr_positions_long") - n("asset_mgr_positions_short"),
+                    "lev": n("lev_money_positions_long") - n("lev_money_positions_short"),
+                    "small": n("nonrept_positions_long_all") - n("nonrept_positions_short_all")})
+    return sorted(out, key=lambda x: x["d"])
+
+
+def crypto_fear_greed_hist(days=1200):
+    """Krypto-Angst-und-Gier je Tag (alternative.me), als {Datum: Wert}."""
+    r = _try("Fear & Greed", "https://api.alternative.me/fng/?limit=%d" % days, timeout=30)
+    out = {}
+    for x in (r or {}).get("data") or []:
+        v, ts = fnum(x.get("value")), fnum(x.get("timestamp"))
+        if v is not None and ts:
+            out[datetime.datetime.utcfromtimestamp(int(ts)).date().isoformat()] = v
+    return out

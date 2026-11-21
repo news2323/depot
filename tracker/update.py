@@ -369,6 +369,15 @@ def run_daily(store):
         if h:
             fg_hist[sym] = (h["d"], h["c"])
     market_fg = analytics.market_fear_greed(fg_hist)
+    # Smart Money / Dumb Money: Terminmarkt-Positionen (CFTC, wöchentlich) und Stimmung, eigene Berechnung
+    smart = {}
+    for name, crowd in (("stocks", {d: v for d, v in (market_fg or {}).get("hist") or []}), ("btc", sources.crypto_fear_greed_hist())):
+        x = analytics.smart_dumb(sources.cftc_tff(sources.COT_MARKETS[name]), crowd)
+        if x:
+            smart[name] = x
+    if smart:
+        smart["updated"] = now_iso()
+        store.put("smart.json", smart)
     # Branchen der großen Indizes als Vergleich für die Sektoren des Depots (über die ETFs URTH und SPY)
     sector_bench = {}
     for name, sym in SECTOR_BENCH:
