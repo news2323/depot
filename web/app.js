@@ -14,8 +14,10 @@ const MON_K = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', '
 const CUR = {EUR: '€', USD: '$', GBP: '£', CHF: 'CHF', JPY: '¥'};
 
 const nf = (v, d = 2) => v == null || isNaN(v) ? '–' : Number(v).toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d});
-const eur = (v, d = 2) => v == null || isNaN(v) ? '–' : nf(v, d) + ' €';
-const eurS = v => v == null || isNaN(v) ? '–' : (v >= 0 ? '+' : '−') + nf(Math.abs(v)) + ' €';
+// Beträge verbergen (Augen-Knopf oben): Euro-Beträge des Depots werden zu Punkten, Kurse und Prozente bleiben sichtbar
+const MASK = '•••• €';
+const eur = (v, d = 2) => v == null || isNaN(v) ? '–' : S.hide ? MASK : nf(v, d) + ' €';
+const eurS = v => v == null || isNaN(v) ? '–' : S.hide ? MASK : (v >= 0 ? '+' : '−') + nf(Math.abs(v)) + ' €';
 function money(v, cur) {
   if (v == null || isNaN(v)) return '–';
   const a = Math.abs(v), d = a >= 1000 ? 0 : a >= 1 ? 2 : a >= 0.01 ? 4 : 6;
@@ -228,6 +230,7 @@ const depots = () => (S.pf.depots && S.pf.depots.length ? S.pf.depots : [{id: 'm
 const depOf = t => t.depot || 'main';
 const depName = id => (depots().find(d => d.id === id) || {}).name || id;
 try { S.dep = localStorage.getItem('depot_dep') || 'all'; } catch (e) { S.dep = 'all'; }
+try { S.hide = localStorage.getItem('depot_hide') === '1'; } catch (e) { S.hide = false; }
 function setDep(id) { S.dep = id; S.calc = null; try { localStorage.setItem('depot_dep', id); } catch (e) { /* egal */ } }
 function calc() {
   if (S.calc) return S.calc;

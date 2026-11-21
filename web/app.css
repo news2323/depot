@@ -551,3 +551,27 @@ input:focus,select:focus{border-color:var(--accent);background:var(--surface)}
 .prof p{margin:0 0 10px;font-size:14px;line-height:1.5;color:var(--ink2)}.prof p:last-child{margin:0}
 .prof b{display:block;font-size:12px;font-weight:650;color:var(--ink3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
 .note.good{background:var(--up-bg);border-color:transparent;color:var(--up)}.note.bad{background:var(--down-bg);border-color:transparent;color:var(--down)}
+
+/* Heute in 30 Sekunden */
+.brief .head{margin-bottom:6px}
+.brief-l{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 28px}
+.brief-l li{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.45;color:var(--ink2)}
+.brief-l li b{color:var(--ink);font-weight:650}.brief-l li b.pos{color:var(--up)}.brief-l li b.neg{color:var(--down)}
+.brief-l i{flex:none;width:8px;height:8px;border-radius:50%;margin-top:6px;background:var(--ink3)}
+.brief-l li.up i{background:var(--up)}.brief-l li.down i{background:var(--down)}.brief-l li.warn i{background:var(--warn)}.brief-l li.info i{background:var(--accent)}
+@media(max-width:759px){.brief-l{grid-template-columns:1fr;gap:9px}.brief-l li{font-size:13.5px}}
+/* Im Blick */
+.radar{display:grid}
+.radar>button{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr) auto;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line);text-align:left;font-size:13px}
+.radar>button:first-child{border-top:0}
+.radar>button:hover .tg b{color:var(--accent)}
+.radar .rx{color:var(--ink2);min-width:0;line-height:1.35}
+.radar .tg{max-width:150px}
+@media(max-width:420px){.radar>button{grid-template-columns:minmax(0,1fr) auto}.radar .rx{grid-column:1/-1;grid-row:2;white-space:normal;font-size:12.5px;margin-top:-4px}.radar .tg{max-width:none}}
+/* Beträge verbergen */
+.iconbtn.on{background:var(--accent-bg);color:var(--accent)}
+/* Reihenfolge der Übersicht, wenn alles untereinander steht: Kurzfassung, Depotwert, Im Blick, Beitrag heute, Heatmap, Stimmung, Kennzahlen */
+@media(max-width:1099px){
+  .g12>.card,.g12 .colstack>.card{order:10}
+  .g12 .card.o0{order:0}.g12 .card.o1{order:1}.g12 .card.o2{order:2}.g12 .card.o3{order:3}.g12 .card.o4{order:4}.g12 .card.o5{order:5}.g12 .card.o6{order:6}
+}

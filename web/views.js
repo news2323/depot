@@ -8,6 +8,7 @@ const ICON = {
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.2-1.3L14 3h-4l-.4 2.5a7 7 0 0 0-2.2 1.3l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.6l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.2 1.3L10 21h4l.4-2.5a7 7 0 0 0 2.2-1.3l2.3 1 2-3.4-2-1.5c.07-.4.1-.9.1-1.3z"/>',
   sync: '<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  eyeoff: '<path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6C3.8 8.4 2 12 2 12s4 7 10 7c1.9 0 3.6-.6 5-1.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   logo: '<path d="M4 17l5-5 4 4 7-8"/><path d="M15 8h5v5"/>',
   insight: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1V16h5v-.1c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z"/>',
 };
@@ -43,6 +44,7 @@ function render() {
       <p class="sub"><span class="live ${stale ? 'old' : ''}"></span><span>Kurse ${esc(ago(upd))}<span class="hm"> · ${WT_LANG[now.getDay()]}, ${now.getDate()}. ${MON[now.getMonth()]}</span></span></p></div>
       <div class="topact"><div class="search">${svg('search')}<input id="q" type="search" placeholder="Titel suchen" autocomplete="off" aria-label="Titel suchen"><kbd>/</kbd><div id="qres" class="qres" hidden></div></div>
       <button class="iconbtn mobs" data-act="searchopen" title="Suchen">${svg('search')}</button>
+      <button class="iconbtn${S.hide ? ' on' : ''}" data-act="hide" title="${S.hide ? 'Beträge zeigen' : 'Beträge verbergen'}" aria-pressed="${S.hide ? 'true' : 'false'}">${svg(S.hide ? 'eyeoff' : 'watch')}</button>
       <button class="iconbtn" id="refresh" data-act="refresh" title="Kurse aktualisieren">${svg('sync')}</button>
       <button class="iconbtn mob" data-act="settings" title="Einstellungen">${svg('gear')}</button></div></header>
     ${strip()}
@@ -163,7 +165,7 @@ function donut(groups, tot, dim) {
     <div class="dc" data-def-n="${esc(dim)}" data-def-v="${esc(eur(tot, 0))}"><span class="n">${esc(dim)}</span><b class="num">${eur(tot, 0)}</b></div></div>`;
 }
 // Vergleich mit gleichen Käufen: jeder Kauf ganz in den S&P 500 bzw. ganz in Bitcoin (zwei Szenarien)
-const eurS0 = v => v == null || isNaN(v) ? '–' : (v >= 0 ? '+' : '−') + nf(Math.abs(v), 0) + ' €';
+const eurS0 = v => v == null || isNaN(v) ? '–' : S.hide ? MASK : (v >= 0 ? '+' : '−') + nf(Math.abs(v), 0) + ' €';
 function cmpTable(c) {
   const sr = c.series, n = sr.d.length - 1;
   if (n < 0) return '';
@@ -198,7 +200,7 @@ function riskCard(c) {
   const r = riskStats();
   if (!r) return card('Risiko', 'Für deine heutigen Positionen', '<p class="empty">Kommt mit der nächsten täglichen Aktualisierung.</p>', '', 'span12');
   const row = (l, v, note = '', cls = 'neg') => `<div class="rk"><span class="l">${l}${note ? `<small>${note}</small>` : ''}</span><span class="v num ${cls}">${v}</span></div>`;
-  const e0 = v => v == null ? '–' : (v >= 0 ? '+' : '−') + nf(Math.abs(v), 0) + ' €';
+  const e0 = v => v == null ? '–' : S.hide ? MASK : (v >= 0 ? '+' : '−') + nf(Math.abs(v), 0) + ' €';
   const months = (a, b) => { const m = Math.round((b - a) / 30.44); return m < 1 ? 'unter einem Monat' : m === 1 ? 'einem Monat' : m + ' Monaten'; };
   const pc = v => nf(v, v < 1 ? 1 : 0) + ' %';
   const syms = l => l.slice(0, 4).map(esc).join(', ') + (l.length > 4 ? ` und ${l.length - 4} weitere` : '');
@@ -269,7 +271,74 @@ function fgCard() {
   return card('Angst und Gier', 'Stimmung am Markt, 0 bis 100', `<div class="fggrid">
     ${m ? gauge('Aktien', m.value, m.label, [m.week != null ? 'vor einer Woche ' + m.week : '', m.month != null ? 'vor einem Monat ' + m.month : ''].filter(Boolean).join(' · ')) : ''}
     ${k ? gauge('Krypto', k.value, FG_DE[k.label] || k.label, k.prev != null ? 'gestern ' + k.prev : '') : ''}</div>
-    ${parts}<p class="hint">Aktien: eigene Berechnung nach dem Vorbild von CNN aus fünf Bausteinen, jeder mit seinem letzten Jahr verglichen. Krypto: alternative.me. Ein Stimmungsbild, kein Kaufsignal.</p>`);
+    ${parts}<p class="hint">Aktien: eigene Berechnung nach dem Vorbild von CNN aus fünf Bausteinen, jeder mit seinem letzten Jahr verglichen. Krypto: alternative.me. Ein Stimmungsbild, kein Kaufsignal.</p>`, '', 'o5');
+}
+/* ---------------------------------------------------------------- Heute in 30 Sekunden und Im Blick
+   Jakobs Wunsch vom 21.11.2026: alles schneller verstehen. Zusammenfassung in Sätzen oben, darunter was Aufmerksamkeit braucht. */
+const trackedKeys = () => [...new Set([...calc().held.map(p => p.key), ...(S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol))])];
+function alertNear(a) {   // Abstand eines Kurs-Alerts in Prozent (in der Währung des Alerts), null wenn nicht berechenbar
+  const key = keyOf(a.kind, a.symbol), q = A(key), cur = a.currency || curOf(key);
+  if (q.price == null || q.error || !/^price_/.test(a.type)) return null;
+  let p = q.price;
+  if (cur !== curOf(key)) p = cur === 'EUR' ? p / (fxNow(curOf(key)) || 1) : curOf(key) === 'EUR' ? p * (fxNow(cur) || 1) : null;
+  if (!p || !a.value) return null;
+  return a.type === 'price_above' ? (a.value / p - 1) * 100 : (p / a.value - 1) * 100;
+}
+function radarItems(c) {
+  const out = [], st = S.state.alerts || {}, set = S.pf.settings || {}, today = todayDay();
+  for (const a of S.pf.alerts || []) {
+    if (st[a.id]) continue;
+    const d = alertNear(a);
+    if (d != null && d >= 0 && d <= 3) out.push({key: keyOf(a.kind, a.symbol), prio: 0, chip: ['warn', 'Alert'], text: `${esc(alertText(a))} · noch ${nf(d, 1)} %`});
+  }
+  const keys = trackedKeys();
+  keys.map(k => [k, A(k).change_pct]).filter(([k, v]) => v != null && Math.abs(v) >= (isCoin(k) ? set.move_crypto ?? 8 : set.move_stock ?? 5))
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 5)
+    .forEach(([k, v]) => out.push({key: k, prio: 1, chip: [v >= 0 ? 'good' : 'bad', 'Bewegung'], text: `${pctS(v, 1)} heute`}));
+  const heldK = new Set(c.held.map(p => p.key));
+  keys.forEach(k => { const l = zoneOf(k), p = A(k).price, r = ratingOf(k); if (!l || p == null) return; const d = (p / l.price - 1) * 100;
+    // nur eigene Positionen oder Watchlist-Titel mit mindestens 7 Punkten, und höchstens 2 % entfernt
+    if (d <= 2 && (heldK.has(k) || (r != null && r >= 7))) out.push({key: k, prio: 2, chip: ['', 'Nachkauf-Zone'], text: `${px(k, l.price)} · noch ${nf(d, 1)} % entfernt${ratingOf(k) != null ? ' · ' + ratingOf(k) + ' Punkte' : ''}`}); });
+  const held = new Set(c.held.map(p => p.key));
+  (S.digest.calendar || []).filter(e => e.key && keys.includes(e.key) && isoToDay(e.date) >= today && isoToDay(e.date) <= today + 7 && (e.category === 'Earnings' || (e.category === 'Dividende' && held.has(e.key))))
+    .forEach(e => { const dt = new Date(e.date + 'T12:00:00');
+      out.push({key: e.key, prio: 3, chip: ['blue', e.category === 'Earnings' ? 'Zahlen' : 'Dividende'], text: `${e.category === 'Earnings' ? 'Quartalszahlen' : 'Ex-Dividende'} ${isoToDay(e.date) === today ? 'heute' : WT[dt.getDay()] + ' ' + dt.getDate() + '.' + (dt.getMonth() + 1) + '.'}${e.time ? ' · ' + esc(e.time) : ''}`}); });
+  return out.sort((a, b) => a.prio - b.prio);
+}
+function radarCard(c) {
+  const it = radarItems(c);
+  const body = it.length ? `<div class="radar">${it.slice(0, 10).map(x => `<button data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<span class="rx">${x.text}</span><span class="chip ${x.chip[0]}">${x.chip[1]}</span></button>`).join('')}</div>
+    ${it.length > 10 ? `<p class="hint">und ${it.length - 10} weitere</p>` : ''}<p class="hint">Nähe einer Nachkauf-Zone ist ein Hinweis, kein Kaufgrund. Keine Anlageberatung.</p>`
+    : '<p class="empty">Gerade nichts Auffälliges: keine Alerts in der Nähe, keine starken Bewegungen, keine Termine in den nächsten 7 Tagen.</p>';
+  return card('Im Blick', 'Was gerade Aufmerksamkeit braucht', body, '', 'o2');
+}
+function briefCard(c, ps) {
+  const L = [], ix = sym => (S.market.indices || []).find(x => x.sym === sym) || {}, sp = ix('^GSPC').change_pct;
+  const name = k => `<b>${esc(shortName(k))}</b>`;
+  if (c.dayPct != null) {
+    const d = sp == null ? null : c.dayPct - sp;
+    L.push([c.dayPct >= 0 ? 'up' : 'down', `Dein Depot steht heute bei <b class="${sign(c.dayPct)}">${pctS(c.dayPct, 1)}</b> (${eurS0(c.dayEur)})${d == null ? '' : `, ${Math.abs(d) < 0.3 ? 'etwa wie der' : d > 0 ? 'besser als der' : 'schwächer als der'} S&amp;P 500 (${pctS(sp, 1)})`}.`]);
+  }
+  const wk = ps && ps.periods.find(x => x.label === '1 Woche');
+  if (wk && wk.v != null) L.push([wk.v >= 0 ? 'up' : 'down', `In 7 Tagen: <b class="${sign(wk.v)}">${pctS(wk.v, 1)}</b>${wk.b != null ? `, S&amp;P 500 ${pctS(wk.b, 1)}` : ''}.`]);
+  const mv = c.held.filter(p => p.dayEur != null && Math.abs(p.dayEur) >= 1).sort((a, b) => a.dayEur - b.dayEur);
+  if (mv.length) {
+    const dn = mv.filter(p => p.dayEur < 0).slice(0, 2), up = mv.filter(p => p.dayEur > 0).reverse().slice(0, 1);
+    L.push(['info', `${dn.length ? 'Am meisten gekostet hat ' + dn.map(p => `${name(p.key)} (${eurS0(p.dayEur)})`).join(' und ') : ''}${dn.length && up.length ? '; ' : ''}${up.length ? 'am meisten gebracht ' + up.map(p => `${name(p.key)} (${eurS0(p.dayEur)})`).join('') : ''}.`]);
+  }
+  const r = riskStats();
+  if (r && r.fromHigh.pct < -0.5) L.push(['down', `Das Depot liegt <b>${nf(-r.fromHigh.pct, 1)} %</b> unter seinem Hoch vom ${dateDe(dayIso(r.fromHigh.day))}.`]);
+  const fg = S.daily.market_fg, sm = (S.smart || {}).stocks;
+  if (fg) {
+    const g = sm && sm.groups ? sm.groups.filter(x => x.smart && x.action !== 'hält').map(x => `${x.label} ${x.action === 'kauft' ? 'kaufen zu' : 'verkaufen'}`) : [];
+    L.push(['info', `Stimmung am Aktienmarkt: <b>${esc(fg.label)}</b> (${fg.value} von 100)${g.length ? '. Am Terminmarkt: ' + g.join(', ') : ''}.`]);
+  }
+  const n = radarItems(c);
+  if (n.length) { const cnt = {}; n.forEach(x => cnt[x.chip[1]] = (cnt[x.chip[1]] || 0) + 1);
+    L.push(['warn', `Im Blick: ${Object.entries(cnt).map(([k, v]) => `${v}× ${k}`).join(', ')}. Details unter „Im Blick“.`]); }
+  if (!L.length) return '';
+  return `<section class="card brief span12 o0"><div class="head"><div><h2>Heute in 30 Sekunden</h2><p class="sub">Kurse ${esc(ago(S.market.updated))}</p></div></div>
+    <ul class="brief-l">${L.map(([ic, t]) => `<li class="${ic}"><i></i><span>${t}</span></li>`).join('')}</ul></section>`;
 }
 function vHome(c) {
   if (!c.txs.length) return `<div class="grid">${card('Willkommen', 'Trag deine ersten Käufe ein, dann rechnet das Dashboard los.',
@@ -280,8 +349,8 @@ function vHome(c) {
   const cal = (S.digest.calendar || []).filter(e => isMine(e) || e.category === 'Fed' || e.category === 'Makro').slice(0, 6);
   const alloc = S.alloc || 'Anlageklasse', hm = S.hm || 'Heute';
   const perf = ps ? `<div class="eyebrow" style="margin-top:18px">Wertentwicklung der heutigen Positionen</div><div class="perf">${ps.periods.map(x => `<div><div class="l">${x.label}</div><div class="v num ${sign(x.v)}">${x.v == null ? '–' : pctS(x.v, 1)}</div><div class="b num">${x.b == null ? '&nbsp;' : 'S&amp;P ' + pctS(x.b, 1)}</div></div>`).join('')}</div>` : '';
-  return `${depSeg() ? `<div class="depbar">${depSeg()}</div>` : ''}<div class="g12"><div class="colstack span8">
-    <section class="card hero"><div class="herotop"><div><div class="eyebrow">${S.dep === 'all' ? 'Depotwert' : 'Depotwert · ' + esc(depName(S.dep))}</div><div class="nav-value num">${eur(c.value)}</div>
+  return `${depSeg() ? `<div class="depbar">${depSeg()}</div>` : ''}<div class="g12">${briefCard(c, ps)}<div class="colstack span8">
+    <section class="card hero o1"><div class="herotop"><div><div class="eyebrow">${S.dep === 'all' ? 'Depotwert' : 'Depotwert · ' + esc(depName(S.dep))}</div><div class="nav-value num">${eur(c.value)}</div>
       <div class="chgrow">${pill(c.dayPct)}<span class="num ${sign(c.dayEur)}">${eurS(c.dayEur)}</span><span class="muted">heute</span></div></div>
       <div class="heroside"><div class="eyebrow">Gewinn offen</div><div class="num ${sign(c.pnl)}" style="font-size:20px;font-weight:650;margin-top:4px">${eurS(c.pnl)}</div><div class="small muted num">${pctS(c.pnlPct, 1)} auf ${eur(c.cost, 0)}</div></div></div>
       ${perf}
@@ -289,17 +358,18 @@ function vHome(c) {
       <div class="chart" id="ch-main"></div><div id="lg-main"></div>
       ${S.mode === 'kauf' ? cmpTable(c) : '<p class="hint">Deine heutigen Bestände, mit den Kursen der Vergangenheit zurückgerechnet. So sieht man, wie sich das Depot in seiner jetzigen Zusammensetzung entwickelt hätte.</p>'}</section>
     ${card('Heatmap', 'Fläche nach Anteil am Depot, Farbe nach ' + (hm === 'Heute' ? 'Tagesbewegung' : 'Gewinn seit Kauf'), `<div class="tm" id="tm"></div>
-      <div class="scale"><span class="num">${hm === 'Heute' ? '−3 %' : '−50 %'}</span><i></i><span class="num">${hm === 'Heute' ? '+3 %' : '+50 %'}</span><span style="margin-left:auto">Krypto-Skala doppelt so weit</span></div>`, seg('hm', ['Heute', 'Seit Kauf'], hm))}
+      <div class="scale"><span class="num">${hm === 'Heute' ? '−3 %' : '−50 %'}</span><i></i><span class="num">${hm === 'Heute' ? '+3 %' : '+50 %'}</span><span style="margin-left:auto">Krypto-Skala doppelt so weit</span></div>`, seg('hm', ['Heute', 'Seit Kauf'], hm), 'o4')}
     </div>
     <div class="colstack span4">
+      ${radarCard(c)}
+      ${card('Beitrag heute', 'Wer den Tag bewegt hat, in Euro', attribution(c), '', 'o3')}
       ${card('Kennzahlen', '', `<div class="kpis">
         <div><span class="l">Gewinn offen</span><span class="v num ${sign(c.pnl)}">${eurS(c.pnl)}<small>${pctS(c.pnlPct, 1)}</small></span></div>
         <div><span class="l">Eingesetzt</span><span class="v num">${eur(c.cost, 0)}</span></div>
         <div><span class="l">Realisiert<small>aus Verkäufen</small></span><span class="v num ${sign(c.realized)}">${eurS(c.realized)}</span></div>
         <div><span class="l">Dividenden pro Jahr<small>erwartet, brutto</small></span><span class="v num">${eur(c.divYear, 0)}<small class="muted">${c.value ? nf(c.divYear / c.value * 100, 2) + ' % Rendite' : ''}</small></span></div>
-        <div><span class="l">Positionen</span><span class="v num">${c.held.length}<small class="muted">${CLASS_ORDER.map(k => [k, c.held.filter(p => assetClass(p.key) === k).length]).filter(x => x[1]).map(x => x[1] + ' ' + x[0]).join(' · ')}</small></span></div></div>`)}
+        <div><span class="l">Positionen</span><span class="v num">${c.held.length}<small class="muted">${CLASS_ORDER.map(k => [k, c.held.filter(p => assetClass(p.key) === k).length]).filter(x => x[1]).map(x => x[1] + ' ' + x[0]).join(' · ')}</small></span></div></div>`, '', 'o6')}
       ${fgCard()}
-      ${card('Beitrag heute', 'Wer den Tag bewegt hat, in Euro', attribution(c))}
     </div>
     ${riskCard(c)}
     ${smartCard()}
@@ -320,7 +390,7 @@ function drawCharts() {
         const from = bc.d[bc.d.length - 1] - RANGES[S.range];
         let i0 = bc.d.findIndex(d => d >= from); if (i0 < 0) i0 = 0;
         const s = [{name: 'Heutige Positionen', color: 'var(--accent)', area: true, pts: bc.d.slice(i0).map((x, i) => [x, bc.v[i0 + i]])}];
-        lineChart('#ch-main', s, {fmt: v => nf(v, 0) + ' €', label: 'Wert der heutigen Positionen, zurückgerechnet', height: 260});
+        lineChart('#ch-main', s, {fmt: v => eur(v, 0), label: 'Wert der heutigen Positionen, zurückgerechnet', height: 260});
         $('#lg-main').innerHTML = legend(s);
       } else $('#ch-main').innerHTML = '<p class="empty">Die Rückrechnung kommt mit der nächsten täglichen Aktualisierung.</p>';
     } else if (c.series.d.length > 1) {
@@ -333,7 +403,7 @@ function drawCharts() {
       const s = [{name: CMP[cm], color: 'var(--accent)', area: true, pts: at(val)}];
       if (sr.bench) s.push({name: 'Alles in S&P 500', color: 'var(--s2)', pts: at(bs)}, {name: 'Alles in Bitcoin', color: 'var(--s7)', pts: at(bb)});
       s.push({name: 'Eingesetzt', color: 'var(--ink3)', dash: true, thin: true, pts: at(inv)});
-      lineChart('#ch-main', s, {fmt: v => nf(v, 0) + ' €', label: 'Depotwert seit Kauf im Vergleich mit gleichen Käufen', height: 260});
+      lineChart('#ch-main', s, {fmt: v => eur(v, 0), label: 'Depotwert seit Kauf im Vergleich mit gleichen Käufen', height: 260});
       $('#lg-main').innerHTML = legend(s);
     }
   }
@@ -404,7 +474,7 @@ function vDepot(c) {
     <details class="card fold"><summary><div><h2>Buchungen</h2><p class="sub">${txs.length} eingetragene Käufe und Verkäufe</p></div><span class="chev"></span></summary>
       ${txs.length ? `<div class="rows">${txs.map(t => `<button class="row" data-act="edittx" data-id="${esc(t.id)}"><div class="l">
       <div class="t">${tag(t.key)}<span>${t.type === 'buy' ? 'Kauf' : 'Verkauf'}${t.source && t.source !== 'manual' ? ' · ' + esc(t.source) : ''}${depots().length > 1 && S.dep === 'all' ? ' · ' + esc(depName(depOf(t))) : ''}</span></div><div class="m num">${dateDe(t.date)} · ${nf(t.qty, t.qty % 1 ? 4 : 0)} × ${money(t.price, t.currency)}</div></div>
-      <div class="r"><span class="chip ${t.type === 'buy' ? 'good' : 'bad'}">${t.type === 'buy' ? '−' : '+'}${money(t.qty * t.price, t.currency)}</span></div></button>`).join('')}</div>` : '<p class="empty">Noch keine Buchungen.</p>'}
+      <div class="r"><span class="chip ${t.type === 'buy' ? 'good' : 'bad'}">${t.type === 'buy' ? '−' : '+'}${S.hide ? MASK : money(t.qty * t.price, t.currency)}</span></div></button>`).join('')}</div>` : '<p class="empty">Noch keine Buchungen.</p>'}
       <p class="hint">Der direkte Import aus Trade Republic oder comdirect ist vorbereitet, aber noch nicht aktiv. Jede Buchung merkt sich ihre Herkunft.</p></details>
   </div>`;
 }
@@ -799,7 +869,8 @@ function formAlert(key, value) {
 function vSettings() {
   const s = S.pf.settings || {}, src = S.market.sources || {};
   const th = document.documentElement.dataset.theme || '';
-  openSheet(sheetTop('Einstellungen') + card('Darstellung', 'Gilt nur auf diesem Gerät', seg('theme', ['System', 'Hell', 'Dunkel'], th === 'light' ? 'Hell' : th === 'dark' ? 'Dunkel' : 'System'))
+  openSheet(sheetTop('Einstellungen') + card('Darstellung', 'Gilt nur auf diesem Gerät', seg('theme', ['System', 'Hell', 'Dunkel'], th === 'light' ? 'Hell' : th === 'dark' ? 'Dunkel' : 'System') +
+    `<p class="hint">Das Auge oben verbirgt alle Euro-Beträge, etwa wenn jemand mitschaut; Kurse und Prozente bleiben sichtbar. Tastenkürzel am PC: / Suche, 1 bis 5 Reiter, B Beträge verbergen, Esc schließt die Detailansicht. · Version ${esc(APP_V)}</p>`)
   + card('Push aufs Handy', 'Über die kostenlose App ntfy', `<form id="f-ntfy"><div class="f"><label>Geheimer Kanalname</label><input name="topic" value="${esc(s.ntfy_topic || '')}" placeholder="noch keiner" autocomplete="off" autocapitalize="off"></div>
     <p class="hint">In der ntfy-App auf „Thema abonnieren“ tippen und genau diesen Namen eintragen. Wer den Namen kennt, kann die Alerts mitlesen: also zufällig wählen und nicht weitergeben.</p>
     <div class="btnrow"><button class="btn" type="submit">Speichern</button><button class="btn ghost" type="button" data-act="gentopic">Zufälligen Namen erzeugen</button><button class="btn ghost" type="button" data-act="testpush">Test senden</button></div></form>`)
@@ -836,6 +907,7 @@ document.addEventListener('click', async ev => {
   else if (act === 'mode') { S.mode = Object.keys(MODES).find(k => MODES[k] === v) || 'positionen'; render(); }
   else if (act === 'hm') { S.hm = v; render(); }
   else if (act === 'cmp') { S.cmp = v; render(); }
+  else if (act === 'hide') { S.hide = !S.hide; try { localStorage.setItem('depot_hide', S.hide ? '1' : ''); } catch (e) { /* egal */ } render(); if (S.sheetKey) vAsset(S.sheetKey); }
   else if (act === 'smk') { S.smk = v === 'Bitcoin' ? 'btc' : 'stocks'; render(); }
   else if (act === 'dep') { setDep(v); render(); }
   else if (act === 'alloc') { S.alloc = v; render(); }
@@ -919,6 +991,12 @@ document.addEventListener('keydown', ev => {
   if (ev.key === 'Enter' && ev.target.matches('tr[data-act]')) ev.target.click();
   if (ev.key === 'Escape' && !$('#sheet').hidden) closeSheet();
   if (ev.key === '/' && !ev.target.matches('input,textarea,select') && $('#q')) { ev.preventDefault(); $('#q').focus(); }
+  // Tastenkürzel am PC: 1 bis 5 wechseln den Reiter, B verbirgt oder zeigt die Beträge
+  if (!ev.target.matches('input,textarea,select') && !ev.metaKey && !ev.ctrlKey && !ev.altKey && $('#sheet').hidden) {
+    const t = TABS[+ev.key - 1];
+    if (t) { S.tab = t[0]; render(); window.scrollTo(0, 0); }
+    else if (ev.key === 'b' || ev.key === 'B') { const b = document.querySelector('[data-act="hide"]'); if (b) b.click(); }
+  }
 });
 document.addEventListener('focusout', ev => { if (ev.target.id === 'q' && !ev.target.value) setTimeout(() => { const t = $('.top'); if (t) t.classList.remove('searching'); }, 150); });
 document.addEventListener('input', ev => {
