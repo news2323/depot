@@ -501,14 +501,27 @@ def _cot_index(vals, i, look=156):
     return 50.0 if hi == lo else (vals[i] - lo) / (hi - lo) * 100
 
 
+SMART_GROUPS = (("lev", "Hedgefonds"), ("dealer", "Investmentbanken"), ("asset", "Große Fondsgesellschaften"))
+DUMB_GROUPS = (("small", "Kleinanleger"),)
+
+
+def _action(chg1, chg4):
+    """Was eine Gruppe gerade tut, aus der Änderung ihrer Netto-Position in Prozent des offenen Interesses."""
+    if chg1 >= 1.0 or (chg4 >= 2.5 and chg1 > -0.5):
+        return "kauft"
+    if chg1 <= -1.0 or (chg4 <= -2.5 and chg1 < 0.5):
+        return "verkauft"
+    return "hält"
+
+
 def smart_dumb(rows, crowd):
-    """Smart Money: Banken und Fondsgesellschaften (Dealer und Asset Manager) netto, Anteil am offenen Interesse, als COT-Index.
-    Dumb Money: Kleinanleger (nicht meldepflichtig) netto als COT-Index, zur Hälfte gemischt mit der Stimmung (Angst und Gier).
-    rows: cftc_tff, älteste zuerst. crowd: {Datum: 0..100}. Gibt Stand, Vorwoche und ein Jahr Verlauf zurück."""
+    """Smart Money: Hedgefonds, Investmentbanken und große Fondsgesellschaften, je Gruppe als Rang ihrer Netto-Position
+    in drei Jahren (0 bis 100), dann gemittelt. Dumb Money: Kleinanleger (nicht meldepflichtig) als Rang, zur Hälfte mit
+    Angst und Gier gemischt. Dazu je Gruppe, ob sie zuletzt gekauft, gehalten oder verkauft hat (Änderung in Prozent des
+    offenen Interesses, eine und vier Wochen). rows: cftc_tff, älteste zuerst. crowd: {Datum: 0..100}."""
     if len(rows) < 30:
         return None
-    pro = [(r["dealer"] + r["asset"]) / r["oi"] for r in rows]
-    small = [r["small"] / r["oi"] for r in rows]
+    share = {g: [r[g] / r["oi"] * 100 for r in rows] for g, _ in SMART_GROUPS + DUMB_GROUPS}
     ck = sorted(crowd)
 
     def crowd_at(d):
@@ -518,15 +531,22 @@ def smart_dumb(rows, crowd):
 
     hist = []
     for i, r in enumerate(rows):
-        s, k = _cot_index(pro, i), _cot_index(small, i)
-        if s is None or k is None:
+        idx = [_cot_index(share[g], i) for g, _ in SMART_GROUPS]
+        k = _cot_index(share["small"], i)
+        if any(x is None for x in idx) or k is None:
             continue
         c = crowd_at(r["d"])
-        dumb = k if c is None else (k + c) / 2
-        hist.append([r["d"], round(s), round(dumb), round(k), None if c is None else round(c)])
+        hist.append([r["d"], round(sum(idx) / len(idx)), round(k if c is None else (k + c) / 2), round(k), None if c is None else round(c)])
     if not hist:
         return None
+    n = len(rows) - 1
+    groups = []
+    for g, label in SMART_GROUPS + DUMB_GROUPS:
+        v = share[g]
+        c1, c4 = v[n] - v[n - 1], v[n] - v[max(0, n - 4)]
+        groups.append({"key": g, "label": label, "smart": g != "small", "net": rows[n][g], "share": round(v[n], 1),
+                       "idx": round(_cot_index(v, n)), "chg1": round(c1, 2), "chg4": round(c4, 2), "action": _action(c1, c4)})
     last = hist[-1]
     return {"day": last[0], "smart": last[1], "dumb": last[2], "small": last[3], "crowd": last[4],
             "prev": {"smart": hist[-2][1], "dumb": hist[-2][2]} if len(hist) > 1 else None,
-            "hist": [h[:3] for h in hist[-104:]]}
+            "groups": groups, "hist": [h[:3] for h in hist[-104:]]}

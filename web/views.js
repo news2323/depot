@@ -246,10 +246,16 @@ function smartCard() {
     <div class="fgbar" role="img" aria-label="${v} von 100"><b style="left:${v}%"></b></div><div class="fgax"><span>vorsichtig</span><span>zuversichtlich</span></div>
     <div class="n">${sub}${prev != null ? ` · Vorwoche ${prev}` : ''}</div></div>`;
   return card('Smart Money und Dumb Money', `Profis gegen Masse am Terminmarkt, 0 bis 100 · Stand ${dateDe(x.day)}`, `<div class="fggrid">
-    ${g('Smart Money', x.smart, (x.prev || {}).smart, 'Banken und Fondsgesellschaften')}${g('Dumb Money', x.dumb, (x.prev || {}).dumb, 'Kleinanleger und Stimmung')}</div>
+    ${g('Smart Money', x.smart, (x.prev || {}).smart, 'Hedgefonds, Investmentbanken, große Fonds')}${g('Dumb Money', x.dumb, (x.prev || {}).dumb, 'Kleinanleger und Stimmung')}</div>
     <div class="note ${read[0]}" style="margin-top:12px">${read[1]}</div>
+    ${(x.groups || []).length ? `<div class="tblwrap" style="margin-top:12px"><table class="tbl sdg"><thead><tr><th>Wer</th><th>Tut gerade</th><th class="r">Position</th><th class="r hm">1 Woche</th><th class="r hm">4 Wochen</th><th class="r">Rang 3 J.</th></tr></thead><tbody>
+      ${x.groups.map(gr => `<tr><td><b>${esc(gr.label)}</b><div class="ts">${gr.smart ? 'Smart Money' : 'Dumb Money'}</div></td>
+        <td><span class="chip ${gr.action === 'kauft' ? 'good' : gr.action === 'verkauft' ? 'bad' : ''}">${gr.action === 'kauft' ? 'kauft zu' : gr.action}</span></td>
+        <td class="r num">${gr.share >= 0 ? 'netto long' : 'netto short'}<div class="ts">${nf(Math.abs(gr.share), 1)} % des Marktes</div></td>
+        <td class="r num hm ${sign(gr.chg1)}">${gr.chg1 >= 0 ? '+' : '−'}${nf(Math.abs(gr.chg1), 1)} Pkt.</td><td class="r num hm ${sign(gr.chg4)}">${gr.chg4 >= 0 ? '+' : '−'}${nf(Math.abs(gr.chg4), 1)} Pkt.</td>
+        <td class="r num">${gr.idx}</td></tr>`).join('')}</tbody></table></div>` : ''}
     <div class="chart" id="ch-smart" style="margin-top:8px"></div><div id="lg-smart"></div>
-    <p class="hint">Eigene Berechnung aus der wöchentlichen Statistik der US-Terminmarktaufsicht CFTC (${which === 'btc' ? 'Bitcoin-Future' : 'E-mini-S&amp;P-500-Future'}): Smart Money = Netto-Position von Banken und Fondsgesellschaften, Dumb Money = Netto-Position der Kleinanleger, zur Hälfte gemischt mit Angst und Gier. Jeweils im Vergleich zu den letzten drei Jahren (0 = so vorsichtig wie nie, 100 = so zuversichtlich wie nie). Nicht der kostenpflichtige Index von Sentimentrader. Ein Stimmungsbild, kein Kaufsignal.</p>`,
+    <p class="hint">Eigene Berechnung aus der wöchentlichen Statistik der US-Terminmarktaufsicht CFTC (${which === 'btc' ? 'Bitcoin-Future' : 'E-mini-S&amp;P-500-Future'}): Smart Money = Hedgefonds, Investmentbanken und große Fondsgesellschaften, Dumb Money = Kleinanleger, zur Hälfte gemischt mit Angst und Gier. Rang: Netto-Position im Vergleich zu den letzten drei Jahren (0 = so vorsichtig wie nie, 100 = so zuversichtlich wie nie). „Kauft zu“ oder „verkauft“: Netto-Position in einer Woche um mindestens 1 Prozentpunkt des Marktes oder in vier Wochen um 2,5 Punkte verändert. Netto short heißt: mehr auf fallende als auf steigende Kurse gesetzt, oft auch zur Absicherung. Wagniskapitalgeber (VCs) melden keine solchen Daten, sie fehlen deshalb. Nicht der kostenpflichtige Index von Sentimentrader. Ein Stimmungsbild, kein Kaufsignal.</p>`,
     seg('smk', ['Aktien', 'Bitcoin'], which === 'btc' ? 'Bitcoin' : 'Aktien'), 'span12');
 }
 // Angst und Gier: Aktienmarkt (eigene Berechnung nach CNN-Vorbild, update.market_fg) und Krypto (alternative.me)
