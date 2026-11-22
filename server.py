@@ -13,7 +13,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 args = sys.argv[1:]
 DATA = os.path.abspath(args[args.index("--data") + 1]) if "--data" in args else os.path.join(ROOT, "data")
 PORT = int(args[args.index("--port") + 1]) if "--port" in args else 8765
-FILES = {"portfolio.json", "market.json", "daily.json", "analysis.json", "digest.json", "state.json", "logos.json", "profiles.json", "smart.json", "screen.json"}
+FILES = {"portfolio.json", "market.json", "daily.json", "analysis.json", "digest.json", "state.json", "logos.json", "profiles.json", "smart.json", "screen.json", "backtest.json"}
 os.makedirs(DATA, exist_ok=True)
 
 

@@ -610,3 +610,26 @@ input:focus,select:focus{border-color:var(--accent);background:var(--surface)}
 /* Momentum-Signal vor der Unterzeile (Jakobs Wunsch vom 22.11.2026) */
 .mom{font-weight:650}.mom.on{color:var(--up)}.mom.fade{color:var(--warn)}.mom.near{color:var(--ink2)}
 small .sep{font-style:normal}
+
+/* Backtest (Reiter Strategie) */
+.btf{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;margin-bottom:6px}
+.btf>div{background:var(--surface2);border-radius:16px;padding:12px 14px}
+.btf b{font-size:13px;color:var(--ink)}.btf p{margin:4px 0 0;font-size:13px;line-height:1.45;color:var(--ink2)}
+.tbl.bt td{vertical-align:top}.tbl.bt tr.strong td{font-weight:650;background:var(--surface2)}
+.pbars{display:grid;gap:5px;margin:6px 0}
+.pbar{display:grid;grid-template-columns:28px 1fr 62px 40px;align-items:center;gap:10px}
+.pbar .score{width:24px;height:24px;font-size:12.5px}
+.pbar .pb{position:relative;height:12px;background:var(--surface2);border-radius:6px}
+.pbar .pb::before{content:'';position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--line2)}
+.pbar .pb i{position:absolute;top:0;bottom:0;border-radius:6px}.pbar .pb i.pos{background:var(--up)}.pbar .pb i.neg{background:var(--down)}
+.pbar b{font-size:13px;text-align:right}.pbar small{font-size:11.5px;color:var(--ink3);text-align:right}
+.btt{padding:12px 0;border-bottom:1px solid var(--line)}.btt:last-of-type{border-bottom:0}
+.bth{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-bottom:8px}
+.ptstrip{display:flex;gap:1px;height:18px;padding-bottom:6px;box-sizing:content-box}
+.ptstrip i{flex:1;min-width:1px;border-radius:2px;background:var(--surface3);position:relative}
+.ptstrip i.t0{background:var(--down)}.ptstrip i.t1{background:var(--down-bg)}.ptstrip i.t2{background:var(--surface3)}.ptstrip i.t3{background:var(--up-bg)}.ptstrip i.t4{background:var(--up)}
+.ptstrip i.on::after{content:'';position:absolute;left:0;right:0;bottom:-5px;height:3px;background:var(--accent);border-radius:2px}
+.ptyears{position:relative;height:16px;margin-top:2px;font-size:11px;color:var(--ink3)}.ptyears span{position:absolute;top:0}
+.btcmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.btcmp{grid-template-columns:1fr}.pbar{grid-template-columns:26px 1fr 56px 34px;gap:8px}}
+.tbl.bt td:first-child{min-width:120px}

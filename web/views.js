@@ -387,6 +387,14 @@ function drawCharts() {
     lineChart(chs, s2, {fmt: v => nf(v, 0), height: 200, label: 'Smart Money und Dumb Money, zwei Jahre', hlines: [{y: 50, label: '', color: 'var(--line2)'}]});
     $('#lg-smart').innerHTML = legend(s2);
   }
+  const cbt = $('#ch-bt');
+  if (cbt && S.bt) {
+    const col = {opt: 'var(--accent)', now: 'var(--s2)', ew: 'var(--s3)', soxx: 'var(--s4)', sp: 'var(--s7)'};
+    const sb = Object.keys(col).map(id => S.bt.strategies.find(x => x.id === id)).filter(Boolean).map(x => ({name: x.name, color: col[x.id], pts: x.curve}));
+    if (sb.length) sb.push({name: 'Eingezahlt', color: 'var(--ink3)', dash: true, thin: true, pts: sb[0].pts.map((p, i) => [p[0], 1000 * (i + 1)])});
+    lineChart(cbt, sb, {fmt: v => v >= 1e6 ? nf(v / 1e6, 1) + ' Mio.' : nf(Math.max(0, v) / 1000, 0) + ' Tsd.', height: 260, label: 'Sparplan mit 1.000 € im Monat nach verschiedenen Regeln, in Euro'});
+    $('#lg-bt').innerHTML = legend(sb);
+  }
   const chh = $('#ch-hold'), hd = holderData();
   if (chh && hd && hd.hist && hd.hist.length > 1) {
     const H = hd.hist, pc = S.hv === 'Plus/Minus';
@@ -738,7 +746,7 @@ function candCard() {
   const note = fl === 'Momentum' && xs.length && !aiOn ? '<div class="note" style="margin:0 0 10px">Im KI- und Halbleiterumfeld hat gerade kein Titel das Signal. Momentum haben vor allem Titel außerhalb deines Schwerpunkts, darum die niedrige Passung. Typisch nach einem starken Rückgang bei Tech.</div>' : '';
   const empty = !xs.length && fl === 'Momentum' ? '<p class="empty">Gerade hat kein Titel der Auswahl das Momentum-Signal und keiner ist nah dran. Typisch nach einem starken Rückgang: Das Signal kommt erst, wenn die Kurse wieder über ihre 200-Tage-Linie steigen.</p>' : '';
   const rows = xs.map(({r, f}) => {
-    const open = S.scx === r.key, w = FIT_W[ansOf('priority')] || FIT_W.upside;
+    const open = S.scx === r.key, w = fitW();
     const bars = Object.keys(w).map(k => `<div class="fb"><span>${FACTOR_DE[k]}</span><i><b style="width:${Math.round((r.c[k] ?? 0.5) * 100)}%"></b></i><em>${nf(w[k] * 100, 0)} %</em></div>`).join('');
     const tracked = !!(D(r.key).hist || A(r.key).price);
     return `<tr data-act="scx" data-key="${esc(r.key)}" class="${open ? 'open' : ''}"><td>${fitBadge(f)}</td><td>${nameCell(r.key, r.theme, momTag(r.key, fl === 'Momentum'))} ${tagOf(r.key)}</td>
@@ -768,6 +776,88 @@ function eventsCard() {
   return card('Hinweise', 'Was sich bei Plan, Depot und Kandidaten getan hat', ev.length ? `<div class="rows tight">${ev.map(evRow).join('')}</div>`
     : '<p class="empty">Noch keine Hinweise.</p>', '', 'span5');
 }
+/* ---------------------------------------------------------------- Backtest (Jakobs Wunsch vom 22.11.2026)
+   tracker/backtest.py → backtest.json: 10 Jahre, nur Daten, die es am jeweiligen Tag gab. Ansichten Ergebnis, Signale,
+   Punkte, Deine Titel, Regeln (S.btv). Das Diagramm zeichnet drawCharts (#ch-bt). */
+const BT_ORDER = ['opt', 'now', 'now_half', 'fit', 'mom', 'dip', 'ew', 'soxx', 'sp'];
+const BT_P = {near: ['Nähe zum Jahreshoch', v => v >= 100 ? 'egal' : `höchstens ${v} % darunter`], trend: ['Trend', v => v === '50_200' ? 'Kurs über 50er, 50er über 200er' : 'Kurs über der 200-Tage-Linie'],
+  rel: ['Stärker als der S&P 500', v => v ? 'ja, 6 Monate' : 'egal'], n_pos: ['Anzahl Titel', v => v + ' Titel'],
+  fear: ['Ausnahme Angst', v => v === 'c25' ? 'unter 25 und Halbleiter −20 %' : v ? 'unter ' + v : 'keine'], crash: ['Ausnahme Halbleiter-Crash', v => v ? `${-v} % unter dem Hoch` : 'keine'],
+  exit: ['Verkauf', v => ({signal: 'wenn das Signal ausgeht', trend: 'unter der 200-Tage-Linie', better: 'wenn es Besseres gibt'})[v]],
+  empty: ['Freie Plätze', v => v === 'cash' ? 'Reserve' : 'S&P 500'], regime: ['Marktfilter', v => v === 'half' ? 'halb Reserve unter der 200-Tage-Linie der Halbleiter' : 'keiner']};
+const bigE = v => v >= 1e6 ? nf(v / 1e6, 2) + ' Mio. €' : eur(v, 0);
+const pc = (v, d = 0) => v == null ? '–' : pctS(v, d);
+function btResult(b) {
+  const S2 = Object.fromEntries(b.strategies.map(x => [x.id, x])), te = b.period.train_end.slice(0, 4);
+  const rows = BT_ORDER.map(id => S2[id]).filter(Boolean).map(x => `<tr class="${x.id === 'opt' || x.id === 'now' ? 'strong' : ''}"><td><b>${esc(x.name)}</b><div class="ts hm">${esc(x.desc)}</div></td>
+    <td class="r num ${sign(x.all.cagr)}">${pc(x.all.cagr)}</td><td class="r num ${x.all.dd < -35 ? 'neg' : ''}">${pc(x.all.dd)}</td>
+    <td class="r num hm">${x.train ? pc(x.train.cagr) : '–'}</td><td class="r num hm">${x.test ? pc(x.test.cagr) : '–'}</td><td class="r num">${bigE(x.save[0])}</td></tr>`).join('');
+  return `<div class="btf">${(b.findings || []).map(f => `<div><b>${esc(f.t)}</b><p>${esc(f.x)}</p></div>`).join('')}</div>
+    <p class="sh">1.000 € im Monat seit ${dateDe(b.period.start)}</p><div class="chart" id="ch-bt"></div><div id="lg-bt"></div>
+    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Regeln</th><th class="r">pro Jahr</th><th class="r">Rückgang</th><th class="r hm">bis ${te}</th><th class="r hm">ab ${te}</th><th class="r">Sparplan</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function btSignals(b) {
+  const h = (x, k) => (x.h || {})[k] || {};
+  const r1 = b.signals.map(x => `<tr><td>${esc(x.name)}</td><td class="r num hm">${nf(h(x, '126').n || 0, 0)}</td><td class="r num hm">${pc(h(x, '63').avg, 1)}</td><td class="r num">${pc(h(x, '126').avg, 1)}</td><td class="r num hm">${pc(h(x, '252').avg, 1)}</td>
+    <td class="r num ${sign(h(x, '126').ex_ew)}">${pc(h(x, '126').ex_ew, 1)}</td><td class="r num ${sign(h(x, '252').ex_ew)}">${pc(h(x, '252').ex_ew, 1)}</td><td class="r num hm">${h(x, '126').hit_ew == null ? '–' : h(x, '126').hit_ew + ' %'}</td></tr>`).join('');
+  const any = b.market_any.avg, mrow = (name, n, a, cls = '') => `<tr class="${cls}"><td>${esc(name)}</td><td class="r num">${n}</td><td class="r num hm">${pc(a.sp['126'])}</td><td class="r num">${pc(a.sp['252'])}</td><td class="r num hm">${pc(a.soxx['126'])}</td><td class="r num">${pc(a.soxx['252'])}</td><td class="r num">${pc(a.ew['252'])}</td></tr>`;
+  const r2 = b.market.map(m => mrow(m.name, m.events.length, m.avg)).join('') + mrow('Zum Vergleich: beliebiger Tag', '–', any, 'strong');
+  const evl = id => { const m = b.market.find(x => x.id === id); return m ? `<details class="qdone"><summary>${esc(m.name)}: alle ${m.events.length} Fälle</summary><div class="rows tight">${m.events.map(e => `<div class="row"><div class="l"><div class="t num">${dateDe(e.day)} <span class="muted">· ${e.v}</span></div></div><div class="r small num">S&amp;P 12 Mon. ${pc(e.r.sp['252'])} · Halbleiter ${pc(e.r.soxx['252'])}</div></div>`).join('')}</div></details>` : ''; };
+  return `<p class="sh" style="margin-top:0">Signale je Titel: Rendite danach im Schnitt</p>
+    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Signal</th><th class="r hm">Fälle</th><th class="r hm">3 Mon.</th><th class="r">6 Mon.</th><th class="r hm">12 Mon.</th><th class="r">ggü. Auswahl 6 M.</th><th class="r">12 M.</th><th class="r hm">besser als Auswahl</th></tr></thead><tbody>${r1}</tbody></table></div>
+    <p class="hint">„ggü. Auswahl“: Vorsprung vor allen ${b.universe} Titeln gleich gewichtet im selben Zeitraum. Ein Titel zählt höchstens einmal je Woche als Signal.</p>
+    <p class="sh">Marktsignale: Rendite danach im Schnitt</p>
+    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Signal</th><th class="r">Fälle</th><th class="r hm">S&amp;P 6 M.</th><th class="r">S&amp;P 12 M.</th><th class="r hm">Halbleiter 6 M.</th><th class="r">Halbleiter 12 M.</th><th class="r">Auswahl 12 M.</th></tr></thead><tbody>${r2}</tbody></table></div>
+    ${evl('fear25')}${evl('semis30')}
+    <p class="hint">Angst und Gier hier aus derselben eigenen Rechnung wie in der Übersicht, Tag für Tag nachgerechnet. Fälle aus den letzten 12 Monaten haben noch kein Ergebnis für 12 Monate.</p>`;
+}
+function btPoints(b) {
+  const bk = b.buckets, mx = Math.max(10, ...bk.map(x => Math.abs(((x.h || {})['252'] || {}).ex_ew || 0)));
+  const bars = bk.slice().reverse().map(x => { const v = ((x.h || {})['252'] || {}).ex_ew, n = ((x.h || {})['252'] || {}).n || 0, w = v == null ? 0 : Math.abs(v) / mx * 50;
+    return `<div class="pbar"><span class="score t${tierOf(x.pts)}">${x.pts}</span><span class="pb"><i class="${v >= 0 ? 'pos' : 'neg'}" style="${v >= 0 ? 'left:50%' : 'right:50%'};width:${w}%"></i></span><b class="num ${sign(v)}">${pc(v, 1)}</b><small class="num">${n}</small></div>`; }).join('');
+  const sc = ((b.opt || {}).schemes || []).map(x => `<tr class="${x.id === b.opt.scheme ? 'strong' : ''}"><td>${esc(x.name)}</td><td class="r num">${x.train ? pc(x.train.cagr) + ' / ' + pc(x.train.dd) : '–'}</td><td class="r num">${x.test ? pc(x.test.cagr) + ' / ' + pc(x.test.dd) : '–'}</td><td class="r num ${sign(x.spread.test252)}">${pc(x.spread.test252, 1)}</td><td class="r num hm ${sign(x.spread.train252)}">${pc(x.spread.train252, 1)}</td></tr>`).join('');
+  const te = b.period.train_end.slice(0, 4);
+  return `<p class="sh" style="margin-top:0">„Für dich“ je Monat nachgerechnet: Vorsprung 12 Monate später gegenüber der Auswahl</p><div class="pbars">${bars}</div>
+    <p class="hint">Rechts die Zahl der Monatswerte. Nachgerechnet aus Kursstärke, Stärke im Thema, Umsatzwachstum und Betriebsmarge (Berichte an die SEC, ab dem Tag der Veröffentlichung). Gewinnschätzungen, Bewertung und Analystenziele gibt es für frühere Jahre nicht frei, sie fehlen. Die Bewertungspunkte (günstig oder teuer) lassen sich darum nicht nachrechnen.</p>
+    <p class="sh">Welche Gewichtung traf besser?</p>
+    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Gewichtung (jeden Monat die besten 7)</th><th class="r">bis ${te}: pro Jahr / Rückgang</th><th class="r">ab ${te}</th><th class="r">Trennschärfe ab ${te}</th><th class="r hm">bis ${te}</th></tr></thead><tbody>${sc}</tbody></table></div>
+    <p class="hint">Trennschärfe: wie weit das beste Fünftel 12 Monate später vor dem schwächsten lag. Bis ${te} trennte keine Gewichtung gut, danach vor allem die Kursstärke.</p>`;
+}
+function btTitles(b) {
+  if (!(b.titles || []).length) return '<p class="empty">Kein Plan mit Titeln, die im Backtest vorkommen.</p>';
+  const T = b.titles, first = T[0].strip;
+  const years = first.map((s, i) => [i, dayToDate(s[0])]).filter(([i, d]) => d.getUTCMonth() === 0).map(([i, d]) => `<span style="left:${i / first.length * 100}%">${String(d.getUTCFullYear()).slice(2)}</span>`).join('');
+  return T.map(t => { const key = keyBySym(t.sym), ev = t.events.filter(e => e.type === 'mom'), dn = t.events.filter(e => e.type === 'down');
+    const ex6 = ev.filter(e => e.ex6 != null), avg = ex6.length ? ex6.reduce((s, e) => s + e.ex6, 0) / ex6.length : null, hi = t.strip.filter(s => s[1] >= 8).length;
+    return `<div class="btt"><div class="bth">${tag(key)}<span class="small muted">${hi} von ${t.strip.length} Monaten mit 8 bis 10 Punkten · ${ev.length} Momentum-Signale, danach 6 Monate im Schnitt ${pc(avg, 0)} ggü. Auswahl · ${dn.length} Trendbrüche</span></div>
+      <div class="ptstrip">${t.strip.map(s => { const d = dayToDate(s[0]); return `<i class="t${s[1] == null ? 'x' : tierOf(s[1])}${s[2] === 'on' ? ' on' : ''}" title="${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}: ${s[1] == null ? 'keine Punkte' : s[1] + ' Punkte'}${s[2] === 'on' ? ', Momentum-Signal an' : ''}"></i>`; }).join('')}</div><div class="ptyears">${years}</div>
+      <details class="qdone"><summary>Signale mit Ergebnis (${t.events.length})</summary><div class="rows tight">${t.events.slice().reverse().map(e => `<div class="row"><div class="l"><div class="t"><span class="num">${dateDe(e.day)}</span> <span class="chip ${e.type === 'mom' ? 'good' : 'bad'}">${e.type === 'mom' ? 'Momentum an' : 'Trendbruch'}</span></div></div><div class="r small num">6 Mon. ${pc(e.r6)} · 12 Mon. ${pc(e.r12)}</div></div>`).join('')}</div></details></div>`; }).join('')
+    + `<p class="hint">Jedes Kästchen ist ein Monat, die Farbe zeigt „Für dich“ (grün 7 bis 10, rot 1 bis 4), der Strich darunter das Momentum-Signal. Nachgerechnet mit den Regeln von heute und nur den Daten von damals.</p>`;
+}
+function btRules(b) {
+  const o = b.opt, cu = o.current, ch = o.chosen, te = b.period.train_end.slice(0, 4), same = JSON.stringify(cu.p) === JSON.stringify(ch.p);
+  const col = (t, d, x) => `<div><b>${t}</b><p class="small" style="margin:4px 0 8px">${esc(d)}</p><div class="tiles two" style="margin:0">${tile('bis ' + te, pc(x.train.cagr) + ' pro Jahr', 'Rückgang ' + pc(x.train.dd))}${tile('ab ' + te, pc(x.test.cagr) + ' pro Jahr', 'Rückgang ' + pc(x.test.dd), '')}</div></div>`;
+  const eff = Object.entries(o.effect).map(([k, vs]) => vs.map((x, i) => `<tr><td>${i === 0 ? `<b>${BT_P[k][0]}</b>` : ''}</td><td>${esc(BT_P[k][1](x.v))} ${x.v === cu.p[k] ? '<span class="chip">heute</span>' : ''}${x.v === ch.p[k] && x.v !== cu.p[k] ? '<span class="chip good">neu</span>' : ''}</td>
+    <td class="r num">${nf(x.train, 2)}</td><td class="r num">${nf(x.test, 2)}</td></tr>`).join('')).join('');
+  const ex = (o.exposure || []).map(x => `<tr class="${x.dd >= -35 && (o.exposure.find(y => y.dd >= -35) || {}).share === x.share ? 'strong' : ''}"><td>${x.share} % investiert, ${100 - x.share} % Reserve</td><td class="r num">${pc(x.cagr)}</td><td class="r num ${x.dd < -35 ? 'neg' : ''}">${pc(x.dd)}</td></tr>`).join('');
+  const adopt = !same && (ansOf('sell') !== {signal: 'signal', trend: 'trend', better: 'better'}[ch.p.exit] || ansOf('regime') !== (ch.p.regime === 'half' ? 'half' : 'full'));
+  return `<div class="btcmp">${col('Deine Regeln heute', o.desc_current, cu)}${col(same ? 'Keine bessere Variante' : 'Optimiert', o.desc_chosen, ch)}</div>
+    ${adopt ? `<div class="btnrow" style="margin-top:12px"><button class="btn" data-act="btadopt">Optimierte Regeln übernehmen</button><span class="small muted">setzt in deinem Profil Verkauf und Marktfilter wie links beschrieben</span></div>` : ''}
+    <p class="sh">So wirkt jede Regel im Schnitt aller ${nf(o.n, 0)} Varianten</p>
+    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Regel</th><th>Einstellung</th><th class="r">bis ${te}</th><th class="r">ab ${te}</th></tr></thead><tbody>${eff}</tbody></table></div>
+    <p class="hint">Zahl = Rendite pro Jahr geteilt durch den größten Rückgang (über 35 % mit Abzug). Höher ist besser. Gewählt wurde nur, was in beiden Hälften besser war, damit die Regeln nicht bloß die Vergangenheit nachzeichnen.</p>
+    <p class="sh">Deine Grenze von −35 %: wie viel Reserve nötig gewesen wäre</p>
+    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Optimierte Regeln mit</th><th class="r">pro Jahr</th><th class="r">größter Rückgang</th></tr></thead><tbody>${ex}</tbody></table></div>`;
+}
+function btCard() {
+  const b = S.bt;
+  if (b === undefined) { setTimeout(loadBacktest, 0); return card('Backtest: 10 Jahre', 'Wird geladen …', '<p class="empty">Lädt …</p>', '', 'span12'); }
+  if (!b) return card('Backtest: 10 Jahre', 'Hätten deine Regeln funktioniert?', '<p class="empty">Noch kein Backtest gerechnet.</p>', '', 'span12');
+  const v = S.btv || 'Ergebnis', fn = {Ergebnis: btResult, Signale: btSignals, Punkte: btPoints, 'Deine Titel': btTitles, Regeln: btRules}[v] || btResult;
+  return card('Backtest: 10 Jahre', `Hätten deine Regeln funktioniert? ${dateDe(b.period.start)} bis ${dateDe(b.period.end)}, ${b.universe} Titel aus KI und Halbleitern, nur mit Daten von damals`,
+    fn(b) + `<p class="hint">Grenzen: Die Auswahl der Titel ist von heute, die Gewinner von heute sind also dabei und Pleiten fehlen. Darum zählt vor allem der Vergleich mit „Alle Titel der Auswahl“. Monatlich umgeschichtet, ohne Steuern. Vergangene Renditen sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p>`,
+    seg('btv', ['Ergebnis', 'Signale', 'Punkte', 'Deine Titel', 'Regeln'], v), 'span12');
+}
 function vStrat(c) {
   const pr = prof();
   if (!pr.answers) return `<div class="grid">${card('Deine Strategie', 'Noch kein Profil', `<p class="body">Beantworte ein paar Fragen. Danach filtert die App Aktien, die zu dir passen könnten, und prüft dein Depot gegen deine Regeln.</p>
@@ -783,6 +873,7 @@ function vStrat(c) {
     ${rateCard()}
     ${checkCard()}
     ${guardCard()}
+    ${btCard()}
     ${candCard()}
     ${playCard()}
     ${eventsCard()}
@@ -872,7 +963,7 @@ function profileCard(key) {
 function fitCard(key, v, ai) {
   const sr = scrRow(key), f = fitOf(sr), vis = (v || {}).vision || {}, pl = (ai || {}).plan;
   if (!sr && vis.implied == null && !pl) return '';
-  const w = FIT_W[ansOf('priority')] || FIT_W.upside;
+  const w = fitW();
   const head = sr && prof().answers ? `<div class="ratehead">${fitBadge(f, 'big')}<div class="ratemain"><div class="ratelabel">${f == null ? 'Passt nach deinen Antworten nicht' : `Für dich: ${fitPts(f)} von 10`}</div>
     <div class="muted small">${esc(sr.theme)} · nach deinen Faktoren und deinem Profil</div></div></div>
     <div class="cx" style="margin-top:12px"><div><ul class="dots">${(sr.pros || []).map(x => `<li class="pos">${esc(x)}</li>`).join('')}${(sr.cons || []).map(x => `<li class="neg">${esc(x)}</li>`).join('')}</ul></div>
@@ -1053,6 +1144,11 @@ document.addEventListener('click', async ev => {
   else if (act === 'startprof') { S.pf.profile = {answers: {}, updated: new Date().toISOString().slice(0, 10), source: 'Eigene Antworten'}; await savePf('Profil angelegt'); }
   else if (act === 'rcm') { S.rcm = {Plan: 'plan', Depot: 'depot', Beides: 'both'}[v]; render(); }
   else if (act === 'scf') { S.scf = v; S.scAll = false; render(); }
+  else if (act === 'btv') { S.btv = v; render(); }
+  else if (act === 'btadopt' && S.bt) { const ch = S.bt.opt.chosen.p, a = Object.assign({}, (S.pf.profile || {}).answers);
+    if (ch.exit === 'signal' || ch.exit === 'trend' || ch.exit === 'better') a.sell = ch.exit;
+    a.regime = ch.regime === 'half' ? 'half' : 'full';
+    S.pf.profile = Object.assign({}, S.pf.profile, {answers: a, updated: new Date().toISOString().slice(0, 10)}); await savePf('Regeln aus dem Backtest übernommen'); }
   else if (act === 'scall') { S.scAll = true; render(); }
   else if (act === 'scx') { S.scx = S.scx === key ? null : key; if (S.tab !== 'strat') { S.tab = 'strat'; S.scf = 'Alle'; S.scAll = true; } render(); }
   else if (act === 'scwatch') { const [k, sy] = key.split(':'); S.pf.watchlist.push({id: uid(), kind: k, symbol: sy, name: nameOf(key)}); await savePf('Auf der Watchlist. Kennzahlen und Recherche kommen mit dem nächsten Tageslauf.'); }

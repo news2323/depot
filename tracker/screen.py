@@ -45,6 +45,11 @@ WEIGHTS = {
 }
 
 
+# Rangfolge „Kursstärke zuerst“ (Frage „rank“, aus dem Backtest vom 22.11.2026: im KI-Umfeld traf die Kursstärke
+# in beiden Hälften der 10 Jahre besser als die heutigen Gewichte). Wachstum und Marge wirken dann nur als Filter.
+# Dieselben Zahlen in web/app.js (PRICE_W).
+PRICE_W = {"momentum": .45, "rs": .20, "revisions": .25, "value": .05, "ev": .05, "growth": 0.0, "quality": 0.0}
+
 # Kaufstil (Frage „style“, Jakobs Wunsch vom 22.11.2026: weg vom Kauf in fallende Kurse, hin zu Momentum):
 # Zu- und Abschlag je Zustand des Momentum-Signals. Dieselben Zahlen in web/app.js (STYLE_MULT).
 STYLE_MULT = {
@@ -195,13 +200,15 @@ def rel_strength(rows):
 
 def fit(row, ans):
     """Passung für dich, 0 bis 100 (None = passt nach deinen Antworten nicht). Gleiche Rechnung in web/app.js (fitOf)."""
-    w = WEIGHTS.get(ans.get("priority") or "upside", WEIGHTS["upside"])
+    w = PRICE_W if ans.get("rank") == "price" else WEIGHTS.get(ans.get("priority") or "upside", WEIGHTS["upside"])
     c, fl = row["c"], row["flags"]
     if ans.get("region") == "usa" and not fl["us"]:
         return None
     if fl["spec"] and ans.get("spec") == "nein":
         return None
     x = sum(c[k] * w[k] for k in w) * 100
+    if ans.get("rank") == "price" and ((row.get("rev_g") is not None and row["rev_g"] < 0) or (row.get("op_margin") is not None and row["op_margin"] < 0)):
+        x *= 0.7                                  # Wachstum und Marge als Filter: schrumpfender Umsatz oder Verlust
     theme = c["theme"] if (ans.get("themes") or "ai") == "ai" else max(c["theme"], 0.7) if ans.get("themes") == "tech" else 1.0
     x *= 0.55 + 0.45 * theme                      # Schwerpunkt KI und Halbleiter
     if c["quality"] < 0.3:
@@ -238,7 +245,9 @@ def semis_stats():
     hi = max(c)
     return {"dd": round(dd * 100, 1), "peak": d[pi], "trough": d[ti], "recovered": d[rec] if rec is not None else None,
             "months_down": round((d[ti] - d[pi]) / 30.4, 1), "months_back": round((d[rec] - d[ti]) / 30.4, 1) if rec is not None else None,
-            "from_high": round((c[-1] / hi - 1) * 100, 1)}
+            "from_high": round((c[-1] / hi - 1) * 100, 1),
+            "above200": c[-1] >= sum(c[-200:]) / 200.0,      # Marktfilter (Frage „regime“): unter der Linie halb Reserve
+            "ma200": round((c[-1] / (sum(c[-200:]) / 200.0) - 1) * 100, 1)}
 
 
 def _held(pf):
