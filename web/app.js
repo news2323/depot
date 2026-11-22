@@ -90,10 +90,11 @@ const emptyPf = () => ({version: 1, base_currency: 'EUR', transactions: [], watc
 async function loadAll() {
   S.loading = true; S.err = '';
   try {
-    const [pf, market, daily, analysis, digest, state, profiles, smart] = await Promise.all(
-      ['portfolio.json', 'market.json', 'daily.json', 'analysis.json', 'digest.json', 'state.json', 'profiles.json', 'smart.json']
-        .map(n => /^(profiles|smart)\.json$/.test(n) ? store.get(n).catch(() => null) : store.get(n)));   // nur die beiden Zusatzdateien dürfen fehlen
+    const [pf, market, daily, analysis, digest, state, profiles, smart, screen] = await Promise.all(
+      ['portfolio.json', 'market.json', 'daily.json', 'analysis.json', 'digest.json', 'state.json', 'profiles.json', 'smart.json', 'screen.json']
+        .map(n => /^(profiles|smart|screen)\.json$/.test(n) ? store.get(n).catch(() => null) : store.get(n)));   // nur die Zusatzdateien dürfen fehlen
     S.profiles = profiles || {}; S.smart = smart || null;
+    S.screen = screen || null; S.scr = Object.fromEntries(((screen || {}).list || []).map(r => [r.key, r]));
     S.pf = Object.assign(emptyPf(), pf || {});
     S.pf.settings = S.pf.settings || {};
     S.market = market || {}; S.daily = daily || {}; S.analysis = analysis || {}; S.digest = digest || {}; S.state = state || {};
@@ -193,12 +194,12 @@ const px = (key, v, day) => money(toShow(key, v, day), showCur(key));
 function ratingOf(key) { const v = D(key).valuation; return !v || v.score == null ? null : (v.rating ?? Math.max(1, Math.min(10, Math.floor(6 + 3 * v.score)))); }
 const tierOf = r => r == null ? null : r <= 2 ? 0 : r <= 4 ? 1 : r <= 6 ? 2 : r <= 8 ? 3 : 4;
 const isFund = key => !isCoin(key) && (A(key).type === 'ETF' || /\b(ETF|ETC|UCITS)\b/i.test(A(key).name || D(key).name || ''));
-const nameOf = key => A(key).name || D(key).name || key.split(':')[1];
+const nameOf = key => A(key).name || D(key).name || ((S.scr || {})[key] || {}).name || key.split(':')[1];
 /* Umgangssprachlicher Name (Jakobs Wunsch vom 19.11.2026): „Apple“ statt „Apple Inc.“ oder AAPL, Kürzel nur, wo man sie so sagt
    (AMD, SAP, UBS). Firmenzusätze werden abgeschnitten, einige Namen fest vorgegeben. ETFs nach ihrem Index bzw. Thema. */
 const SHORT = {'stock:GOOGL': 'Google', 'stock:GOOG': 'Google', 'stock:AMD': 'AMD', 'stock:MC.PA': 'LVMH', 'stock:LHA.DE': 'Lufthansa',
   'stock:1211.HK': 'BYD', 'stock:HIMS': 'Hims & Hers', 'stock:BMNR': 'Bitmine', 'stock:ANT': 'Anthropic', 'stock:IBM': 'IBM',
-  'stock:TSM': 'TSMC', 'stock:BRK-B': 'Berkshire', 'stock:BRK-A': 'Berkshire'};
+  'stock:TSM': 'TSMC', 'stock:BRK-B': 'Berkshire', 'stock:BRK-A': 'Berkshire', 'stock:000660.KS': 'SK Hynix', 'stock:005930.KS': 'Samsung'};
 const FUND_THEME = [[/MSCI World/i, 'MSCI World'], [/NASDAQ[- ]?100/i, 'Nasdaq 100'], [/S&P 500/i, 'S&P 500'], [/All[- ]World/i, 'All-World'],
   [/Emerging Markets/i, 'Schwellenländer'], [/Gold/i, 'Gold'], [/Silver|Silber/i, 'Silber'], [/Commodit/i, 'Rohstoffe'],
   [/Clean Energy/i, 'Saubere Energie'], [/Electric Vehicles/i, 'Elektroautos'], [/Asia Pacific Ex Japan/i, 'Asien-Pazifik'], [/DAX/i, 'DAX'],
@@ -760,4 +761,179 @@ function markets() {
     {name: 'Xetra', open: marketState('Europe/Berlin', 540, 1050) && fresh('^GDAXI'), hours: '9:00–17:30'},
     {name: 'Krypto', open: true, hours: 'rund um die Uhr'},
   ];
+}
+
+/* ---------------------------------------------------------------- Strategie (Jakobs Wunsch vom 22.11.2026)
+   Profil und Antworten: portfolio.json → profile (answers, text, plan). Filter: screen.json (tracker/screen.py).
+   Die Passung „Für dich“ rechnet hier mit denselben Gewichten wie tracker/screen.py (fit), damit Antworten sofort wirken:
+   beide Stellen ändern. Faktoren nach Jakobs Vorgabe: Momentum, Schätzungsänderungen, Wachstum, Qualität, relative Stärke
+   im KI-Umfeld; Bewertung nur als Sicherheitsnetz; dazu Erwartungswert (Chance zu Risiko). Keine Anlageberatung. */
+const FIT_W = {
+  upside: {momentum: .23, revisions: .21, growth: .21, quality: .14, rs: .09, value: .06, ev: .06},
+  rr: {momentum: .17, revisions: .17, growth: .15, quality: .19, rs: .07, value: .17, ev: .08},
+  safe: {momentum: .11, revisions: .15, growth: .09, quality: .28, rs: .04, value: .25, ev: .08}};
+const FACTOR_DE = {momentum: 'Momentum', revisions: 'Schätzungen', growth: 'Wachstum', quality: 'Qualität', rs: 'Stärke im Thema', value: 'Bewertung', ev: 'Chance-Risiko'};
+// Fragen ans Profil. core = aus Jakobs Grok-Profil vorbelegt; lesson = Leitplanke aus dem FTX-Fall.
+const QUESTIONS = [
+  {id: 'risk', core: 1, q: 'Wie viel Risiko willst du eingehen?', o: [['low', 'Niedrig'], ['mid', 'Mittel'], ['high', 'Hoch']]},
+  {id: 'horizon', core: 1, q: 'Wie lange willst du anlegen?', o: [['lt2', 'Unter 2 Jahre'], ['2to5', '2 bis 5 Jahre'], ['gt5', 'Über 5 Jahre']]},
+  {id: 'max_dd', core: 1, q: 'Welchen Rückgang des Depots hältst du aus, ohne zu verkaufen?', o: [[15, '−15 %'], [25, '−25 %'], [35, '−35 %'], [50, '−50 %']]},
+  {id: 'on_loss', core: 1, q: 'Was tust du bei starken Verlusten?', o: [['buy', 'Nachkaufen, wenn die These hält'], ['hold', 'Halten'], ['sell', 'Verkaufen']]},
+  {id: 'priority', core: 1, q: 'Was ist dir wichtiger?', o: [['upside', 'Möglichst viel Upside'], ['rr', 'Gutes Chance-Risiko'], ['safe', 'Sicherheit']]},
+  {id: 'positions', core: 1, q: 'Wie viele Einzelaktien willst du halten?', o: [['3-5', '3 bis 5'], ['6-8', '6 bis 8'], ['9-12', '9 bis 12'], ['13-40', 'mehr']]},
+  {id: 'min_pos', core: 1, q: 'Wie groß soll eine Position mindestens sein?', o: [[250, '250 €'], [500, '500 €'], [1000, '1.000 €']]},
+  {id: 'themes', core: 1, q: 'Welchen Schwerpunkt hat dein Depot?', o: [['ai', 'KI und Halbleiter'], ['tech', 'Tech allgemein'], ['none', 'Keinen']]},
+  {id: 'defensive', core: 1, q: 'Defensive Titel wie Microsoft?', o: [['reduce', 'Reduzieren oder weglassen'], ['keep', 'Als Ausgleich behalten']]},
+  {id: 'spec', core: 1, q: 'Junge KI-Firmen, die noch keinen Gewinn machen (z. B. CoreWeave, Nebius)?', o: [['nein', 'Nein'], ['wenig', 'Kleiner Anteil'], ['ja', 'Ja']]},
+  {id: 'need', q: 'Brauchst du dieses Geld in den nächsten 2 Jahren für etwas Bestimmtes?', why: 'Fest eingeplantes Geld verträgt keinen Rückgang von 35 %.', o: [['yes', 'Ja, fest eingeplant'], ['maybe', 'Vielleicht'], ['no', 'Nein']]},
+  {id: 'cash', q: 'Hast du Geld zurückgelegt, um bei Schwäche nachzukaufen?', why: 'Nachkaufen bei Schwäche geht nur mit Reserve.', o: [['yes', 'Ja'], ['some', 'Etwas'], ['no', 'Nein']]},
+  {id: 'crash', q: 'Halbleiter fallen wie 2022 um rund 45 %, die Gewinnschätzungen halten. Was tust du?', why: 'Prüft, ob dein Plan bei Verlusten auch im Ernstfall gilt.', o: [['buy', 'Nachkaufen'], ['hold', 'Halten'], ['sell', 'Verkaufen']]},
+  {id: 'maxpos', q: 'Wie groß darf eine einzelne Aktie höchstens werden?', why: 'Grenze für Klumpen.', o: [[15, '15 %'], [20, '20 %'], [25, '25 %'], [30, '30 %']]},
+  {id: 'share', q: 'Welcher Teil deines Vermögens steckt in Aktien und Krypto?', why: 'Je größer der Anteil, desto mehr zählt ein Rückgang.', o: [['lt25', 'Unter 25 %'], ['25-50', '25 bis 50 %'], ['50-75', '50 bis 75 %'], ['gt75', 'Über 75 %']]},
+  {id: 'lever', lesson: 1, q: 'Nutzt du Hebel, Optionen oder Kredit?', why: 'Lehre aus FTX: Hebel macht aus einem Rückgang einen Totalverlust.', o: [['no', 'Nein'], ['some', 'Manchmal'], ['yes', 'Ja']]},
+  {id: 'wallet', lesson: 1, q: 'Wo liegen deine Coins?', why: 'Lehre aus FTX: Auf einer Krypto-Börse sind Coins im Ernstfall weg.', o: [['self', 'Eigene Wallet'], ['broker', 'Beim Broker'], ['exchange', 'Auf einer Krypto-Börse']]},
+  {id: 'region', q: 'Nur US-Aktien oder auch Asien und Europa (SK Hynix, Samsung, ASML)?', o: [['all', 'Auch Asien und Europa'], ['usa', 'Nur USA']]},
+  {id: 'profit', q: 'Was tust du bei großen Gewinnen?', o: [['run', 'Laufen lassen'], ['50', 'Ab +50 % einen Teil verkaufen'], ['100', 'Ab +100 % einen Teil verkaufen']]},
+  {id: 'sell', q: 'Wann verkaufst du eine Aktie?', o: [['thesis', 'Wenn die These bricht'], ['stop', 'Bei festem Verlust (−20 %)'], ['better', 'Wenn es Besseres gibt']]},
+  {id: 'etf', q: 'Gehören deine ETFs zur Strategie?', why: 'Sonst zählen nur die Einzelaktien.', o: [['apart', 'Nein, getrennt'], ['base', 'Ja, als Basis']]},
+  {id: 'crypto', q: 'Und Krypto?', o: [['apart', 'Getrennt'], ['part', 'Gehört dazu']]},
+  {id: 'rebalance', q: 'Wie oft willst du umschichten?', o: [['need', 'Bei Bedarf'], ['month', 'Monatlich'], ['quarter', 'Vierteljährlich']]},
+  {id: 'push', q: 'Wann sollen Hinweise aufs Handy kommen?', o: [['important', 'Nur Wichtiges'], ['all', 'Alles'], ['none', 'Gar nicht']]}];
+const prof = () => S.pf.profile || {};
+const ansOf = id => (prof().answers || {})[id];
+const ansLabel = id => { const q = QUESTIONS.find(x => x.id === id), v = ansOf(id); const o = q && q.o.find(x => String(x[0]) === String(v)); return o ? o[1] : null; };
+const scrRow = key => (S.scr || {})[key];
+function fitOf(r) {
+  if (!r) return null;
+  const w = FIT_W[ansOf('priority')] || FIT_W.upside, c = r.c, fl = r.flags || {};
+  if (ansOf('region') === 'usa' && !fl.us) return null;
+  if (fl.spec && ansOf('spec') === 'nein') return null;
+  let x = Object.keys(w).reduce((s, k) => s + (c[k] ?? 0.5) * w[k], 0) * 100;
+  const th = ansOf('themes') || 'ai', t = th === 'ai' ? c.theme : th === 'tech' ? Math.max(c.theme, 0.7) : 1;
+  x *= 0.55 + 0.45 * t;
+  if (c.quality < 0.3) x *= 0.85;
+  if (fl.pricey) x *= 0.85;
+  if (fl.spec && ansOf('spec') !== 'ja') x *= 0.85;
+  if (fl.def && (ansOf('defensive') || 'reduce') === 'reduce') x *= 0.8;
+  if (fl.cut) x = Math.min(x, 45);
+  if ((ansOf('horizon') || 'lt2') === 'lt2' && (r.vol || 0) > 70) x *= 0.9;
+  return Math.round(Math.min(100, x));
+}
+const fitPts = f => f == null ? null : Math.max(1, Math.min(10, Math.round(f / 10)));
+const fitKey = key => fitPts(fitOf(scrRow(key)));
+const planDay = () => { const d = (prof().plan || {}).date; return d ? isoToDay(d) : null; };
+function calcFor(dep) { const sd = S.dep, sc = S.calc; S.dep = dep; S.calc = null; const r = calc(); S.dep = sd; S.calc = sc; return r; }
+// Geplante Käufe: Wert heute, wenn am Plantag gekauft
+function planRows() {
+  const pl = prof().plan; if (!pl || !(pl.items || []).length) return [];
+  const pd = planDay();
+  return pl.items.map(it => {
+    const key = keyOf(it.kind || 'stock', it.symbol), now = A(key).price ?? priceAt(key, todayDay()), then = pd != null ? priceAt(key, pd) : null;
+    const chg = now != null && then ? (toShow(key, now, todayDay()) / toShow(key, then, pd) - 1) * 100 : null;   // beide mit Tageskursen der Währung, sonst entsteht ein Scheinunterschied
+    return {key, it, eur: +it.eur || 0, pct: +it.pct || 0, chg, value: (+it.eur || 0) * (1 + (chg || 0) / 100)};
+  });
+}
+// Rückgang eines Korbs mit festen Gewichten über die letzten Jahre (heutige Gewichte zurückgerechnet, in Euro)
+function basketDD(items, years = 5) {
+  const xs = items.filter(x => (D(x.key).hist || {}).d && D(x.key).hist.d.length > 200 && x.w > 0);
+  if (!xs.length) return null;
+  const end = todayDay(), start = Math.max(end - years * 365, ...xs.map(x => D(x.key).hist.d[0]));
+  const base = xs[0].key, days = D(base).hist.d.filter(d => d >= start);
+  const tw = xs.reduce((s, x) => s + x.w, 0);
+  const last = xs.map(x => toShow(x.key, D(x.key).hist.c[D(x.key).hist.c.length - 1], end));
+  let peak = -Infinity, pk = days[0], best = {dd: 0, peak: days[0], trough: days[0]};
+  const ser = days.map(d => { const v = xs.reduce((s, x, i) => s + x.w / tw * toShow(x.key, priceAt(x.key, d), d) / last[i], 0); return [d, v]; });
+  for (const [d, v] of ser) { if (v > peak) { peak = v; pk = d; } const dd = (v / peak - 1) * 100; if (dd < best.dd) best = {dd, peak: pk, trough: d}; }
+  const hi = Math.max(...ser.map(s => s[1]));
+  return {dd: best.dd, peak: best.peak, trough: best.trough, fromHigh: (ser[ser.length - 1][1] / hi - 1) * 100, years: Math.round((end - start) / 365 * 10) / 10, n: xs.length, of: items.length};
+}
+// Positionen für den Regel-Check: Plan, Hauptdepot heute oder beides; ETFs und Krypto nur, wenn sie laut Antwort dazugehören
+function strategyBook(mode) {
+  const out = {};
+  const add = (key, v) => { if (!v) return; out[key] = (out[key] || 0) + v; };
+  if (mode !== 'plan') for (const p of calcFor('main').held) {
+    if (isCoin(p.key) && ansOf('crypto') !== 'part') continue;
+    if ((isFund(p.key) || isCommodity(p.key)) && ansOf('etf') !== 'base') continue;
+    add(p.key, p.value);
+  }
+  if (mode !== 'depot') for (const r of planRows()) add(r.key, mode === 'plan' ? r.value : r.eur);
+  const tot = Object.values(out).reduce((s, v) => s + v, 0);
+  return Object.entries(out).map(([key, v]) => ({key, v, w: tot ? v / tot * 100 : 0})).sort((a, b) => b.v - a.v);
+}
+const isStockOnly = key => !isCoin(key) && !isFund(key) && !isCommodity(key);
+function themeOf(key) { const r = scrRow(key); if (r) return [r.theme, r.c.theme]; const f = D(key).fund || {}; return [isCoin(key) ? 'Krypto' : isFund(key) ? 'ETF' : f.industry || f.sector || '–', /Semicond/.test(f.industry || '') ? 1 : 0.2]; }
+function ruleCheck(mode) {
+  const book = strategyBook(mode), stocks = book.filter(x => isStockOnly(x.key)), rows = [];
+  const add = (state, title, text, lesson) => rows.push({state, title, text, lesson});
+  if (!book.length) return {rows, book};
+  const [lo, hi] = String(ansOf('positions') || '6-8').split('-').map(Number), n = stocks.length;
+  add(n >= lo && n <= hi ? 'ok' : 'warn', `${n} Einzelaktien`, n < lo ? `Weniger als deine ${lo} bis ${hi}: einzelne Titel wiegen schwer.` : n > hi ? `Mehr als deine ${lo} bis ${hi}: ${n - hi} zu viel, die schwächsten nach Passung zuerst prüfen.` : `Passt zu deinen ${lo} bis ${hi}.`);
+  const minp = +ansOf('min_pos') || 500, small = book.filter(x => x.v < minp);
+  if (small.length) add('warn', `${small.length} unter ${eur(minp, 0)}`, small.map(x => shortName(x.key)).join(', ') + ': kleiner als deine Mindestgröße.');
+  const top = book[0], maxpos = +ansOf('maxpos') || 25;
+  add(top.w > maxpos ? 'warn' : 'ok', `Größte Position ${nf(top.w, 0)} %`, `${shortName(top.key)}. ${top.w > maxpos ? 'Über' : 'Innerhalb'} deiner Grenze von ${maxpos} %${ansOf('maxpos') ? '' : ' (angenommen, Frage offen)'}.`, 1);
+  const aiShare = stocks.filter(x => themeOf(x.key)[1] >= 0.8).reduce((s, x) => s + x.w, 0), stockShare = stocks.reduce((s, x) => s + x.w, 0);
+  if ((ansOf('themes') || 'ai') === 'ai' && stockShare) add(aiShare / stockShare >= 0.7 ? 'ok' : 'warn', `KI und Halbleiter ${nf(aiShare / stockShare * 100, 0)} %`, `Anteil an deinen Einzelaktien. ${aiShare / stockShare >= 0.7 ? 'Passt zu deinem Schwerpunkt.' : 'Weniger Schwerpunkt, als dein Profil sagt.'}`);
+  const byTheme = {}; for (const x of stocks) { const t = themeOf(x.key)[0]; byTheme[t] = (byTheme[t] || 0) + x.w; }
+  const [bt, bw] = Object.entries(byTheme).sort((a, b) => b[1] - a[1])[0] || ['', 0];
+  if (bt) add(bw > 40 ? 'warn' : 'ok', `Größtes Thema: ${bt} ${nf(bw, 0)} %`, bw > 40 ? 'Titel aus einem Thema fallen meist gemeinsam.' : 'Kein einzelnes Thema dominiert.');
+  const def = stocks.filter(x => (scrRow(x.key) || {flags: {}}).flags.def);
+  if (def.length && (ansOf('defensive') || 'reduce') === 'reduce') add('warn', 'Defensive Titel', def.map(x => shortName(x.key)).join(', ') + ': wenig Wachstum. Laut deinem Profil eher reduzieren.');
+  const cut = stocks.filter(x => (scrRow(x.key) || {}).est90 != null && scrRow(x.key).est90 <= -10);
+  if (cut.length) add('bad', 'These prüfen', cut.map(x => `${shortName(x.key)} (Schätzung ${pctS(scrRow(x.key).est90, 0)})`).join(', ') + ': Gewinnschätzungen deutlich gesenkt.');
+  const bd = basketDD(book.map(x => ({key: x.key, w: x.w}))), mdd = +ansOf('max_dd') || 35;
+  if (bd) add(bd.dd < -mdd ? 'bad' : bd.dd < -mdd * 0.8 ? 'warn' : 'ok', `Größter Rückgang ${pctS(bd.dd, 0)}`, `So weit wäre diese Mischung in den letzten ${nf(bd.years, 0)} Jahren gefallen (${dateDe(dayToDate(bd.peak).toISOString())} bis ${dateDe(dayToDate(bd.trough).toISOString())}${bd.n < bd.of ? `, ${bd.of - bd.n} Titel ohne langen Verlauf` : ''}). Deine Grenze: −${mdd} %.`, 1);
+  const fits = stocks.map(x => [x, fitOf(scrRow(x.key))]).filter(x => x[1] != null).sort((a, b) => a[1] - b[1]);
+  const best = (S.screen && S.screen.list || []).map(r => [r, fitOf(r)]).filter(x => x[1] != null && !book.some(b => b.key === x[0].key)).sort((a, b) => b[1] - a[1])[0];
+  if (fits.length && best && best[1] - fits[0][1] >= 15) add('info', 'Tausch prüfen', `${shortName(fits[0][0].key)} passt am schwächsten (${fitPts(fits[0][1])} von 10), ${shortName(best[0].key)} deutlich besser (${fitPts(best[1])} von 10).`);
+  if (mode === 'depot' && ['50', '100'].includes(ansOf('profit'))) {
+    const c = calcFor('main'), g = c.held.filter(p => isStockOnly(p.key) && p.pnlPct >= +ansOf('profit'));
+    if (g.length) add('info', 'Gewinnregel', g.map(p => `${shortName(p.key)} ${pctS(p.pnlPct, 0)}`).join(', ') + `: über deiner Schwelle von +${ansOf('profit')} %.`);
+  }
+  return {rows, book, bd};
+}
+// Leitplanken: das Brauchbare aus dem Denken von Sam Bankman-Fried (Erwartungswert) und seine Fehler als Regeln
+function guardRails(rc) {
+  const g = [], a = id => ansOf(id);
+  const add = (state, title, text) => g.push({state, title, text});
+  add(a('lever') === 'yes' ? 'bad' : a('lever') === 'some' ? 'warn' : a('lever') ? 'ok' : 'open', 'Kein Hebel, kein Kredit', a('lever') ? (a('lever') === 'no' ? 'Du nutzt keinen Hebel.' : 'Mit Hebel kann ein Rückgang alles kosten. Genau das hat FTX und Alameda ruiniert.') : 'Frage offen: Nutzt du Hebel?');
+  add(a('need') === 'yes' ? 'bad' : a('need') ? 'ok' : 'open', 'Nur Geld, das du nicht brauchst', a('need') === 'yes' ? 'Fest eingeplantes Geld gehört nicht in ein Depot, das 35 % fallen darf.' : a('need') ? 'Kein fest eingeplantes Geld im Depot.' : 'Frage offen: Brauchst du das Geld bald?');
+  const mp = +a('maxpos') || 25, top = (rc.book || [])[0];
+  add(top && top.w > mp ? 'warn' : 'ok', 'Kein Einsatz über die Hälfte des Kelly-Maßes', `Auch bei einer guten Wette nie alles auf einen Titel: höchstens ${mp} % je Aktie${top ? `, größte heute ${nf(top.w, 0)} %` : ''}. Sam Bankman-Fried wollte sogar mehr als das volle Kelly-Maß setzen.`);
+  const bd = rc.bd, mdd = +a('max_dd') || 35;
+  add(!bd ? 'open' : bd.dd < -mdd ? 'bad' : 'ok', 'Totalverlust vermeiden', bd ? `Größter Rückgang dieser Mischung: ${pctS(bd.dd, 0)}, deine Grenze −${mdd} %. Ein Erwartungswert hilft nichts, wenn man vorher aufgeben muss.` : 'Noch kein Verlauf für die Rechnung.');
+  if (calcFor('main').held.some(p => isCoin(p.key))) add(a('wallet') === 'exchange' ? 'warn' : a('wallet') ? 'ok' : 'open', 'Coins nicht auf der Börse lassen', a('wallet') === 'exchange' ? 'Auf einer Krypto-Börse gehören die Coins im Ernstfall der Börse, wie bei FTX.' : a('wallet') ? 'Gut: nicht auf einer Krypto-Börse.' : 'Frage offen: Wo liegen deine Coins?');
+  add(a('on_loss') === 'buy' && a('cash') === 'no' ? 'warn' : a('cash') ? 'ok' : 'open', 'Reserve für Nachkäufe', a('cash') === 'no' && a('on_loss') === 'buy' ? 'Du willst bei Schwäche nachkaufen, hast aber keine Reserve.' : a('cash') ? 'Reserve vorhanden.' : 'Frage offen: Hast du Geld zum Nachkaufen?');
+  return g;
+}
+// Wenn … dann: Regeln aus deinem Profil mit dem heutigen Stand
+function playbook(rc) {
+  const sm = (S.screen || {}).semis || {}, list = (S.screen || {}).list || [], book = rc.book || [], inBook = new Set(book.map(x => x.key));
+  const mine = list.filter(r => inBook.has(r.key)), soon = todayDay() + 14, mdd = +ansOf('max_dd') || 35;
+  const names = xs => xs.map(r => shortName(r.key)).join(', ');
+  const dipOk = mine.filter(r => (r.from_high || 0) <= -20 && (r.est90 == null || r.est90 >= 0) && (r.c.rs >= 0.4));
+  const broken = mine.filter(r => r.est90 != null && r.est90 <= -10);
+  const weak = mine.filter(r => r.c.momentum < 0.3 && r.c.rs < 0.4);
+  const earn = mine.filter(r => r.earnings && isoToDay(r.earnings) >= todayDay() && isoToDay(r.earnings) <= soon);
+  const bd = rc.bd;
+  return [
+    {on: sm.from_high != null && sm.from_high <= -20, when: 'Halbleiter fallen 20 % oder mehr vom Hoch, die Schätzungen halten', then: ansOf('on_loss') === 'buy' ? 'Nach deiner Regel nachkaufen: zuerst Titel, deren Schätzungen steigen und die im Thema relativ stark bleiben.' : 'Nach deiner Regel halten.', now: sm.from_high != null ? `Halbleiter-ETF ${pctS(sm.from_high, 0)} unter dem Hoch${dipOk.length ? ' · in Frage: ' + names(dipOk) : ''}` : ''},
+    {on: broken.length > 0, when: 'Die Gewinnschätzung einer Position sinkt in 90 Tagen um 10 % oder mehr', then: 'These gebrochen: Position prüfen, Ersatz aus den Kandidaten.', now: broken.length ? names(broken) : 'keine'},
+    {on: weak.length > 0, when: 'Momentum dreht: Kurs schwächer als der Markt und als die anderen KI-Titel', then: 'Nach deinen Faktoren nicht nachkaufen, bis Momentum oder Schätzungen wieder drehen.', now: weak.length ? names(weak) : 'keine'},
+    {on: !!bd && bd.fromHigh <= -mdd * 0.7, when: `Die Mischung liegt ${nf(mdd * 0.7, 0)} % unter dem Hoch (70 % deiner Grenze)`, then: 'Risiko prüfen, keine Käufe auf Kredit, Reserve einplanen.', now: bd ? `heute ${pctS(bd.fromHigh, 0)}` : ''},
+    {on: book.some(x => x.w > (+ansOf('maxpos') || 25)), when: `Eine Position wächst über ${+ansOf('maxpos') || 25} %`, then: 'Nicht weiter aufstocken, bei Bedarf einen Teil verkaufen.', now: book.filter(x => x.w > (+ansOf('maxpos') || 25)).map(x => shortName(x.key) + ' ' + nf(x.w, 0) + ' %').join(', ') || 'keine'},
+    {on: earn.length > 0, when: 'Quartalszahlen in den nächsten 14 Tagen', then: 'Mit großen Ausschlägen rechnen. Nachkauf erst, wenn die Zahlen die These bestätigen.', now: earn.length ? earn.map(r => shortName(r.key) + ' ' + dateDe(r.earnings)).join(', ') : 'keine'}];
+}
+function strategySummary() {
+  const a = id => ansOf(id), L = id => ansLabel(id);
+  const s = [`${{high: 'Wachstum mit hohem Risiko', mid: 'Wachstum mit mittlerem Risiko', low: 'Vorsichtiges Wachstum'}[a('risk')] || 'Wachstum'}${a('themes') === 'ai' || !a('themes') ? ', Schwerpunkt KI und Halbleiter' : a('themes') === 'tech' ? ', Schwerpunkt Tech' : ''}, ${L('positions') || '6 bis 8'} Einzelaktien ab ${eur(+a('min_pos') || 500, 0)}.`,
+    `Horizont ${{lt2: 'unter 2 Jahren', '2to5': '2 bis 5 Jahre', gt5: 'über 5 Jahre'}[a('horizon') || 'lt2']}, Rückgang bis −${+a('max_dd') || 35} % tragbar.${a('on_loss') === 'buy' ? ' Bei Schwäche nachkaufen, solange die Gewinnschätzungen halten.' : ''}`,
+    'Auswahl nach Momentum, Schätzungsänderungen, Wachstum und Qualität, dazu relative Stärke im KI-Umfeld. Bewertung nur als Sicherheitsnetz, Erwartungswert als Chance-Risiko-Prüfung.'];
+  const t = [], sm = (S.screen || {}).semis;
+  if ((a('horizon') || 'lt2') === 'lt2' && sm && sm.dd) t.push(`Halbleiter fielen zuletzt um ${nf(-sm.dd, 0)} % und brauchten ${sm.months_back ? nf(sm.months_back, 0) + ' Monate' : 'lange'} zurück zum Hoch. Bei unter 2 Jahren Horizont kann so eine Phase fast die ganze Zeit dauern.`);
+  if (a('on_loss') === 'buy') t.push('Momentum und Nachkaufen bei Schwäche ziehen in verschiedene Richtungen. Darum gilt ein Nachkauf nur, wenn die Schätzungen halten und der Titel im Thema relativ stark bleibt.');
+  if (a('need') === 'yes') t.push('Du brauchst das Geld bald, willst aber −35 % aushalten. Das passt nicht zusammen.');
+  if (a('crash') && a('on_loss') && a('crash') !== a('on_loss')) t.push(`Du sagst „${L('on_loss')}“, beim Test mit −45 % aber „${L('crash')}“. Im Ernstfall zählt das Zweite.`);
+  if (a('on_loss') === 'buy' && a('cash') === 'no') t.push('Nachkaufen bei Schwäche geht nur mit Reserve.');
+  return {s, t};
 }

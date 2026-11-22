@@ -9,7 +9,7 @@ import datetime
 import sys
 import time
 
-from . import analytics, sources
+from . import analytics, screen, sources
 from .common import CLOUD, SourceError, asset_key, empty_portfolio, get_store, http_json, log, now_iso, tracked_assets
 
 BENCH = {"SP500": ("stock", "^GSPC", "S&P 500"), "BTC": ("crypto", "BTC", "Bitcoin")}
@@ -292,6 +292,7 @@ def run_daily(store):
     rng = "10y" if first and first < (datetime.date.today() - datetime.timedelta(days=5 * 365 - 30)).isoformat() else "5y"
     first_day = (datetime.date.fromisoformat(first) - datetime.date(1970, 1, 1)).days if first else None
     yf = sources.YahooFundamentals()
+    research = (store.get("analysis.json") or {}).get("assets") or {}   # Plan der Firma aus der Recherche fließt in die Punkte
     onchain = sources.onchain_revenue([a["symbol"] for a in assets.values() if a["kind"] == "crypto"])
     out, currencies = {}, {"USD"}
     # Gesamtmarkt als Maßstab: ein Rückgang zählt nur, wenn der Titel nicht deutlich schwächer läuft als der Markt
@@ -329,7 +330,7 @@ def run_daily(store):
             entry["fund"] = _round(fund)
             entry["div"] = div
             entry["divs"] = [[d, round(x, 4)] for d, x in h["div"]]
-            entry["valuation"] = analytics.stock_valuation(price, tech, fund, div)
+            entry["valuation"] = analytics.stock_valuation(price, tech, fund, div, (research.get(key) or {}).get("claude"))
             entry.update(yf.extra.get(a["symbol"]) or {})   # insider, analyst, sectors
             if fund.get("earnings_date"):
                 entry["earnings_date"] = analytics.ts_to_iso(fund["earnings_date"])
@@ -361,7 +362,9 @@ def run_daily(store):
         m = meta.get(a["symbol"]) if a["kind"] == "crypto" else None
         if m and key in out:
             out[key]["mcap"], out[key]["rank"] = m.get("mcap"), m.get("rank")
-    update_logos(store, assets, out, meta)
+    # Strategie: Titel der Auswahl (KI und Halbleiter), die nicht ohnehin verfolgt werden
+    extra = screen.fetch(out, yf, market_6m)
+    update_logos(store, dict(screen.universe_assets(), **assets), dict(extra, **out), meta)
     # Angst und Gier am Aktienmarkt: eigene Berechnung (CNN sperrt Skripte), aus Yahoo-Kursen
     fg_hist = {}
     for sym in ("^GSPC", "^VIX", "SPY", "TLT", "HYG", "IEF", "RSP"):
@@ -384,6 +387,10 @@ def run_daily(store):
     if smart:
         smart["updated"] = now_iso()
         store.put("smart.json", smart)
+    try:
+        screen.build(store, pf, out, extra, push, (bench.get("SP500") or {}).get("c"))
+    except Exception as e:   # der Filter darf den Tageslauf nicht aufhalten
+        log("Strategie: Fehler " + type(e).__name__)
     # Branchen der großen Indizes als Vergleich für die Sektoren des Depots (über die ETFs URTH und SPY)
     sector_bench = {}
     for name, sym in SECTOR_BENCH:

@@ -254,10 +254,80 @@ def _intrinsic_points(pts, fund):
     return chg
 
 
-def stock_valuation(price, tech, fund, div):
-    """Kennzahlen zählen voll, Analystenziel und Dividende halb, die Kurslage nur gestützt (siehe _price_points)."""
+# Eingepreiste Erwartungen (Reverse-DCF nach Mauboussin/Rappaport, „Expectations Investing“): nicht schätzen, was die Firma
+# wert ist, sondern ausrechnen, welches Wachstum der heutige Kurs voraussetzt, und das mit den Erwartungen vergleichen.
+VISION_YEARS, VISION_EXIT_PE, VISION_RATE = 5, 20.0, 0.09
+
+
+def implied_growth(forward_pe):
+    """Gewinnwachstum pro Jahr (in %), das der Kurs voraussetzt: In 5 Jahren soll die Aktie noch das 20-Fache ihres Gewinns
+    wert sein (übliches KGV einer reifen Tech-Firma) und bis dahin 9 % im Jahr bringen. Rechnet mit dem erwarteten KGV."""
+    if not forward_pe or forward_pe <= 0:
+        return None
+    need = forward_pe * (1 + VISION_RATE) ** VISION_YEARS / VISION_EXIT_PE
+    return (need ** (1.0 / (VISION_YEARS - 1)) - 1) * 100
+
+
+def expected_growth(fund):
+    """Gewinnwachstum pro Jahr, das Analysten erwarten (in %): Langfrist-Schätzung über 5 Jahre, sonst die Schätzung fürs
+    nächste Jahr abgeschwächt (hohes Wachstum lässt meist nach), sonst das Umsatzwachstum abgeschwächt. (Wert, Quelle)."""
+    if fund.get("est_g_5y") is not None:
+        return min(fund["est_g_5y"], 60.0), "Analysten, 5 Jahre"
+    if fund.get("est_g_1y") is not None:
+        return min(fund["est_g_1y"], 80.0) * 0.75, "Analysten, nächstes Jahr, abgeschwächt"
+    if fund.get("revenue_growth") is not None:
+        return min(fund["revenue_growth"] * 100, 80.0) * 0.75, "Umsatzwachstum, abgeschwächt"
+    return None, ""
+
+
+PLAN_POINTS = {("ja", "zu wenig"): 2, ("ja", "passend"): 1, ("ja", "zu viel"): 0, ("teilweise", "zu wenig"): 1,
+               ("teilweise", "passend"): 0, ("teilweise", "zu viel"): -1, ("nein", "zu wenig"): 0, ("nein", "passend"): -1,
+               ("nein", "zu viel"): -2}
+
+
+def vision_check(fund, research=None):
+    """Wachstum und Vision: Wie viel Zukunft steckt im Kurs, und ist der Plan der Firma realistisch?
+    Ergebnis: {"implied", "expected", "source", "diff", "plan"} oder None."""
+    imp = implied_growth(fund.get("forward_pe"))
+    exp, src = expected_growth(fund)
+    out = {}
+    if imp is not None and exp is not None:
+        out.update(implied=round(imp, 1), expected=round(exp, 1), source=src, diff=round(exp - imp, 1))
+    plan = (research or {}).get("plan") if isinstance(research, dict) else None
+    if isinstance(plan, dict) and plan.get("realistic") in ("ja", "teilweise", "nein"):
+        try:
+            age = (datetime.date.today() - datetime.date.fromisoformat(str(research.get("at") or "")[:10])).days
+        except ValueError:
+            age = 999
+        if age <= 150:
+            out["plan"] = {k: plan.get(k) for k in ("goal", "analysts", "realistic", "priced_in", "why") if plan.get(k)}
+    return out or None
+
+
+def stock_valuation(price, tech, fund, div, research=None):
+    """Kennzahlen zählen voll, Analystenziel und Dividende halb, die Kurslage nur gestützt (siehe _price_points).
+    Dazu Wachstum und Vision (vision_check): Vision darf eingepreist sein, wenn sie realistisch ist."""
     fund = fund or {}
     pts = _Points()
+    vis = vision_check(fund, research) or {}
+    plan = vis.get("plan") or {}
+    if vis.get("diff") is not None:
+        d, imp = vis["diff"], vis["implied"]
+        word = ("kaum Zukunft eingepreist" if d >= 8 else "weniger eingepreist als erwartet" if d >= 3
+                else "eingepreist, was realistisch erwartet wird" if d > -3 else "etwas mehr eingepreist als erwartet" if d > -10
+                else "deutlich mehr Vision eingepreist, als Analysten erwarten")
+        pts.add(2 if d >= 8 else 1 if d >= 3 else 0 if d > -3 else -1 if d > -10 else -2,
+                ("Kurs setzt %+.0f %% Gewinnwachstum pro Jahr voraus" % imp if imp >= 0 else "Kurs setzt sinkende Gewinne voraus (−%.0f %% pro Jahr)" % -imp)
+                + ", erwartet werden %+.0f %% (%s): %s" % (vis["expected"], vis["source"], word), 1.0, "vision")
+    if plan:
+        p = PLAN_POINTS.get((plan.get("realistic"), plan.get("priced_in")), 0)
+        pts.add(p, "Plan der Firma laut Recherche %s, %s" % (
+            {"ja": "realistisch", "teilweise": "teilweise realistisch", "nein": "kaum realistisch"}[plan["realistic"]],
+            {"zu wenig": "im Kurs noch nicht voll enthalten", "passend": "im Kurs angemessen enthalten",
+             "zu viel": "im Kurs schon mehr als enthalten"}.get(plan.get("priced_in"), "Einpreisung offen")), 0.5, "vision")
+    # Vision darf eingepreist sein: Setzt der Kurs nicht mehr voraus, als erwartet wird, und hält die Recherche den Plan
+    # nicht für unrealistisch, zählen hohe Bewertungskennzahlen nur halb.
+    vision_ok = vis.get("diff") is not None and vis["diff"] > -3 and plan.get("realistic") != "nein"
     peg, pe, fpe = fund.get("peg"), fund.get("pe"), fund.get("forward_pe")
     # --- Bewertung: was man für Gewinn und Geldfluss zahlt
     if peg and peg > 0:
@@ -313,8 +383,13 @@ def stock_valuation(price, tech, fund, div):
             pts.add(1, "Dividendenrendite %.1f %% über dem 5-Jahres-Schnitt (%.1f %%)" % (y, avg), 0.5, "markt")
         elif y < avg * 0.8:
             pts.add(-1, "Dividendenrendite %.1f %% unter dem 5-Jahres-Schnitt (%.1f %%)" % (y, avg), 0.5, "markt")
+    if vision_ok:
+        for x in pts.items:
+            if x["g"] == "wert" and x["p"] < 0 and x["w"] == 1.0 and x["text"].startswith(("PEG", "Erwartetes KGV", "KGV", "Unternehmenswert")):
+                x["w"] = 0.5
+                x["text"] += " – durch realistisches Wachstum gedeckt"
     est = _intrinsic_points(pts, fund)
-    core = pts.score(("wert", "qual"))
+    core = pts.score(("wert", "qual", "vision"))
     has_core = pts.count(("wert", "qual")) >= 2
     _price_points(pts, price, tech, has_core and core is not None and core > 0, (tech or {}).get("rel_6m"), "der Gesamtmarkt",
                   intrinsic=(est, (tech or {}).get("perf_3m"), "die Gewinnschätzungen", "in 3 Monaten") if est is not None else None)
@@ -331,8 +406,12 @@ def stock_valuation(price, tech, fund, div):
     if est is not None and est <= -10:
         score = min(score, -0.2 if est <= -25 else 0.3)   # innerer Wert gesunken: niedriger Kurs ist kein Schnäppchen
     points = rating(score)
-    return {"score": round(score, 2), "rating": points, "label": rating_label(points, "stock"),
-            "basis": "Kennzahlen voll, Kursziele halb, gefallener Kurs nur bei Überreaktion", "reasons": pts.items}
+    out = {"score": round(score, 2), "rating": points, "label": rating_label(points, "stock"),
+           "basis": "Kennzahlen und eingepreistes Wachstum voll, Kursziele und Recherche halb, gefallener Kurs nur bei Überreaktion",
+           "reasons": pts.items}
+    if vis:
+        out["vision"] = vis
+    return out
 
 
 def _plain(items):

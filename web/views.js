@@ -10,10 +10,11 @@ const ICON = {
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
   eyeoff: '<path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6C3.8 8.4 2 12 2 12s4 7 10 7c1.9 0 3.6-.6 5-1.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
   logo: '<path d="M4 17l5-5 4 4 7-8"/><path d="M15 8h5v5"/>',
+  strat: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
   insight: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.5 1.1 1.3 1.1 2.1V16h5v-.1c0-.8.4-1.6 1.1-2.1A6 6 0 0 0 12 3z"/>',
 };
 const svg = n => `<svg viewBox="0 0 24 24">${ICON[n]}</svg>`;
-const TABS = [['home', 'Übersicht'], ['depot', 'Positionen'], ['watch', 'Watchlist'], ['insight', 'Einblicke'], ['cal', 'Termine']];
+const TABS = [['home', 'Übersicht'], ['depot', 'Positionen'], ['watch', 'Watchlist'], ['strat', 'Strategie'], ['insight', 'Einblicke'], ['cal', 'Termine']];
 const CAT = {Earnings: ['blue', 'Quartalszahlen'], Makro: ['teal', 'Konjunktur'], Fed: ['purple', 'Notenbank'], IPO: ['pink', 'IPO'], Dividende: ['good', 'Ex-Dividende'], Zahltag: ['good', 'Zahltag'], Krypto: ['warn', 'Krypto'], Event: ['', 'Event']};
 const isMine = e => !e.market;
 const ALERT_TYPES = {price_above: 'Kurs steigt über', price_below: 'Kurs fällt unter', change_above: 'Tagesplus größer als (%)',
@@ -36,7 +37,7 @@ function render() {
   const stale = upd && Date.now() - Date.parse(upd) > 45 * 6e4;
   if (!TABS.some(t => t[0] === S.tab)) S.tab = 'home';
   if (!MODES[S.mode]) S.mode = 'kauf';
-  const view = {home: vHome, depot: vDepot, watch: vWatch, insight: vInsight, cal: vCal}[S.tab](c);
+  const view = {home: vHome, depot: vDepot, watch: vWatch, strat: vStrat, insight: vInsight, cal: vCal}[S.tab](c);
   const title = Object.fromEntries(TABS)[S.tab];
   $('#app').innerHTML = `<div class="shell">${sideBar(upd, stale)}
   <main class="main"><div class="inner">
@@ -664,6 +665,102 @@ function moodCard(keys, sw) {
     <p class="hint">Reddit: wie oft ein Titel in 24 Stunden in den großen Börsen-Foren genannt wurde (ApeWisdom, täglich, nur US-Kürzel und Coins).${none > 0 ? ` ${none} Titel ohne Daten.` : ''} Viel Gerede heißt nicht, dass ein Kurs steigt. Stimmung ist kein Kaufgrund. Keine Anlageberatung.</p>`, sw, 'span12');
 }
 const insightKeys = c => [...new Set(fltOn('ein', 'Depot') === 'Depot' ? c.held.filter(p => p.value > 0).map(p => p.key) : (S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol)))];
+/* ---------------------------------------------------------------- Strategie (Jakobs Wunsch vom 22.11.2026)
+   Profil mit Fragen, geplante Käufe, Regel-Check, Leitplanken, Kandidaten aus dem Filter (screen.json), Wenn-dann-Regeln, Hinweise. */
+const fitBadge = (f, cls = '') => f == null ? '<span class="score none">–</span>' : `<span class="score t${tierOf(fitPts(f))} ${cls}" title="Passung für dich: ${fitPts(f)} von 10">${fitPts(f)}</span>`;
+const stIcon = st => `<span class="st ${st}">${{ok: '✓', warn: '!', bad: '✕', info: 'i', open: '?'}[st] || ''}</span>`;
+function questionsCard() {
+  const open = QUESTIONS.filter(q => ansOf(q.id) == null), done = QUESTIONS.filter(q => ansOf(q.id) != null);
+  const qhtml = q => `<div class="qq"><div class="qt">${esc(q.q)}${q.lesson ? ' <span class="chip warn">Lehre aus FTX</span>' : ''}</div>${q.why ? `<div class="qw">${esc(q.why)}</div>` : ''}
+    <div class="qo">${q.o.map(([v, l]) => `<button class="pillbtn ${String(ansOf(q.id)) === String(v) ? 'on' : ''}" data-act="ans" data-id="${q.id}" data-v="${esc(String(v))}">${esc(l)}</button>`).join('')}</div></div>`;
+  return card('Fragen an dich', open.length ? `${open.length} offen · jede Antwort schärft Filter und Regeln sofort` : 'Alle beantwortet · du kannst jede Antwort ändern',
+    `${open.slice(0, 4).map(qhtml).join('')}${open.length > 4 ? `<p class="hint">Noch ${open.length - 4} weitere Fragen, sobald diese beantwortet sind.</p>` : ''}
+    <details class="qdone"><summary>Deine Antworten (${done.length})</summary>${done.map(qhtml).join('')}</details>`, '', 'span5');
+}
+function planCard() {
+  const pl = prof().plan, rows = planRows();
+  if (!pl || !rows.length) return '';
+  const tot = rows.reduce((s, r) => s + r.eur, 0), val = rows.reduce((s, r) => s + r.value, 0), bd = basketDD(rows.map(r => ({key: r.key, w: r.pct})));
+  const mdd = +ansOf('max_dd') || 35;
+  return card('Dein Plan', `${esc(pl.note || 'Geplante Käufe')} · Stand ${dateDe(pl.date)} · noch nicht gekauft`, `<div class="tiles" style="margin-top:0">
+      ${tile('Geplant', eur(tot, 0), rows.length + ' Aktien')}${tile('Wert heute', eur(val, 0), 'wenn am ' + dateDe(pl.date) + ' gekauft', sign(val - tot))}
+      ${tile('Größter Rückgang', bd ? pctS(bd.dd, 0) : '–', bd ? `in ${nf(bd.years, 0)} Jahren, deine Grenze −${mdd} %` : 'Verlauf fehlt noch', bd && bd.dd < -mdd ? 'neg' : '')}${tile('Unter dem Hoch', bd ? pctS(bd.fromHigh, 0) : '–', 'die Mischung heute')}</div>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th>Für dich</th><th>Titel</th><th class="r">Anteil</th><th class="r hm">Betrag</th><th class="r">Seit Plan</th><th class="r hm">Punkte</th><th>Lage</th></tr></thead><tbody>
+    ${rows.map(r => { const sr = scrRow(r.key) || {}, f = fitOf(scrRow(r.key));
+      const lage = sr.flags && sr.flags.cut ? '<span class="chip bad">Schätzung gesenkt</span>' : sr.chg5 != null && sr.chg5 <= -8 && !(sr.est90 < -2) ? `<span class="chip warn">Rücksetzer ${pctS(sr.chg5, 0)}, Schätzung hält</span>`
+        : sr.earnings && isoToDay(sr.earnings) - todayDay() <= 14 && isoToDay(sr.earnings) >= todayDay() ? `<span class="chip blue">Zahlen ${dateDe(sr.earnings)}</span>` : sr.c && sr.c.momentum >= 0.6 ? '<span class="chip good">Momentum</span>' : '<span class="muted">–</span>';
+      return `<tr data-act="open" data-key="${esc(r.key)}"><td>${fitBadge(f)}</td><td>${nameCell(r.key, sr.theme || '')}</td><td class="r num">${nf(r.pct, 0)} %</td><td class="r num hm">${eur(r.eur, 0)}</td>
+        <td class="r">${chgA(r.chg)}</td><td class="r hm">${score(r.key)}</td><td>${lage}</td></tr>`; }).join('')}</tbody></table></div>
+    <p class="hint">„Seit Plan“: Kurs in Euro seit dem Plantag. „Größter Rückgang“: diese Gewichte mit den Kursen der Vergangenheit zurückgerechnet. Faustregel, keine Anlageberatung.</p>`, '', 'span7');
+}
+function checkCard() {
+  const mode = S.rcm || (prof().plan ? 'plan' : 'depot'), rc = ruleCheck(mode);
+  const body = rc.rows.length ? `<div class="rules">${rc.rows.map(r => `<div class="rule">${stIcon(r.state)}<div><b>${esc(r.title)}</b><div class="x">${esc(r.text)}</div></div></div>`).join('')}</div>` : '<p class="empty">Keine Positionen für diese Auswahl.</p>';
+  return card('Regel-Check', 'Deine Positionen gegen dein Profil', body + `<p class="hint">Gezählt werden Einzelaktien${ansOf('etf') === 'base' ? ' und ETFs' : ''}${ansOf('crypto') === 'part' ? ' und Krypto' : ''}, beim Depot nur das Hauptdepot. Keine Anlageberatung.</p>`,
+    seg('rcm', ['Plan', 'Depot', 'Beides'], {plan: 'Plan', depot: 'Depot', both: 'Beides'}[mode]), 'span7');
+}
+function guardCard() {
+  const mode = S.rcm || (prof().plan ? 'plan' : 'depot'), g = guardRails(ruleCheck(mode));
+  return card('Leitplanken', 'Erwartungswert ja, Totalverlust nein', `<div class="rules">${g.map(r => `<div class="rule">${stIcon(r.state)}<div><b>${esc(r.title)}</b><div class="x">${esc(r.text)}</div></div></div>`).join('')}</div>
+    <p class="hint">Sam Bankman-Fried (FTX, Alameda) entschied nach dem Erwartungswert: Er setzte auf alles, was im Schnitt mehr bringt, auch wenn ein Totalverlust möglich war, und wollte mehr setzen, als das Kelly-Maß erlaubt. Dazu kamen Hebel, Geld der Kunden und wenig Prüfung vor Beteiligungen. 2023 wurde er wegen Betrugs verurteilt. Übernommen wird nur das Denken in Erwartungswerten: Chance zu Risiko fließt in die Passung ein. Seine Fehler stehen hier als Regeln.</p>`, '', 'span5');
+}
+function candCard() {
+  const list = ((S.screen || {}).list || []).map(r => ({r, f: fitOf(r)})).filter(x => x.f != null);
+  if (!list.length) return card('Kandidaten', 'Aktien, die zu dir passen könnten', '<p class="empty">Der Filter läuft mit dem nächsten Tageslauf.</p>', '', 'span12');
+  const held = new Set(calcFor('main').held.map(p => p.key)), plan = new Set(planRows().map(r => r.key));
+  const fl = S.scf || 'Neu für dich';
+  let xs = list.filter(x => fl === 'Alle' ? true : fl === 'Neu für dich' ? !held.has(x.r.key) && !plan.has(x.r.key)
+    : fl === 'Rücksetzer' ? x.r.chg5 != null && x.r.chg5 <= -8 && !x.r.flags.cut : x.r.c.theme >= 0.9);
+  xs.sort((a, b) => b.f - a.f);
+  const more = xs.length > 15 && !S.scAll; if (more) xs = xs.slice(0, 15);
+  const tagOf = k => held.has(k) ? '<span class="chip">im Depot</span>' : plan.has(k) ? '<span class="chip blue">im Plan</span>' : '';
+  const rows = xs.map(({r, f}) => {
+    const open = S.scx === r.key, w = FIT_W[ansOf('priority')] || FIT_W.upside;
+    const bars = Object.keys(w).map(k => `<div class="fb"><span>${FACTOR_DE[k]}</span><i><b style="width:${Math.round((r.c[k] ?? 0.5) * 100)}%"></b></i><em>${nf(w[k] * 100, 0)} %</em></div>`).join('');
+    const tracked = !!(D(r.key).hist || A(r.key).price);
+    return `<tr data-act="scx" data-key="${esc(r.key)}" class="${open ? 'open' : ''}"><td>${fitBadge(f)}</td><td>${nameCell(r.key, r.theme)} ${tagOf(r.key)}</td>
+      <td class="r num ${sign(r.r6)}">${r.r6 == null ? '–' : pctS(r.r6, 0)}</td><td class="r num hm ${sign(r.est90)}">${r.est90 == null ? '–' : pctS(r.est90, 0)}</td>
+      <td class="r num hm">${r.rev_g == null ? '–' : pctS(r.rev_g, 0)}${r.accel === 'schneller' ? ' ↗' : r.accel === 'langsamer' ? ' ↘' : ''}</td>
+      <td class="r num hm ${sign(r.ev)}">${r.ev == null ? '–' : pctS(r.ev, 0)}</td><td class="r hm">${r.rating ? `<span class="score t${tierOf(r.rating)}">${r.rating}</span>` : '–'}</td>
+      <td class="r">${chgA(r.chg5)}</td></tr>
+      ${open ? `<tr class="xrow"><td colspan="8"><div class="cx"><div><p class="sh" style="margin-top:0">Dafür</p><ul class="dots">${(r.pros || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>–</li>'}</ul>
+        <p class="sh">Dagegen</p><ul class="dots">${(r.cons || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>nichts Auffälliges</li>'}</ul></div>
+        <div><p class="sh" style="margin-top:0">Faktoren (Gewicht)</p><div class="fbars">${bars}</div>
+        <div class="btnrow" style="margin-top:12px">${tracked ? `<button class="btn sm" data-act="open" data-key="${esc(r.key)}">Details</button>` : ''}${(S.pf.watchlist || []).some(x => keyOf(x.kind, x.symbol) === r.key) || held.has(r.key) ? '' : `<button class="btn sm ghost" data-act="scwatch" data-key="${esc(r.key)}">Auf die Watchlist</button>`}</div></div></div></td></tr>` : ''}`;
+  }).join('');
+  return card('Kandidaten', `Aktien aus KI und Halbleitern, die zu deinem Profil passen könnten · ${dateDe((S.screen || {}).updated)}`, `<div class="tblwrap"><table class="tbl cand"><thead><tr><th>Für dich</th><th>Titel</th><th class="r">6 Mon. ggü. S&amp;P</th><th class="r hm">Schätzung 90 T.</th><th class="r hm">Umsatz</th><th class="r hm">Erwartungswert</th><th class="r hm">Punkte</th><th class="r">5 Tage</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${more ? `<div class="btnrow"><button class="btn sm ghost" data-act="scall">Alle ${list.length} zeigen</button></div>` : ''}
+    <p class="hint">„Für dich“ (1 bis 10): Momentum, Schätzungsänderungen und Überraschungen, Wachstum (↗ beschleunigt, ↘ lässt nach), Qualität, Stärke im KI-Umfeld, dazu Bewertung als Sicherheitsnetz und Erwartungswert aus der Spanne der Analystenziele; gewichtet nach deinem Vorrang, mit Abzügen für Spekulatives, Defensives und gesenkte Schätzungen. „Punkte“: günstig oder teuer, mit eingepreistem gegen erwartetes Wachstum. Zeile antippen für Gründe. Eine Auswahl, keine Kaufempfehlung. Keine Anlageberatung.</p>`,
+    seg('scf', ['Neu für dich', 'Alle', 'KI-Kern', 'Rücksetzer'], fl), 'span12');
+}
+function playCard() {
+  const mode = S.rcm || (prof().plan ? 'plan' : 'depot'), pb = playbook(ruleCheck(mode));
+  return card('Wenn … dann', 'Deine Regeln und was davon heute zutrifft', `<div class="rules">${pb.map(r => `<div class="rule ${r.on ? 'on' : ''}">${stIcon(r.on ? 'warn' : 'ok')}<div><b>Wenn ${esc(r.when)}</b><div class="x">Dann: ${esc(r.then)}</div>${r.now ? `<div class="m">Heute: ${esc(r.now)}</div>` : ''}</div></div>`).join('')}</div>
+    <p class="hint">Regeln aus deinem Profil. Gelb heißt: trifft gerade zu. Keine Anlageberatung.</p>`, '', 'span7');
+}
+function eventsCard() {
+  const ev = ((S.screen || {}).events || []).slice(0, 12);
+  return card('Hinweise', 'Was sich bei Plan, Depot und Kandidaten getan hat', ev.length ? `<div class="rows tight">${ev.map(e => `<button class="row" data-act="${D(e.key).hist ? 'open' : 'scx'}" data-key="${esc(e.key)}"><div class="l"><div class="t">${tag(e.key)}</div><div class="m">${esc(e.text)}</div></div><div class="r small muted">${dateDe(e.day)}${e.important ? ' · Push' : ''}</div></button>`).join('')}</div>`
+    : '<p class="empty">Noch keine Hinweise.</p>', '', 'span5');
+}
+function vStrat(c) {
+  const pr = prof();
+  if (!pr.answers) return `<div class="grid">${card('Deine Strategie', 'Noch kein Profil', `<p class="body">Beantworte ein paar Fragen. Danach filtert die App Aktien, die zu dir passen könnten, und prüft dein Depot gegen deine Regeln.</p>
+    <div class="btnrow"><button class="btn" data-act="startprof">Profil anlegen</button></div>`)}</div>`;
+  const sum = strategySummary();
+  return `<div class="g12">
+    ${card('Deine Strategie', `${esc(pr.source || 'Profil')}${pr.updated ? ' · zuletzt geändert ' + dateDe(pr.updated) : ''}`, `<p class="body strong">${sum.s.map(esc).join(' ')}</p>
+      ${sum.t.length ? `<p class="sh">Spannungen in deinem Profil</p><div class="rules">${sum.t.map(t => `<div class="rule">${stIcon('warn')}<div class="x">${esc(t)}</div></div>`).join('')}</div>` : ''}
+      ${pr.text ? `<details class="qdone"><summary>Dein Profil im Wortlaut</summary><p class="body small">${esc(pr.text)}</p></details>` : ''}`, '', 'span7')}
+    ${questionsCard()}
+    ${planCard()}
+    ${guardCard()}
+    ${checkCard()}
+    ${eventsCard()}
+    ${candCard()}
+    ${playCard()}
+  </div><p class="hint" style="margin-top:14px">Alles hier ist eine regelbasierte Auswahl nach deinen eigenen Angaben, keine Anlageberatung und keine Kaufempfehlung.</p>`;
+}
 function vInsight(c) {
   const keys = insightKeys(c);
   const stocks = keys.filter(k => !isCoin(k) && !isFund(k)).map(key => ({key}));
@@ -744,6 +841,23 @@ function profileCard(key) {
   if (en) return card(title, 'Beschreibung von Yahoo, auf Englisch. Die deutsche Fassung kommt mit der nächsten Recherche.', `<p class="body">${esc(en)}</p>`);
   return '';
 }
+// Detailansicht: Passung für dich (Strategie) und Wachstum und Vision (eingepreist gegen erwartet, Plan der Firma laut Recherche)
+function fitCard(key, v, ai) {
+  const sr = scrRow(key), f = fitOf(sr), vis = (v || {}).vision || {}, pl = (ai || {}).plan;
+  if (!sr && vis.implied == null && !pl) return '';
+  const w = FIT_W[ansOf('priority')] || FIT_W.upside;
+  const head = sr && prof().answers ? `<div class="ratehead">${fitBadge(f, 'big')}<div class="ratemain"><div class="ratelabel">${f == null ? 'Passt nach deinen Antworten nicht' : `Für dich: ${fitPts(f)} von 10`}</div>
+    <div class="muted small">${esc(sr.theme)} · nach deinen Faktoren und deinem Profil</div></div></div>
+    <div class="cx" style="margin-top:12px"><div><ul class="dots">${(sr.pros || []).map(x => `<li class="pos">${esc(x)}</li>`).join('')}${(sr.cons || []).map(x => `<li class="neg">${esc(x)}</li>`).join('')}</ul></div>
+    <div class="fbars">${Object.keys(w).map(k => `<div class="fb"><span>${FACTOR_DE[k]}</span><i><b style="width:${Math.round((sr.c[k] ?? 0.5) * 100)}%"></b></i><em>${nf(w[k] * 100, 0)} %</em></div>`).join('')}</div></div>` : '';
+  const vz = vis.implied != null ? `<p class="sh">Wachstum und Vision</p><div class="tiles" style="margin:0">${tile('Im Kurs steckt', pctS(vis.implied, 0) + ' pro Jahr', 'Gewinnwachstum, das der Kurs voraussetzt')}${tile('Erwartet', pctS(vis.expected, 0) + ' pro Jahr', esc(vis.source || ''))}
+    ${tile('Abstand', pctS(vis.diff, 0), vis.diff >= 3 ? 'weniger eingepreist als erwartet' : vis.diff > -3 ? 'passt zur Erwartung' : 'mehr eingepreist als erwartet', sign(vis.diff))}</div>` : '';
+  const pz = pl ? `<div class="rows" style="margin-top:8px">${pl.goal ? `<div class="row"><div class="l"><div class="t">Plan der Firma</div><div class="x">${esc(pl.goal)}</div></div></div>` : ''}
+    ${pl.analysts ? `<div class="row"><div class="l"><div class="t">Was Analysten sagen</div><div class="x">${esc(pl.analysts)}</div></div></div>` : ''}
+    <div class="row"><div class="l"><div class="t">Realistisch? <span class="chip ${pl.realistic === 'ja' ? 'good' : pl.realistic === 'nein' ? 'bad' : 'warn'}">${esc(pl.realistic || '–')}</span> <span class="chip">${esc({'zu wenig': 'noch nicht voll eingepreist', passend: 'angemessen eingepreist', 'zu viel': 'mehr als eingepreist'}[pl.priced_in] || '')}</span></div>${pl.why ? `<div class="x">${esc(pl.why)}</div>` : ''}</div></div></div>` : '';
+  return card(sr && prof().answers ? 'Passt das zu dir?' : 'Wachstum und Vision', '', head + vz + pz +
+    `<p class="tiny muted" style="margin:10px 0 0">Im Kurs steckt: welches Gewinnwachstum pro Jahr nötig ist, damit sich der heutige Kurs in 5 Jahren mit 9 % im Jahr lohnt, wenn die Aktie dann das 20-Fache ihres Gewinns wert ist (Reverse-DCF nach Mauboussin). Vision darf eingepreist sein, wenn sie realistisch ist: Dann zählen hohe Bewertungskennzahlen nur halb. Keine Anlageberatung.</p>`);
+}
 function vAsset(key) {
   S.sheetKey = key;
   const a = A(key), d = D(key), ai = AI(key).claude, gr = grokOf(key), c = calc(), p = c.pos.find(x => x.key === key && x.qty > 1e-12);
@@ -762,6 +876,7 @@ function vAsset(key) {
       ${aiChip(ai) ? `<div class="rateai"><div class="tiny muted">Recherche</div>${aiChip(ai)}</div>` : ''}</div>
       <div class="reasons">${(v.reasons || []).map(x => `<div class="${x.p > 0 ? 'plus' : x.p < 0 ? 'minus' : 'zero'}"><i>${x.p > 0 ? '+' : x.p < 0 ? '−' : '○'}</i><span>${esc(x.text)}${x.w != null && x.w > 0 && x.w < 1 && x.p ? ` <em>${x.w >= 0.5 ? 'zählt halb' : 'zählt wenig'}</em>` : ''}</span></div>`).join('')}</div>
       <p class="tiny muted" style="margin:10px 0 0">${r == null ? 'Ohne Kennzahlen gibt es keine Punkte, nur ein Wort zur Kurslage. ' : 'Plus spricht für günstig, Minus für teuer. Kennzahlen zählen voll. Ein gefallener Kurs zählt nur, wenn die Kennzahlen positiv sind und der Markt überreagiert hat: Der Kurs fiel deutlich stärker als die Gewinnschätzungen (bei Coins: die Einnahmen). Wurden die Schätzungen stark gesenkt, gibt es höchstens 5 oder 6 Punkte. '}Faustregel, keine Anlageberatung.</p></section>`; }
+  h += fitCard(key, v, ai);
   if (p) h += card('Deine Position', '', `<div class="tiles" style="margin:0">${tile('Wert', eur(p.value), nf(p.weight, 1) + ' % vom Depot')}${tile('Gewinn', eurS(p.pnl), pctS(p.pnlPct), sign(p.pnl))}
     ${tile('Stück', nf(p.qty, p.qty % 1 ? 4 : 0), 'Einstand ' + eur(p.cost / p.qty) + ' je Stück')}${tile('Heute', eurS(p.dayEur), '', sign(p.dayEur))}</div>`);
   if ((d.levels || []).length || (ai && (ai.buy_zones || []).length)) h += card('Nachkauf-Zonen', 'Kurse, an denen ein Nachkauf naheliegt',
@@ -883,6 +998,13 @@ document.addEventListener('click', async ev => {
   else if (act === 'cmp') { S.cmp = v; render(); }
   else if (act === 'hide') { S.hide = !S.hide; try { localStorage.setItem('depot_hide', S.hide ? '1' : ''); } catch (e) { /* egal */ } render(); if (S.sheetKey) vAsset(S.sheetKey); }
   else if (act === 'hv') { S.hv = v; render(); }
+  else if (act === 'ans') { const q = QUESTIONS.find(x => x.id === id); if (q) { const val = q.o.find(o => String(o[0]) === v)[0]; S.pf.profile = S.pf.profile || {}; S.pf.profile.answers = Object.assign({}, S.pf.profile.answers, {[id]: val}); S.pf.profile.updated = new Date().toISOString().slice(0, 10); await savePf('Antwort gespeichert'); } }
+  else if (act === 'startprof') { S.pf.profile = {answers: {}, updated: new Date().toISOString().slice(0, 10), source: 'Eigene Antworten'}; await savePf('Profil angelegt'); }
+  else if (act === 'rcm') { S.rcm = {Plan: 'plan', Depot: 'depot', Beides: 'both'}[v]; render(); }
+  else if (act === 'scf') { S.scf = v; S.scAll = false; render(); }
+  else if (act === 'scall') { S.scAll = true; render(); }
+  else if (act === 'scx') { S.scx = S.scx === key ? null : key; if (S.tab !== 'strat') { S.tab = 'strat'; S.scf = 'Alle'; S.scAll = true; } render(); }
+  else if (act === 'scwatch') { const [k, sy] = key.split(':'); S.pf.watchlist.push({id: uid(), kind: k, symbol: sy, name: nameOf(key)}); await savePf('Auf der Watchlist. Kennzahlen und Recherche kommen mit dem nächsten Tageslauf.'); }
   else if (act === 'smk') { S.smk = v === 'Bitcoin' ? 'btc' : 'stocks'; render(); }
   else if (act === 'dep') { setDep(v); render(); }
   else if (act === 'alloc') { S.alloc = v; render(); }
@@ -966,7 +1088,7 @@ document.addEventListener('keydown', ev => {
   if (ev.key === 'Enter' && ev.target.matches('tr[data-act]')) ev.target.click();
   if (ev.key === 'Escape' && !$('#sheet').hidden) closeSheet();
   if (ev.key === '/' && !ev.target.matches('input,textarea,select') && $('#q')) { ev.preventDefault(); $('#q').focus(); }
-  // Tastenkürzel am PC: 1 bis 5 wechseln den Reiter, B verbirgt oder zeigt die Beträge
+  // Tastenkürzel am PC: 1 bis 6 wechseln den Reiter, B verbirgt oder zeigt die Beträge
   if (!ev.target.matches('input,textarea,select') && !ev.metaKey && !ev.ctrlKey && !ev.altKey && $('#sheet').hidden) {
     const t = TABS[+ev.key - 1];
     if (t) { S.tab = t[0]; render(); window.scrollTo(0, 0); }

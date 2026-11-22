@@ -66,6 +66,10 @@ def stock_prompt(a, q, d, today):
              "52-Wochen-Tief": (d.get("tech") or {}).get("low52"), "200-Tage-Linie": (d.get("tech") or {}).get("sma200"),
              "technische Nachkauf-Zonen": [x["price"] for x in d.get("levels") or []],
              "IR-Seite laut Yahoo": fund.get("ir_website") or fund.get("website")}
+    vis = (d.get("valuation") or {}).get("vision") or {}
+    if vis.get("implied") is not None:
+        facts["vom Kurs vorausgesetztes Gewinnwachstum pro Jahr in % (eigene Rechnung: 5 Jahre, danach KGV 20, 9 % Rendite)"] = vis["implied"]
+        facts["erwartetes Gewinnwachstum pro Jahr in % (" + vis.get("source", "") + ")"] = vis.get("expected")
     facts = {k: v for k, v in facts.items() if v not in (None, "", [])}
     return f"""Heute ist {today}. Analysiere die Aktie {a['symbol']} ({q.get('name') or a.get('name') or ''}) für einen Privatanleger.
 
@@ -73,7 +77,11 @@ Recherchiere mit der Websuche, bevorzugt auf der Investor-Relations-Seite des Un
 1. die zuletzt gemeldeten Quartalszahlen (Umsatz, Gewinn je Aktie, Vergleich zu Vorjahr und Erwartungen, Ausblick),
 2. den Termin der nächsten Quartalszahlen,
 3. die Dividende: Höhe je Aktie, Rhythmus, nächster Ex-Tag und Zahltag,
-4. wie die Aktie im Vergleich zur eigenen Historie und zu Wettbewerbern bewertet ist.
+4. wie die Aktie im Vergleich zur eigenen Historie und zu Wettbewerbern bewertet ist,
+5. den Plan der Firma: Ziele und Fahrplan des Managements (Umsatzziele, Produkte, Märkte, Größe des Marktes) und
+   was Analysten großer Häuser dazu sagen. Prüfe wie ein Wachstumsinvestor (Erwartungen im Kurs nach Mauboussin,
+   dauerhafter Vorsprung, Kapitalrendite, Schätzungsänderungen): Ist der Plan realistisch umsetzbar, und wie viel davon
+   steckt schon im Kurs? Vision darf eingepreist sein, wenn sie realistisch ist.
 
 Bekannte Kennzahlen (Stand heute): {json.dumps(facts, ensure_ascii=False)}
 
@@ -84,6 +92,8 @@ an denen ein Nachkauf sinnvoll wäre, jeweils mit Begründung. Das ist eine Eins
 Struktur:
 {{"summary": "2–3 Sätze zur Lage des Unternehmens",
  "business": {{"what": "1–2 einfache Sätze, was das Unternehmen tut", "money": "1–2 Sätze, womit es sein Geld verdient, mit groben Anteilen der Sparten"}},
+ "plan": {{"goal": "1–2 Sätze: was sich die Firma vorgenommen hat, mit Zahlen", "analysts": "1–2 Sätze: wie Analysten den Plan sehen, Spanne der Meinungen",
+   "realistic": "ja|teilweise|nein", "priced_in": "zu wenig|passend|zu viel", "why": "2 Sätze, warum"}},
  "verdict": "unterbewertet|fair|überbewertet", "score": 5, "confidence": "niedrig|mittel|hoch",
  "valuation_reasoning": "3–4 Sätze, warum",
  "last_quarter": {{"period": "z. B. Q3 2026", "date": "YYYY-MM-DD", "revenue": "", "revenue_growth": "", "eps": "", "vs_expectations": "", "guidance": "", "highlights": ["2–4 Punkte"], "source_url": ""}},
@@ -195,7 +205,8 @@ def due_keys(assets, res, daily, pos, today, refresh_days=None):
         age = _age_days(old.get("at"))
         earn = (daily.get("assets") or {}).get(key, {}).get("earnings_date")
         fresh_numbers = bool(earn and old.get("at") and old["at"][:10] < earn <= today)
-        if age >= days or fresh_numbers:
+        no_plan = key.startswith("stock:") and old.get("at") and "plan" not in old and old.get("verdict")   # ältere Recherche ohne Plan der Firma
+        if age >= days or fresh_numbers or no_plan:
             todo.append((key, age))
     todo.sort(key=lambda x: (0 if (pos.get(x[0]) or {}).get("qty", 0) > 0 else 1, -x[1]))
     return [k for k, _ in todo]

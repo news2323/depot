@@ -119,7 +119,7 @@ class YahooFundamentals:
     """Kennzahlen über quoteSummary. Yahoo sperrt Rechenzentren gelegentlich aus: dann bleibt alles leer
     und die KI-Recherche liefert die Zahlen."""
 
-    MODULES = ("summaryDetail,defaultKeyStatistics,financialData,calendarEvents,assetProfile,earningsTrend,"
+    MODULES = ("summaryDetail,defaultKeyStatistics,financialData,calendarEvents,assetProfile,earningsTrend,earningsHistory,"
                "recommendationTrend,upgradeDowngradeHistory,insiderTransactions,topHoldings")
 
     def __init__(self):
@@ -192,6 +192,7 @@ class YahooFundamentals:
             "summary_en": (prof.get("longBusinessSummary") or "")[:900] or None,
         }
         out.update(_eps_trend(d.get("earningsTrend")))
+        out.update(_surprises(d.get("earningsHistory")))
         extra = {"insider": _insider(d.get("insiderTransactions")),
                  "analyst": _analyst(d.get("recommendationTrend"), d.get("upgradeDowngradeHistory")),
                  "sectors": _sectors(d.get("topHoldings"))}
@@ -307,6 +308,20 @@ def _sectors(th):
     return w
 
 
+def _surprises(mod):
+    """Überraschungen bei den letzten (bis zu 4) Quartalszahlen: Gewinn je Aktie gegen die Erwartung."""
+    rows = []
+    for h in (mod or {}).get("history") or []:
+        g = lambda k: fnum(h[k].get("raw")) if isinstance(h.get(k), dict) else fnum(h.get(k))
+        act, est = g("epsActual"), g("epsEstimate")
+        if act is not None and est is not None and est > 0:
+            rows.append((act / est - 1) * 100)
+    if not rows:
+        return {}
+    rows = rows[-4:]
+    return {"surprise_avg": round(sum(rows) / len(rows), 1), "beats": sum(1 for x in rows if x > 0), "beats_n": len(rows)}
+
+
 def _eps_trend(mod):
     """Wie sich die Gewinnschätzung der Analysten für das nächste Geschäftsjahr in 30 und 90 Tagen verändert hat.
     Das ist der beste frei verfügbare Hinweis darauf, ob sich am inneren Wert etwas geändert hat."""
@@ -324,6 +339,14 @@ def _eps_trend(mod):
                "est_up_30d": num("upLast30days"), "est_down_30d": num("downLast30days")}
         if d30 is not None:
             out["est_eps_30d"] = d30
+        # Erwartetes Wachstum laut Analysten: Gewinn je Aktie nächstes Jahr, Umsatz nächstes Jahr, Gewinn pro Jahr über 5 Jahre
+        gr = lambda x: fnum(x.get("raw")) if isinstance(x, dict) else fnum(x)
+        for name, per, sub in (("est_g_1y", "+1y", None), ("est_g_5y", "+5y", None), ("rev_g_1y", "+1y", "revenueEstimate"),
+                               ("rev_g_0y", "0y", "revenueEstimate")):
+            src = trend.get(per) or {}
+            v = gr((src.get(sub) or {}).get("growth")) if sub else gr(src.get("growth"))
+            if v is not None and -1 < v < 10:
+                out[name] = round(v * 100, 1)
         # Prozent nur, wenn beide Werte positiv sind. Bei Verlusten ist eine Prozentänderung irreführend.
         if now > 0 and d90 > 0:
             out["est_chg_90d"] = (now / d90 - 1) * 100
