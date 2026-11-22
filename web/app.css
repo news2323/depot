@@ -645,3 +645,41 @@ small .sep{font-style:normal}
 .lage .tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
 .lage .tile .v .chip{font-size:13px}
 @media(max-width:760px){.lage .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Strategie „Heute“ (überarbeitet 22.11.2026): Kopf, Ideal-Depot als Liste mit Balken, nächste Schritte */
+.shero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px 32px;align-items:center}
+.shero-t{display:flex;align-items:center;gap:10px;font-size:28px;font-weight:700;letter-spacing:-.025em;color:var(--ink);margin:6px 0 6px}
+.shero-l p{margin:0;font-size:14px;line-height:1.5;color:var(--ink2);max-width:640px}
+.sdot{width:11px;height:11px;border-radius:50%;background:var(--ink3);flex:none;box-shadow:0 0 0 4px color-mix(in srgb,var(--ink3) 18%,transparent)}
+.sdot.warn{background:var(--warn);box-shadow:0 0 0 4px var(--warn-bg)}.sdot.good{background:var(--up);box-shadow:0 0 0 4px var(--up-bg)}
+.shero-r{display:flex;gap:10px}
+.kv{background:var(--surface2);border-radius:16px;padding:12px 16px;min-width:120px;display:flex;flex-direction:column;gap:2px}
+.kv span{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)}
+.kv b{font-size:24px;font-weight:650;letter-spacing:-.02em;color:var(--ink)}.kv b small{font-size:14px;font-weight:600;color:var(--ink3)}
+.kv b.neg{color:var(--down)}.kv>small{font-size:12px;color:var(--ink3)}
+.abar{display:flex;gap:3px;height:12px;margin:2px 0 6px}
+.abar i{display:block;border-radius:4px;min-width:4px}
+.abar i.res{background:repeating-linear-gradient(135deg,var(--surface3) 0 4px,var(--surface2) 4px 8px)}
+.ilist{display:flex;flex-direction:column}
+.irow{display:grid;grid-template-columns:4px 28px 28px minmax(0,1fr) auto 96px;align-items:center;gap:12px;padding:11px 0;border:0;border-bottom:1px solid var(--line);background:none;text-align:left;width:100%;cursor:pointer;font:inherit;color:inherit}
+.irow:last-child{border-bottom:0}.irow:hover .irow-n b{color:var(--accent)}
+.irow .cdot{width:4px;height:30px;border-radius:2px}
+.irow .lg{width:28px;height:28px;font-size:12px;border-radius:8px}
+.irow-n{min-width:0}.irow-n b{display:block;font-size:14.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.irow-n small{display:block;font-size:12px;color:var(--ink3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.irow-v{text-align:right}.irow-v b{display:block;font-size:14.5px;font-weight:650}.irow-v small{display:block;font-size:12px;color:var(--ink3);margin-top:2px;white-space:nowrap}
+.steps{list-style:none;margin:0;padding:0}
+.steps>li{display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.steps>li:first-child{padding-top:2px}.steps>li:last-child{border-bottom:0;padding-bottom:0}
+.sn{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12.5px;font-weight:700;background:var(--accent-bg);color:var(--accent)}
+.sh2{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:2px 0 8px}.sh2 b{font-size:14.5px}.sh2 span{font-size:12.5px;color:var(--ink3);text-align:right}
+.srows{display:flex;flex-direction:column}
+.srow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border:0;background:none;width:100%;cursor:pointer;font:inherit;color:inherit}
+.srow b{font-size:14px}
+.how .dots li{margin:6px 0;color:var(--ink2);font-size:13.5px;line-height:1.5}
+.evl .row .m{font-size:12.5px}
+@media(max-width:760px){
+  .shero{grid-template-columns:1fr}.shero-t{font-size:24px}
+  .shero-r{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.kv{min-width:0;padding:10px 12px}.kv b{font-size:20px}
+  .irow{grid-template-columns:4px 26px minmax(0,1fr) auto 78px;gap:10px}.irow .score{display:none}.irow .lg{width:26px;height:26px}
+}

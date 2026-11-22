@@ -273,6 +273,7 @@ def events(rows, prev, pf, ans, others=None, fg=None, ideal_keys=()):
     today = datetime.date.today()
     held = _held(pf)
     watch = {asset_key(w.get("kind") or "stock", str(w.get("symbol") or "").upper()) for w in pf.get("watchlist") or []}
+    tmin = {"ai": 0.6, "tech": 0.4, "none": 0.0}.get(ans.get("themes") or "ai", 0.6)
     style = ans.get("style") or "dip"
     plan = set(ideal_keys)      # Titel des Ideal-Depots Jakob
     old = {r["key"]: r for r in ((prev or {}).get("list") or []) + ((prev or {}).get("other") or [])}
@@ -306,7 +307,8 @@ def events(rows, prev, pf, ans, others=None, fg=None, ideal_keys=()):
     for r in rows + (others or []):
         m, o = r.get("mom") or {}, old.get(r["key"]) or {}
         om = o.get("mom") or {}
-        mine, stock = r["key"] in held or r["key"] in plan or r["key"] in watch, "c" in r
+        stock = "c" in r       # Watchlist nur im Schwerpunkt (KI-Umfeld), wie das Ideal-Depot
+        mine = r["key"] in held or r["key"] in plan or (r["key"] in watch and stock and r["c"]["theme"] >= tmin)
         if m.get("state") == "on" and m.get("since", 99) <= 5 and om.get("state") != "on" and (mine or r["key"] in top) \
                 and not (r.get("flags") or {}).get("cut"):
             est = r.get("est90")
