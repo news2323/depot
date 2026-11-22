@@ -750,11 +750,15 @@ def run(ans, plan_syms):
     add_strat("mom", "Nur Momentum", "Kauf nur mit Signal, freie Plätze als Reserve, Verkauf wenn es Besseres gibt", run_strat("mom", daily=True))
     add_strat("now", "Deine Regeln heute", "Momentum zuerst, Ausnahmen bei Angst unter 25 und Halbleiter −20 %, Verkauf wenn es Besseres gibt", run_strat("mom_ex", daily=True))
 
-    def calmar(x):        # Rendite je Rückgang, ein Rückgang über 35 % (deine Grenze) kostet extra
+    limit = float(ans.get("max_dd") or 35)
+
+    def calmar(x):
+        """Ziel der Optimierung (Jakobs Vorgabe vom 22.11.2026: Rendite zählt, die Grenze für Rückgänge ist kein Gesetz):
+        Rendite pro Jahr in Prozent; jeder Prozentpunkt Rückgang über seiner Grenze (Frage max_dd) kostet 2 Punkte."""
         if not x or x["cagr"] is None:
             return -99
         dd = abs(x["dd"])
-        return round(x["cagr"] / max(dd, 10) - (0.05 * (dd - 35) if dd > 35 else 0), 3)
+        return round(x["cagr"] - (2.0 * (dd - limit) if dd > limit else 0), 2)
 
     # ------------------------------------------------- Gewichtung der Faktoren: welche Rangfolge traf besser?
     schemes = []
@@ -881,26 +885,38 @@ def run(ans, plan_syms):
             effect[k].append({"v": v, "train": round(sum(r["s_train"] for r in xs) / len(xs), 3), "test": round(sum(r["s_test"] for r in xs) / len(xs), 3),
                               "cagr_test": round(sum(r["test"]["cagr"] for r in xs if r["test"]) / len(xs), 1),
                               "dd_test": round(sum(r["test"]["dd"] for r in xs if r["test"]) / len(xs), 1)})
-    chosen = dict(cur)
-    for k in keys:
-        base = next(x for x in effect[k] if x["v"] == cur[k])
-        better = [x for x in effect[k] if x["train"] > base["train"] and x["test"] > base["test"]]
-        if better:
-            chosen[k] = max(better, key=lambda x: min(x["train"] - base["train"], x["test"] - base["test"]))["v"]
-    # Reihenfolge bei Ausnahmen: sind beide in beiden Hälften fast gleich gut, zählt die Passung (Jakobs eigene Faktoren)
-    e = {x["v"]: x for x in effect["ex_sort"]}
-    if chosen["ex_sort"] == "rs" and abs(e["fit"]["train"] - e["rs"]["train"]) < 0.1 and abs(e["fit"]["test"] - e["rs"]["test"]) < 0.1:
-        chosen["ex_sort"] = "fit"
-    # Gegenprobe mit genau dieser Kombination: eine geänderte Regel bleibt nur, wenn sie hier in beiden Hälften besser ist
+    # Auswahl Schritt für Schritt von deinen Regeln aus: je Schritt eine Regel ändern, aber nur, wenn genau diese Kombination
+    # in beiden Hälften besser wird (der größte Gewinn in der schwächeren Hälfte zuerst). So zählt, wie Regeln zusammenwirken;
+    # die Mittelwerte oben zeigen nur die Richtung.
     by_p = {tuple(sorted(r["p"].items())): r for r in results}
-    for k in keys:
-        if k == "ex_sort" or chosen[k] == cur[k]:
-            continue
-        a, b = by_p.get(tuple(sorted(chosen.items()))), by_p.get(tuple(sorted(dict(chosen, **{k: cur[k]}).items())))
-        if a and b and not (a["s_train"] > b["s_train"] and a["s_test"] > b["s_test"]):
-            chosen[k] = cur[k]
+    get = lambda p: by_p.get(tuple(sorted(p.items())))
+    lo_hi = [int(x) for x in str(ans.get("positions") or "6-8").split("-")]
+
+    def climb(allowed):
+        ch, steps = dict(cur), []
+        while True:
+            here, best = get(ch), None
+            for k in keys:
+                for v in grid[k]:
+                    r = get(dict(ch, **{k: v})) if v != ch[k] and allowed(k, v) else None
+                    if r:
+                        gain = min(r["s_train"] - here["s_train"], r["s_test"] - here["s_test"])
+                        if gain > 0 and (best is None or gain > best[0]):
+                            best = (gain, k, v, r)
+            if not best:
+                return ch, steps
+            ch[best[1]] = best[2]
+            steps.append({"k": best[1], "v": best[2], "train": best[3]["s_train"], "test": best[3]["s_test"]})
+    # gewählt wird nur innerhalb deines Profils (Zahl der Titel); die freie Variante steht als Hinweis daneben
+    chosen, path = climb(lambda k, v: k != "n_pos" or min(lo_hi) <= v <= max(lo_hi))
+    free, free_path = climb(lambda k, v: True)
+    # Reihenfolge bei Ausnahmen: nach Passung (Jakobs eigene Faktoren), außer die Stärke im Thema ist in beiden Hälften besser
+    here, alt = get(chosen), get(dict(chosen, ex_sort="fit"))
+    if chosen["ex_sort"] == "rs" and alt and not (here["s_train"] > alt["s_train"] and here["s_test"] > alt["s_test"]):
+        chosen["ex_sort"] = "fit"
+        path.append({"k": "ex_sort", "v": "fit", "train": alt["s_train"], "test": alt["s_test"], "tie": True})
     now = next(x for x in strategies if x["id"] == "now")
-    opt = {"current": {"p": cur, "train": now["train"], "test": now["test"], "s_train": calmar(now["train"]), "s_test": calmar(now["test"])},
+    opt = {"current": {"p": cur, "train": now["train"], "test": now["test"], "s_train": calmar(now["train"]), "s_test": calmar(now["test"])}, "path": path, "free": dict(get(free), desc=None) if free != chosen and get(free) else None,
            "scheme": scheme, "schemes": schemes, "buckets_new": buckets_new, "chosen": next(r for r in results if r["p"] == chosen), "best_train": results[0], "top": results[:15], "effect": effect,
            "n": len(results), "train_end": TRAIN_END}
 
@@ -924,6 +940,8 @@ def run(ans, plan_syms):
         if sid == "opt":
             opt_nav = [1.0] + res["nav_d"]
     opt["desc_current"], opt["desc_chosen"] = desc(cur), desc(chosen)
+    if opt.get("free"):
+        opt["free"]["desc"] = desc(opt["free"]["p"])
     # Wie viel in der Strategie, damit der größte Rückgang höchstens 35 % beträgt (Rest Reserve, täglich ausgeglichen)
     exposure = []
     for e in (1.0, 0.9, 0.8, 0.75, 0.7, 0.6, 0.5):
@@ -951,7 +969,7 @@ def run(ans, plan_syms):
                         "r12": round(r12 * 100, 1) if r12 is not None else None,
                         "ex6": round((r6 - e6) * 100, 1) if r6 is not None and e6 is not None else None})
         titles.append({"sym": sym, "strip": strip, "events": evs})
-    out = {"updated": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+    out = {"updated": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z", "limit": limit,
             "period": {"start": iso[months[0]], "end": iso[months[-1]], "train_end": TRAIN_END},
             "universe": len(stocks), "sec": len(sec), "signals": sig, "market": market, "market_any": market_any,
             "buckets": bucket_out, "groups": groups, "strategies": strategies, "opt": opt, "titles": titles,
@@ -991,11 +1009,13 @@ def findings(b):
                     "Aussagekräftig ist der Vergleich mit allen Titeln der Auswahl. Ohne Steuern, Kosten 0,1 %% je Umschichtung." % (
                         yr, _e(S["now"]["save"][1]), _e(S["now"]["save"][0]), _e(S["opt"]["save"][0]), _e(S["ew"]["save"][0]),
                         _e(S["soxx"]["save"][0]) if "soxx" in S else "–", _e(S["sp"]["save"][0]))))
-    ok = next((x for x in o.get("exposure") or [] if x["dd"] >= -35), None)
-    out.append(("Rückgang", "Größter Rückgang deiner Regeln %s, optimiert %s, S&P 500 %s. Deine Grenze von −35 %% hielt keine Variante mit diesen Titeln.%s" % (
-        _p(S["now"]["all"]["dd"]), _p(S["opt"]["all"]["dd"]), _p(S["sp"]["all"]["dd"]),
-        " Mit %d %% in der Strategie und %d %% Reserve wären es %s gewesen, bei %s pro Jahr." % (ok["share"], 100 - ok["share"], _p(ok["dd"]), _p(ok["cagr"]))
-        if ok and ok["share"] < 100 else "")))
+    lim = b.get("limit") or 35
+    ok = next((x for x in o.get("exposure") or [] if x["dd"] >= -lim), None)
+    full = (o.get("exposure") or [{}])[0]
+    out.append(("Rückgang", "Größter Rückgang deiner Regeln %s, optimiert %s, S&P 500 %s. Deine Grenze: −%d %%.%s" % (
+        _p(S["now"]["all"]["dd"]), _p(S["opt"]["all"]["dd"]), _p(S["sp"]["all"]["dd"]), lim,
+        " Voll investiert blieben die optimierten Regeln darin, bei %s pro Jahr." % _p(full.get("cagr")) if ok and ok["share"] == 100 else
+        " Mit %d %% in der Strategie und %d %% Reserve wären es %s gewesen, bei %s pro Jahr." % (ok["share"], 100 - ok["share"], _p(ok["dd"]), _p(ok["cagr"])) if ok else "")))
     m, d_up, d_dn, tb = sig["mom_on"].get("126") or {}, sig["dip_up"].get("126") or {}, sig["dip_down"].get("126") or {}, sig["trend_break"].get("252") or {}
     base6, base12 = sig["any"].get("126") or {}, sig["any"].get("252") or {}
     out.append(("Signale je Titel", "Geht das Momentum-Signal an, lief der Titel danach etwa so wie nach einem beliebigen Tag "

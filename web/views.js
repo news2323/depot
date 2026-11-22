@@ -799,7 +799,7 @@ const pc = (v, d = 0) => v == null ? '–' : pctS(v, d);
 function btResult(b) {
   const S2 = Object.fromEntries(b.strategies.map(x => [x.id, x])), te = b.period.train_end.slice(0, 4);
   const rows = BT_ORDER.map(id => S2[id]).filter(Boolean).map(x => `<tr class="${x.id === 'opt' || x.id === 'now' ? 'strong' : ''}"><td><b>${esc(x.name)}</b><div class="ts hm">${esc(x.desc)}</div></td>
-    <td class="r num ${sign(x.all.cagr)}">${pc(x.all.cagr)}</td><td class="r num ${x.all.dd < -35 ? 'neg' : ''}">${pc(x.all.dd)}</td>
+    <td class="r num ${sign(x.all.cagr)}">${pc(x.all.cagr)}</td><td class="r num ${x.all.dd < -(b.limit || 35) ? 'neg' : ''}">${pc(x.all.dd)}</td>
     <td class="r num hm">${x.train ? pc(x.train.cagr) : '–'}</td><td class="r num hm">${x.test ? pc(x.test.cagr) : '–'}</td><td class="r num">${bigE(x.save[0])}</td></tr>`).join('');
   return `<div class="btf">${(b.findings || []).map(f => `<div><b>${esc(f.t)}</b><p>${esc(f.x)}</p></div>`).join('')}</div>
     <p class="sh">1.000 € im Monat seit ${dateDe(b.period.start)}</p><div class="chart" id="ch-bt"></div><div id="lg-bt"></div>
@@ -847,15 +847,17 @@ function btRules(b) {
   const o = b.opt, cu = o.current, ch = o.chosen, te = b.period.train_end.slice(0, 4), same = JSON.stringify(cu.p) === JSON.stringify(ch.p);
   const col = (t, d, x) => `<div><b>${t}</b><p class="small" style="margin:4px 0 8px">${esc(d)}</p><div class="tiles two" style="margin:0">${tile('bis ' + te, pc(x.train.cagr) + ' pro Jahr', 'Rückgang ' + pc(x.train.dd))}${tile('ab ' + te, pc(x.test.cagr) + ' pro Jahr', 'Rückgang ' + pc(x.test.dd), '')}</div></div>`;
   const eff = Object.entries(o.effect).map(([k, vs]) => vs.map((x, i) => `<tr><td>${i === 0 ? `<b>${BT_P[k][0]}</b>` : ''}</td><td>${esc(BT_P[k][1](x.v))} ${x.v === cu.p[k] ? '<span class="chip">heute</span>' : ''}${x.v === ch.p[k] && x.v !== cu.p[k] ? '<span class="chip good">neu</span>' : ''}</td>
-    <td class="r num">${nf(x.train, 2)}</td><td class="r num">${nf(x.test, 2)}</td></tr>`).join('')).join('');
-  const ex = (o.exposure || []).map(x => `<tr class="${x.dd >= -35 && (o.exposure.find(y => y.dd >= -35) || {}).share === x.share ? 'strong' : ''}"><td>${x.share} % investiert, ${100 - x.share} % Reserve</td><td class="r num">${pc(x.cagr)}</td><td class="r num ${x.dd < -35 ? 'neg' : ''}">${pc(x.dd)}</td></tr>`).join('');
+    <td class="r num">${nf(x.train, 1)}</td><td class="r num">${nf(x.test, 1)}</td></tr>`).join('')).join('');
+  const lim = b.limit || 35, ex = (o.exposure || []).map(x => `<tr class="${(o.exposure.find(y => y.dd >= -lim) || {}).share === x.share ? 'strong' : ''}"><td>${x.share} % investiert, ${100 - x.share} % Reserve</td><td class="r num">${pc(x.cagr)}</td><td class="r num ${x.dd < -lim ? 'neg' : ''}">${pc(x.dd)}</td></tr>`).join('');
   const adopt = !same && (ansOf('sell') !== {signal: 'signal', trend: 'trend', better: 'better'}[ch.p.exit] || ansOf('regime') !== (ch.p.regime === 'half' ? 'half' : 'full'));
   return `<div class="btcmp">${col('Deine Regeln heute', o.desc_current, cu)}${col(same ? 'Keine bessere Variante' : 'Optimiert', o.desc_chosen, ch)}</div>
     ${adopt ? `<div class="btnrow" style="margin-top:12px"><button class="btn" data-act="btadopt">Optimierte Regeln übernehmen</button><span class="small muted">setzt in deinem Profil Verkauf und Marktfilter wie links beschrieben</span></div>` : ''}
+    ${o.free ? `<div class="note" style="margin-top:12px"><b>Außerhalb deines Profils:</b> ${esc(o.free.desc)}: bis ${te} ${pc(o.free.train.cagr)} pro Jahr (Rückgang ${pc(o.free.train.dd)}), ab ${te} ${pc(o.free.test.cagr)} (Rückgang ${pc(o.free.test.dd)}). Nicht gewählt, weil die Zahl der Titel außerhalb deiner Antwort liegt.</div>` : ''}
+    ${(o.path || []).length ? `<p class="sh">So kam die Auswahl zustande</p><ol class="small" style="margin:4px 0 0;padding-left:20px">${o.path.map(p => `<li>${BT_P[p.k][0]}: ${esc(BT_P[p.k][1](p.v))}${p.tie ? ' (nicht in beiden Hälften schlechter, darum nach deinen Faktoren)' : ''} <span class="muted num">· danach ${nf(p.train, 1)} bis ${te}, ${nf(p.test, 1)} ab ${te}</span></li>`).join('')}</ol>` : ''}
     <p class="sh">So wirkt jede Regel im Schnitt aller ${nf(o.n, 0)} Varianten</p>
     <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Regel</th><th>Einstellung</th><th class="r">bis ${te}</th><th class="r">ab ${te}</th></tr></thead><tbody>${eff}</tbody></table></div>
-    <p class="hint">Zahl = Rendite pro Jahr geteilt durch den größten Rückgang (über 35 % mit Abzug). Höher ist besser. Gewählt wurde nur, was in beiden Hälften besser war, damit die Regeln nicht bloß die Vergangenheit nachzeichnen.</p>
-    <p class="sh">Deine Grenze von −35 %: wie viel Reserve nötig gewesen wäre</p>
+    <p class="hint">Zahl = Rendite pro Jahr in Prozent; jeder Prozentpunkt Rückgang über deiner Grenze (−${b.limit || 35} %) kostet 2 Punkte. Höher ist besser. Gewählt wurde Schritt für Schritt von deinen Regeln aus und nur, was mit genau dieser Kombination in beiden Hälften besser war, damit die Regeln nicht bloß die Vergangenheit nachzeichnen.</p>
+    <p class="sh">Deine Grenze von −${b.limit || 35} %: Rückgang je nach Aktienanteil</p>
     <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Optimierte Regeln mit</th><th class="r">pro Jahr</th><th class="r">größter Rückgang</th></tr></thead><tbody>${ex}</tbody></table></div>`;
 }
 function btCard() {
@@ -880,14 +882,15 @@ function idealCard() {
   const other = [...new Set([...Object.keys(plan), ...Object.keys(jh)])].filter(k => !ib.items.some(x => x.key === k));
   const same = ib.items.length && ib.items.every(it => plan[it.key]) && Object.keys(plan).length === ib.items.length;
   const body = `<div class="tiles" style="margin-top:0">${tile('In Aktien', nf(ib.share * 100, 0) + ' %', `${ib.items.length} von ${ib.n} Plätzen`)}${tile('Reserve', nf(ib.reserve * 100, 0) + ' %', eur(ib.base * ib.reserve, 0))}
-      ${tile('Je Titel', ib.items.length ? eur(ib.items[0].eur, 0) : '–', 'gleich gewichtet')}${tile('Rückgang im Backtest', `etwa −${mdd} %`, ib.filt ? 'mit Marktfilter weniger' : 'deine Grenze')}</div>
+      ${tile('Je Titel', ib.items.length ? eur(ib.items[0].eur, 0) : '–', 'gleich gewichtet')}${(() => { const xr = ((S.bt || {}).opt || {}).exposure, row = xr && xr.slice().sort((a, b) => Math.abs(a.share - ib.share * 100) - Math.abs(b.share - ib.share * 100))[0];
+      return tile('Rückgang im Backtest', row ? pctS(row.dd, 0) : 'bis −' + mdd + ' %', row ? `bei ${row.share} % in Aktien, deine Grenze −${mdd} %` : 'deine Grenze'); })()}</div>
     ${ib.ex.on ? `<div class="note warn" style="margin:0 0 10px"><b>Ausnahme aktiv:</b> ${esc(ib.ex.text)}. Kein Titel muss dafür ein Signal haben, die Schätzungen müssen halten.</div>` : ib.filt ? `<div class="note" style="margin:0 0 10px"><b>Marktfilter aktiv:</b> Halbleiter ${pctS(ib.sm.ma200, 0)} zur 200-Tage-Linie, darum nur halb investiert.</div>` : ''}
     <div class="tblwrap"><table class="tbl"><thead><tr><th>Für dich</th><th>Titel</th><th>Regel</th><th class="r">Anteil</th><th class="r">Betrag</th><th class="r hm">Dein Plan</th><th class="r hm">Im Depot</th><th class="hm">Warum</th></tr></thead><tbody>
       ${ib.items.map(it => row(it.key, it.w, it.eur, viaTxt(it.via))).join('')}
       ${other.map(k => row(k, 0, 0, plan[k] ? 'in deinem Plan, nicht im Ideal-Depot' : 'im Depot, nicht im Ideal-Depot')).join('')}
-      <tr><td></td><td><b>Reserve</b><div class="ts">Geld für Rücksetzer und Ausnahmen</div></td><td></td><td class="r num">${nf(ib.reserve * 100, 1)} %</td><td class="r num">${eur(ib.base * ib.reserve, 0)}</td><td class="r hm">–</td><td class="r hm">–</td><td class="hm"></td></tr></tbody></table></div>
+      ${ib.reserve < 0.005 ? '' : `<tr><td></td><td><b>Reserve</b><div class="ts">Geld für Rücksetzer und Ausnahmen</div></td><td></td><td class="r num">${nf(ib.reserve * 100, 1)} %</td><td class="r num">${eur(ib.base * ib.reserve, 0)}</td><td class="r hm">–</td><td class="r hm">–</td><td class="hm"></td></tr>`}</tbody></table></div>
     ${ib.items.length && !same ? `<div class="btnrow" style="margin-top:12px"><button class="btn" data-act="idealplan">Als Plan übernehmen</button><span class="small muted">ersetzt deinen Plan (${Object.keys(plan).length} Titel) durch das Ideal-Depot; der alte bleibt gespeichert</span></div>` : ''}
-    <p class="hint">So würden deine Regeln das Depot Jakob heute aufstellen. Titel im Depot bleiben, solange deine Verkaufsregel sie hält. Freie Plätze bekommen Titel aus dem KI-Umfeld mit Momentum-Signal, bei einer Ausnahme auch ohne Signal; jeweils beste Passung zuerst, Gewinnschätzungen müssen halten. Gleich gewichtet wie im Backtest; ${nf(ib.share * 100, 0)} % in Aktien, weil der größte Rückgang im Backtest damit bei etwa −${mdd} % blieb. Basis ${eur(ib.base, 0)} (Plan oder Depot Jakob, das Größere). Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`;
+    <p class="hint">So würden deine Regeln das Depot Jakob heute aufstellen. Titel im Depot bleiben, solange deine Verkaufsregel sie hält. Freie Plätze bekommen Titel aus dem KI-Umfeld mit Momentum-Signal, bei einer Ausnahme auch ohne Signal; jeweils beste Passung zuerst, Gewinnschätzungen müssen halten. Gleich gewichtet wie im Backtest; ${nf(ib.share * 100, 0)} % in Aktien nach deiner Grenze für Rückgänge (−${mdd} %). Basis ${eur(ib.base, 0)} (Plan oder Depot Jakob, das Größere). Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`;
   return card('Ideal-Depot Jakob', 'Nach dem Backtest und deinen Regeln, Stand heute', body, '', 'span7');
 }
 function todoCard() {
