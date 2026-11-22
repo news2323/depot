@@ -700,57 +700,29 @@ function questionsCard() {
     `${open.slice(0, 4).map(qhtml).join('')}${open.length > 4 ? `<p class="hint">Noch ${open.length - 4} weitere Fragen, sobald diese beantwortet sind.</p>` : ''}
     <details class="qdone"><summary>Deine Antworten (${done.length})</summary>${done.map(qhtml).join('')}</details>`, '', 'span5');
 }
-function planCard() {
-  const pl = prof().plan, rows = planRows();
-  if (!pl || !rows.length) return '';
-  const tot = rows.reduce((s, r) => s + r.eur, 0), val = rows.reduce((s, r) => s + r.value, 0), bd = basketDD(rows.map(r => ({key: r.key, w: r.pct})));
-  const mdd = +ansOf('max_dd') || 35;
-  const bought = Object.keys(jakobHeld()).length;
-  return card('Depot Jakob: Plan', `${esc(pl.note || 'Geplante Käufe')} · Stand ${dateDe(pl.date)} · ${bought ? bought + ' Titel im Depot Jakob' : 'noch nicht gekauft'}${pl.reserve_pct ? ' · ' + pl.reserve_pct + ' % Reserve' : ''}`, `<div class="tiles" style="margin-top:0">
-      ${tile('Geplant', eur(tot, 0), rows.length + ' Aktien')}${tile('Wert heute', eur(val, 0), 'wenn am ' + dateDe(pl.date) + ' gekauft', sign(val - tot))}
-      ${tile('Größter Rückgang', bd ? pctS(bd.dd, 0) : '–', bd ? `in ${nf(bd.years, 0)} Jahren, deine Grenze −${mdd} %` : 'Verlauf fehlt noch', bd && bd.dd < -mdd ? 'neg' : '')}${tile('Unter dem Hoch', bd ? pctS(bd.fromHigh, 0) : '–', 'die Mischung heute')}</div>
-    <div class="tblwrap"><table class="tbl"><thead><tr><th>Für dich</th><th>Titel</th><th>Regel</th><th class="r">Anteil</th><th class="r hm">Betrag</th><th class="r">Seit Plan</th><th class="r hm">Punkte</th><th class="hm">Lage</th></tr></thead><tbody>
-    ${rows.map(r => { const sr = scrRow(r.key) || {}, f = fitOf(scrRow(r.key));
-      const mo = momOf(r.key) || {};
-      const lage = sr.flags && sr.flags.cut ? '<span class="chip bad">Schätzung gesenkt</span>' : mo.state === 'on' ? `<span class="chip good">Momentum-Signal${mo.since <= 10 ? ' neu' : ''}</span>`
-        : sr.chg5 != null && sr.chg5 <= -8 && !(sr.est90 < -2) ? `<span class="chip warn">Rücksetzer ${pctS(sr.chg5, 0)}, Schätzung hält</span>`
-        : sr.earnings && isoToDay(sr.earnings) - todayDay() <= 14 && isoToDay(sr.earnings) >= todayDay() ? `<span class="chip blue">Zahlen ${dateDe(sr.earnings)}</span>`
-        : mo.state === 'fade' ? '<span class="chip warn">Momentum lässt nach</span>' : mo.state === 'down' ? `<span class="chip">kein Signal · ${pctS(mo.from_high, 0)} vom Hoch</span>` : '<span class="muted">–</span>';
-      return `<tr data-act="open" data-key="${esc(r.key)}"><td>${fitBadge(f)}</td><td>${nameCell(r.key, sr.theme || '')}</td><td>${ruleChip(r.key)}</td><td class="r num">${nf(r.pct, 0)} %</td><td class="r num hm">${eur(r.eur, 0)}</td>
-        <td class="r">${chgA(r.chg)}</td><td class="r hm">${score(r.key)}</td><td class="hm">${lage}</td></tr>`; }).join('')}</tbody></table></div>
-    <p class="hint">„Seit Plan“: Kurs in Euro seit dem Plantag. „Größter Rückgang“: diese Gewichte mit den Kursen der Vergangenheit zurückgerechnet. „Momentum-Signal“: über der 50- und 200-Tage-Linie, nahe am Jahreshoch, stärker als der S&amp;P 500. Faustregel, keine Anlageberatung.</p>`, '', 'span7');
-}
-function rateCard() {
-  const r = monthlyRate();
-  if (!r) return '';
-  const mon = new Date().toLocaleDateString('de-DE', {month: 'long'}), L = {mom: 'Momentum zuerst', gap: 'was am meisten fehlt', split: 'nach Gewicht auf alle'}[r.rule];
-  const body = r.pick.length ? `<div class="rows tight">${r.pick.map(x => `<button class="row" data-act="open" data-key="${esc(x.key)}"><div class="l">${nameCell(x.key, `Ziel ${eur(x.target, 0)} · im Depot ${eur(x.have, 0)}`, ruleTag(x.key) || momTag(x.key))}</div><div class="r num"><b>${eur(x.eur, 0)}</b></div></button>`).join('')}</div>` : '';
-  return card('Monatsrate', `${eur(r.m, 0)} im ${mon} · Regel: ${L}`, `${r.viaEx ? `<div class="note warn" style="margin:0 0 10px"><b>Ausnahme aktiv:</b> ${esc(r.ex.text)}.</div>` : ''}<p class="body small" style="margin:0 0 8px">${esc(r.why)}</p>${body}
-    ${r.pick.length ? `<p class="small" style="margin:8px 0 0">${eur(r.mm, 0)} in Aktien, ${eur(r.reserve, 0)} als Reserve.</p>` : ''}
-    <p class="hint">Ziel ist das Ideal-Depot Jakob: ${nf(r.share * 100, 0)} % in Aktien, der Rest Reserve (deine Grenze für Rückgänge${r.half ? ', dazu der Marktfilter' : ''}). Bei ${eur(+ansOf('min_pos') || 500, 0)} Mindestgröße je Position geht der Aktienteil auf höchstens ${r.k} Titel im Monat${r.rule === 'split' ? ' (als Sparplan auf alle)' : ''}. Hauptdepot und Fenja zählen nicht mit. Regel aus deinen Antworten, keine Anlageberatung.</p>`, '', 'span5');
-}
+const rcMode = () => S.rcm || (Object.keys(jakobHeld()).length ? 'depot' : 'ideal');
 function checkCard() {
-  const mode = S.rcm || (prof().plan ? 'plan' : 'depot'), rc = ruleCheck(mode);
+  const mode = rcMode(), rc = ruleCheck(mode);
   const body = rc.rows.length ? `<div class="rules">${rc.rows.map(r => `<div class="rule">${stIcon(r.state)}<div><b>${esc(r.title)}</b><div class="x">${esc(r.text)}</div></div></div>`).join('')}</div>` : '<p class="empty">Keine Positionen für diese Auswahl.</p>';
-  return card('Regel-Check', 'Deine Positionen gegen dein Profil', body + `<p class="hint">Gezählt werden Einzelaktien${ansOf('etf') === 'base' ? ' und ETFs' : ''}${ansOf('crypto') === 'part' ? ' und Krypto' : ''}, beim Depot nur das Depot Jakob. Keine Anlageberatung.</p>`,
-    seg('rcm', ['Plan', 'Depot', 'Beides'], {plan: 'Plan', depot: 'Depot', both: 'Beides'}[mode]), 'span7');
+  return card('Regel-Check', 'Ideal-Depot oder Depot Jakob gegen dein Profil', body + `<p class="hint">Gezählt werden Einzelaktien${ansOf('etf') === 'base' ? ' und ETFs' : ''}${ansOf('crypto') === 'part' ? ' und Krypto' : ''}. Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`,
+    seg('rcm', ['Ideal-Depot', 'Depot Jakob'], mode === 'ideal' ? 'Ideal-Depot' : 'Depot Jakob'), 'span7');
 }
 function guardCard() {
-  const mode = S.rcm || (prof().plan ? 'plan' : 'depot'), g = guardRails(ruleCheck(mode));
+  const mode = rcMode(), g = guardRails(ruleCheck(mode));
   return card('Leitplanken', 'Erwartungswert ja, Totalverlust nein', `<div class="rules">${g.map(r => `<div class="rule">${stIcon(r.state)}<div><b>${esc(r.title)}</b><div class="x">${esc(r.text)}</div></div></div>`).join('')}</div>
     <p class="hint">Sam Bankman-Fried (FTX, Alameda) entschied nach dem Erwartungswert: Er setzte auf alles, was im Schnitt mehr bringt, auch wenn ein Totalverlust möglich war, und wollte mehr setzen, als das Kelly-Maß erlaubt. Dazu kamen Hebel, Geld der Kunden und wenig Prüfung vor Beteiligungen. 2023 wurde er wegen Betrugs verurteilt. Übernommen wird nur das Denken in Erwartungswerten: Chance zu Risiko fließt in die Passung ein. Seine Fehler stehen hier als Regeln.</p>`, '', 'span5');
 }
 function candCard() {
   const list = ((S.screen || {}).list || []).map(r => ({r, f: fitOf(r)})).filter(x => x.f != null);
   if (!list.length) return card('Kandidaten', 'Aktien, die zu dir passen könnten', '<p class="empty">Der Filter läuft mit dem nächsten Tageslauf.</p>', '', 'span12');
-  const held = new Set(Object.keys(jakobHeld())), plan = new Set(planRows().map(r => r.key));
+  const held = new Set(Object.keys(jakobHeld())), plan = new Set(((idealBook() || {}).items || []).map(x => x.key));
   const fl = S.scf || 'Neu für dich';
   let xs = list.filter(x => fl === 'Alle' ? true : fl === 'Neu für dich' ? !held.has(x.r.key) && !plan.has(x.r.key)
     : fl === 'Momentum' ? (x.r.mom || {}).state === 'on' || (x.r.mom || {}).state === 'none' && (x.r.mom || {}).met >= 3
     : fl === 'Rücksetzer' ? x.r.chg5 != null && x.r.chg5 <= -8 && !x.r.flags.cut : x.r.c.theme >= 0.9);
   xs.sort((a, b) => fl === 'Momentum' ? ((b.r.mom || {}).state === 'on') - ((a.r.mom || {}).state === 'on') || b.f - a.f : b.f - a.f);
   const more = xs.length > 15 && !S.scAll; if (more) xs = xs.slice(0, 15);
-  const tagOf = k => held.has(k) ? '<span class="chip">im Depot Jakob</span>' : plan.has(k) ? '<span class="chip blue">im Plan</span>' : '';
+  const tagOf = k => held.has(k) ? '<span class="chip">im Depot Jakob</span>' : plan.has(k) ? '<span class="chip blue">im Ideal-Depot</span>' : '';
   const aiOn = list.some(x => (x.r.mom || {}).state === 'on' && x.r.c.theme >= 0.6);
   const note = fl === 'Momentum' && xs.length && !aiOn ? '<div class="note" style="margin:0 0 10px">Im KI- und Halbleiterumfeld hat gerade kein Titel das Signal. Momentum haben vor allem Titel außerhalb deines Schwerpunkts, darum die niedrige Passung. Typisch nach einem starken Rückgang bei Tech.</div>' : '';
   const empty = !xs.length && fl === 'Momentum' ? '<p class="empty">Gerade hat kein Titel der Auswahl das Momentum-Signal und keiner ist nah dran. Typisch nach einem starken Rückgang: Das Signal kommt erst, wenn die Kurse wieder über ihre 200-Tage-Linie steigen.</p>' : '';
@@ -774,16 +746,16 @@ function candCard() {
     seg('scf', ['Neu für dich', 'Momentum', 'Alle', 'KI-Kern', 'Rücksetzer'], fl), 'span12');
 }
 function playCard() {
-  const mode = S.rcm || (prof().plan ? 'plan' : 'depot'), pb = playbook(ruleCheck(mode));
+  const mode = rcMode(), pb = playbook(ruleCheck(mode));
   return card('Wenn … dann', 'Deine Regeln und was davon heute zutrifft', `<div class="rules">${pb.map(r => `<div class="rule ${r.on ? 'on' : ''}">${stIcon(r.on ? 'warn' : 'ok')}<div><b>Wenn ${esc(r.when)}</b><div class="x">Dann: ${esc(r.then)}</div>${r.now ? `<div class="m">Heute: ${esc(r.now)}</div>` : ''}</div></div>`).join('')}</div>
-    <p class="hint">Regeln aus deinem Profil. Gelb heißt: trifft gerade zu. Keine Anlageberatung.</p>`, '', 'span7');
+    <p class="hint">Regeln aus deinem Profil. Gelb heißt: trifft gerade zu. Keine Anlageberatung.</p>`, '', 'span12');
 }
 function eventsCard() {
   const ev = ((S.screen || {}).events || []).slice(0, 12);
   const evRow = e => /^(fg|depot):/.test(e.key) ? `<div class="row"><div class="l"><div class="t"><b>${esc(e.symbol)}</b></div><div class="m">${esc(e.text)}</div></div><div class="r small muted">${dateDe(e.day)}${e.important ? ' · Push' : ''}</div></div>`
     : `<button class="row" data-act="${D(e.key).hist ? 'open' : 'scx'}" data-key="${esc(e.key)}"><div class="l"><div class="t">${tag(e.key)}</div><div class="m">${esc(e.text)}</div></div><div class="r small muted">${dateDe(e.day)}${e.important ? ' · Push' : ''}</div></button>`;
-  return card('Hinweise', 'Was sich bei Plan, Depot und Kandidaten getan hat', ev.length ? `<div class="rows tight">${ev.map(evRow).join('')}</div>`
-    : '<p class="empty">Noch keine Hinweise.</p>', '', 'span5');
+  return card('Hinweise', 'Was sich bei Ideal-Depot, Depot Jakob und Kandidaten getan hat · die letzten 8', ev.length ? `<div class="rows tight">${ev.slice(0, 8).map(evRow).join('')}</div>`
+    : '<p class="empty">Noch keine Hinweise.</p>', '', 'span12');
 }
 /* ---------------------------------------------------------------- Backtest (Jakobs Wunsch vom 22.11.2026)
    tracker/backtest.py → backtest.json: 10 Jahre, nur Daten, die es am jeweiligen Tag gab. Ansichten Ergebnis, Signale,
@@ -874,37 +846,49 @@ const viaTxt = v => ({ausnahme: 'Ausnahme: beste Passung, Schätzungen halten', 
 function idealCard() {
   const ib = idealBook();
   if (!ib) return '';
-  const jh = jakobHeld(), plan = Object.fromEntries(planRows().map(r => [r.key, r])), mdd = +ansOf('max_dd') || 35;
+  const jh = jakobHeld(), mdd = +ansOf('max_dd') || 35;
   const row = (key, w, amount, via) => { const sr = scrRow(key) || {}, f = fitOf(scrRow(key));
     return `<tr data-act="open" data-key="${esc(key)}"><td>${fitBadge(f)}</td><td>${nameCell(key, sr.theme || '', momTag(key))}</td><td>${ruleChip(key)}</td>
-      <td class="r num">${w ? nf(w * 100, 1) + ' %' : '–'}</td><td class="r num">${amount ? eur(amount, 0) : '–'}</td><td class="r num hm">${plan[key] ? nf(plan[key].pct, 0) + ' %' : '–'}</td>
+      <td class="r num">${w ? nf(w * 100, 1) + ' %' : '–'}</td><td class="r num">${amount ? eur(amount, 0) : '–'}</td>
       <td class="r num hm">${jh[key] ? eur(jh[key].value, 0) : '–'}</td><td class="small hm">${esc(via)}</td></tr>`; };
-  const other = [...new Set([...Object.keys(plan), ...Object.keys(jh)])].filter(k => !ib.items.some(x => x.key === k));
-  const same = ib.items.length && ib.items.every(it => plan[it.key]) && Object.keys(plan).length === ib.items.length;
-  const body = `<div class="tiles" style="margin-top:0">${tile('In Aktien', nf(ib.share * 100, 0) + ' %', `${ib.items.length} von ${ib.n} Plätzen`)}${tile('Reserve', nf(ib.reserve * 100, 0) + ' %', eur(ib.base * ib.reserve, 0))}
+  const other = Object.keys(jh).filter(k => !ib.items.some(x => x.key === k));
+  const body = `<div class="tiles" style="margin-top:0">${tile('In Aktien', nf(ib.share * 100, 0) + ' %', `${ib.items.length} von ${ib.n} Plätzen${ib.filt ? ', Marktfilter' : ''}`)}${ib.reserve >= 0.005 ? tile('Reserve', nf(ib.reserve * 100, 0) + ' %', eur(ib.base * ib.reserve, 0)) : ''}
       ${tile('Je Titel', ib.items.length ? eur(ib.items[0].eur, 0) : '–', 'gleich gewichtet')}${(() => { const xr = ((S.bt || {}).opt || {}).exposure, row = xr && xr.slice().sort((a, b) => Math.abs(a.share - ib.share * 100) - Math.abs(b.share - ib.share * 100))[0];
-      return tile('Rückgang im Backtest', row ? pctS(row.dd, 0) : 'bis −' + mdd + ' %', row ? `bei ${row.share} % in Aktien, deine Grenze −${mdd} %` : 'deine Grenze'); })()}</div>
-    ${ib.ex.on ? `<div class="note warn" style="margin:0 0 10px"><b>Ausnahme aktiv:</b> ${esc(ib.ex.text)}. Kein Titel muss dafür ein Signal haben, die Schätzungen müssen halten.</div>` : ib.filt ? `<div class="note" style="margin:0 0 10px"><b>Marktfilter aktiv:</b> Halbleiter ${pctS(ib.sm.ma200, 0)} zur 200-Tage-Linie, darum nur halb investiert.</div>` : ''}
-    <div class="tblwrap"><table class="tbl"><thead><tr><th>Für dich</th><th>Titel</th><th>Regel</th><th class="r">Anteil</th><th class="r">Betrag</th><th class="r hm">Dein Plan</th><th class="r hm">Im Depot</th><th class="hm">Warum</th></tr></thead><tbody>
+      return tile('Rückgang im Backtest', row ? pctS(row.dd, 0) : 'bis −' + mdd + ' %', `deine Grenze −${mdd} %`); })()}</div>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th>Für dich</th><th>Titel</th><th>Regel</th><th class="r">Anteil</th><th class="r">Betrag</th><th class="r hm">Im Depot</th><th class="hm">Warum</th></tr></thead><tbody>
       ${ib.items.map(it => row(it.key, it.w, it.eur, viaTxt(it.via))).join('')}
-      ${other.map(k => row(k, 0, 0, plan[k] ? 'in deinem Plan, nicht im Ideal-Depot' : 'im Depot, nicht im Ideal-Depot')).join('')}
-      ${ib.reserve < 0.005 ? '' : `<tr><td></td><td><b>Reserve</b><div class="ts">Geld für Rücksetzer und Ausnahmen</div></td><td></td><td class="r num">${nf(ib.reserve * 100, 1)} %</td><td class="r num">${eur(ib.base * ib.reserve, 0)}</td><td class="r hm">–</td><td class="r hm">–</td><td class="hm"></td></tr>`}</tbody></table></div>
-    ${ib.items.length && !same ? `<div class="btnrow" style="margin-top:12px"><button class="btn" data-act="idealplan">Als Plan übernehmen</button><span class="small muted">ersetzt deinen Plan (${Object.keys(plan).length} Titel) durch das Ideal-Depot; der alte bleibt gespeichert</span></div>` : ''}
-    <p class="hint">So würden deine Regeln das Depot Jakob heute aufstellen. Titel im Depot bleiben, solange deine Verkaufsregel sie hält. Freie Plätze bekommen Titel aus dem KI-Umfeld mit Momentum-Signal, bei einer Ausnahme auch ohne Signal; jeweils beste Passung zuerst, Gewinnschätzungen müssen halten. Gleich gewichtet wie im Backtest; ${nf(ib.share * 100, 0)} % in Aktien nach deiner Grenze für Rückgänge (−${mdd} %). Basis ${eur(ib.base, 0)} (Plan oder Depot Jakob, das Größere). Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`;
-  return card('Ideal-Depot Jakob', 'Nach dem Backtest und deinen Regeln, Stand heute', body, '', 'span7');
+      ${other.map(k => row(k, 0, 0, 'im Depot Jakob, nicht mehr im Ideal-Depot')).join('')}
+      ${ib.reserve < 0.005 ? '' : `<tr><td></td><td><b>Reserve</b><div class="ts">Geld für Rücksetzer und Ausnahmen</div></td><td></td><td class="r num">${nf(ib.reserve * 100, 1)} %</td><td class="r num">${eur(ib.base * ib.reserve, 0)}</td><td class="r hm">–</td><td class="hm"></td></tr>`}</tbody></table></div>
+    <p class="hint">So würden deine Regeln das Depot Jakob heute aufstellen. Titel im Depot bleiben, solange deine Verkaufsregel sie hält. Freie Plätze bekommen Titel aus dem KI-Umfeld mit Momentum-Signal, bei einer Ausnahme auch ohne Signal; jeweils beste Passung zuerst, Gewinnschätzungen müssen halten. Gleich gewichtet wie im Backtest; ${nf(ib.share * 100, 0)} % in Aktien nach deiner Grenze für Rückgänge (−${mdd} %). Basis ${eur(ib.base, 0)} (Startbetrag oder Depot Jakob, das Größere; Startbetrag unter Profil). Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`;
+  return card('Ideal-Depot Jakob', 'Die beste Aufstellung nach Backtest und deinen Regeln, Stand heute', body, '', 'span7');
 }
 function todoCard() {
   const ib = idealBook();
   if (!ib) return '';
-  const jh = jakobHeld(), keys = [...new Set([...ib.items.map(x => x.key), ...Object.keys(jh), ...planRows().map(r => r.key)])];
+  const jh = jakobHeld(), keys = [...new Set([...ib.items.map(x => x.key), ...Object.keys(jh)])];
   const rs = keys.map(k => ({key: k, r: ruleOf(k)})).filter(x => x.r), grp = w => rs.filter(x => x.r.word === w), me = monthEnd();
-  const sec = (w, note) => { const xs = grp(w); return xs.length ? `<p class="sh">${w}${note ? ` <span class="muted small">· ${note}</span>` : ''}</p><div class="rows tight">${xs.map(x => `<button class="row" data-act="open" data-key="${esc(x.key)}"><div class="l"><div class="t">${tag(x.key)}</div><div class="m">${esc(x.r.why[0])}</div></div><div class="r num">${x.r.eur ? `<b>${eur(x.r.eur, 0)}</b>` : ''}</div></button>`).join('')}</div>` : ''; };
-  const empty = !Object.keys(jh).length ? `<p class="body small" style="margin:0 0 6px">Depot Jakob ist noch leer. Zum Start nach dem Ideal-Depot: ${eur(ib.base * ib.share, 0)} in ${ib.items.length} Aktien, ${eur(ib.base * ib.reserve, 0)} Reserve. Buchungen dafür im Depot „Jakob“ eintragen.</p>` : '';
-  const wait = grp('Warten'), stat = ib.ex.on ? `<div class="note warn" style="margin:0 0 8px"><b>Ausnahme aktiv:</b> ${esc(ib.ex.text)}. Kaufen in Teilen, nur mit intakten Gewinnschätzungen.</div>`
-    : ib.filt ? `<div class="note" style="margin:0 0 8px"><b>Marktfilter aktiv:</b> Halbleiter ${pctS(ib.sm.ma200, 0)} zur 200-Tage-Linie, nur halb investiert.</div>` : '';
-  return card('Heute zu tun', 'Depot Jakob · was deine Regeln heute sagen', stat + empty + sec('Verkaufen', `zum Monatsende, ${WT[me.getDay()]} ${me.getDate()}.${me.getMonth() + 1}.`) + sec('Kaufen') + sec('Nachkaufen', 'Rücksetzer im Aufwärtstrend') + sec('Halten')
-    + (wait.length ? `<p class="sh">Warten</p><div class="tgs">${wait.map(x => tag(x.key)).join('')}</div>` : '')
-    + `<p class="hint">Kaufen und Verkaufen zum Monatsende wie im Backtest, Nachkaufen bei Rücksetzern sofort. Es zählt nur das Depot Jakob. Deine Regeln, keine Anlageberatung.</p>`, '', 'span5');
+  const line = x => `<button class="row" data-act="open" data-key="${esc(x.key)}"><div class="l"><div class="t">${tag(x.key)}</div><div class="m">${esc(x.r.why[0])}</div></div><div class="r num">${x.r.eur ? `<b>${eur(x.r.eur, 0)}</b>` : ''}</div></button>`;
+  const sec = (w, note) => { const xs = grp(w); return xs.length ? `<p class="sh"><span class="chip ${RULE_CLS[w]}">${w}</span>${note ? ` <span class="muted small">${note}</span>` : ''}</p><div class="rows tight">${xs.map(line).join('')}</div>` : ''; };
+  const empty = !Object.keys(jh).length ? `<p class="body small" style="margin:0 0 4px">Depot Jakob ist noch leer. Start nach dem Ideal-Depot: ${eur(ib.base * ib.share, 0)} in ${ib.items.length} Aktien${ib.reserve >= 0.005 ? `, ${eur(ib.base * ib.reserve, 0)} Reserve` : ''}. Käufe im Depot „Jakob“ eintragen.</p>` : '';
+  const hold = grp('Halten'), r = monthlyRate(), mon = new Date().toLocaleDateString('de-DE', {month: 'long'});
+  const rate = r ? `<p class="sh">Monatsrate ${mon} <span class="muted small">${eur(r.m, 0)}${r.reserve ? ` · davon ${eur(r.reserve, 0)} Reserve` : ''}</span></p>
+    ${r.pick.length ? `<div class="rows tight">${r.pick.map(x => `<button class="row" data-act="open" data-key="${esc(x.key)}"><div class="l"><div class="t">${tag(x.key)}</div><div class="m">Ziel ${eur(x.target, 0)}, im Depot ${eur(x.have, 0)}</div></div><div class="r num"><b>${eur(x.eur, 0)}</b></div></button>`).join('')}</div>` : `<p class="small muted">${esc(r.why)}</p>`}` : '';
+  const body = empty + sec('Verkaufen', `zum Monatsende, ${WT[me.getDay()]} ${me.getDate()}.${me.getMonth() + 1}.`) + (Object.keys(jh).length ? sec('Kaufen') : grp('Kaufen').length ? `<p class="sh"><span class="chip good">Kaufen</span> <span class="muted small">zum Start, je ${eur(ib.items[0].eur, 0)} · Beträge im Ideal-Depot</span></p><div class="tgs">${grp('Kaufen').map(x => tag(x.key)).join('')}</div>` : '')
+    + sec('Nachkaufen', 'Rücksetzer im Aufwärtstrend') + (hold.length ? `<p class="sh"><span class="chip blue">Halten</span></p><div class="tgs">${hold.map(x => tag(x.key)).join('')}</div>` : '') + rate;
+  return card('Heute zu tun', 'Depot Jakob', body + `<p class="hint">Kaufen und Verkaufen zum Monatsende wie im Backtest, Nachkaufen bei Rücksetzern sofort. Deine Regeln, keine Anlageberatung.</p>`, '', 'span5');
+}
+// Lage heute: warum die Regeln gerade so entscheiden (Angst und Gier, Halbleiter, Signale im KI-Umfeld)
+function lageCard() {
+  const ib = idealBook(), sm = (S.screen || {}).semis || {}, fg = (S.daily.market_fg || {}).value;
+  if (!ib) return '';
+  const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes') || 'ai'] ?? 0.6, list = ((S.screen || {}).list || []).filter(r => (r.c || {}).theme >= tmin);
+  const on = list.filter(r => (momOf(r.key) || r.mom || {}).state === 'on').length;
+  const mode = ib.ex.on ? ['warn', 'Ausnahme aktiv', 'Kaufen in Teilen, auch ohne Signal'] : ib.filt ? ['', 'Marktfilter aktiv', 'nur halb investiert'] : ['good', 'Normalbetrieb', 'Momentum zuerst'];
+  return `<section class="card span12 lage"><div class="tiles" style="margin:0">
+    ${tile('Regeln heute', `<span class="chip ${mode[0]}">${mode[1]}</span>`, mode[2])}
+    ${tile('Angst und Gier', fg == null ? '–' : fg, fg == null ? '' : fg < FEAR ? 'extreme Angst' : fg < 45 ? 'Angst' : fg <= 55 ? 'neutral' : 'Gier', fg != null && fg < FEAR ? 'neg' : '')}
+    ${tile('Halbleiter', sm.from_high != null ? pctS(sm.from_high, 0) : '–', sm.ma200 != null ? `vom Hoch · ${pctS(sm.ma200, 0)} zur 200-Tage-Linie` : 'vom Hoch', sm.from_high <= -20 ? 'neg' : '')}
+    ${tile('Momentum-Signal', `${on} von ${list.length}`, 'KI-Titel mit Signal')}</div></section>`;
 }
 // Detailansicht: was deine Regel für diesen Titel sagt, mit dem passenden Ergebnis aus dem Backtest
 function ruleCard(key) {
@@ -920,28 +904,27 @@ function ruleCard(key) {
     <ul class="dots" style="margin-top:10px">${r.why.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${note ? `<p class="small muted" style="margin:6px 0 0">${esc(note)}</p>` : ''}
     <p class="tiny muted" style="margin:8px 0 0">Was deine Regeln sagen (Ideal-Depot, Verkaufsregel, Ausnahmen), keine Empfehlung. Keine Anlageberatung.</p>`);
 }
+// Strategie in vier Bereichen (Jakobs Wunsch vom 22.11.2026: übersichtlicher): Heute, Kandidaten, Backtest, Profil
+const SV = ['Heute', 'Kandidaten', 'Backtest', 'Profil'];
+try { S.sv = localStorage.getItem('depot_sv') || 'Heute'; } catch (e) { S.sv = 'Heute'; }
 function vStrat(c) {
   const pr = prof();
   if (!pr.answers) return `<div class="grid">${card('Deine Strategie', 'Noch kein Profil', `<p class="body">Beantworte ein paar Fragen. Danach filtert die App Aktien, die zu dir passen könnten, und prüft dein Depot gegen deine Regeln.</p>
     <div class="btnrow"><button class="btn" data-act="startprof">Profil anlegen</button></div>`)}</div>`;
-  const sum = strategySummary(), ex = buyException();
-  return `<div class="g12">
-    ${card('Deine Strategie', `${esc(pr.source || 'Profil')}${pr.updated ? ' · zuletzt geändert ' + dateDe(pr.updated) : ''}`, `<p class="body strong">${sum.s.map(esc).join(' ')}</p>
-      ${ex.on && momStyle() ? `<div class="note warn"><b>Heute greift deine Ausnahme:</b> ${esc(ex.text)}. Nach deinen Regeln ein Kaufzeitpunkt, auch ohne Momentum-Signal: in Teilen und nur Titel mit intakten Gewinnschätzungen.</div>` : ''}
-      ${sum.t.length ? `<p class="sh">Spannungen in deinem Profil</p><div class="rules">${sum.t.map(t => `<div class="rule">${stIcon('warn')}<div class="x">${esc(t)}</div></div>`).join('')}</div>` : ''}
-      ${pr.text ? `<details class="qdone"><summary>Dein Profil im Wortlaut</summary><p class="body small">${esc(pr.text)}</p></details>` : ''}`, '', 'span7')}
-    ${questionsCard()}
-    ${idealCard()}
-    ${todoCard()}
-    ${planCard()}
-    ${rateCard()}
-    ${checkCard()}
-    ${guardCard()}
-    ${btCard()}
-    ${candCard()}
-    ${playCard()}
-    ${eventsCard()}
-  </div><p class="hint" style="margin-top:14px">Alles hier ist eine regelbasierte Auswahl nach deinen eigenen Angaben, keine Anlageberatung und keine Kaufempfehlung.</p>`;
+  if (S.bt === undefined) setTimeout(loadBacktest, 0);   // für den Rückgang im Ideal-Depot und die Detailansicht
+  const v = SV.includes(S.sv) ? S.sv : 'Heute', open = QUESTIONS.filter(q => ansOf(q.id) == null).length;
+  const nav = `<div class="depbar svbar">${seg('sv', SV, v)}${open ? `<span class="small muted">${open} ${open === 1 ? 'Frage' : 'Fragen'} offen unter Profil</span>` : ''}</div>`;
+  let body;
+  if (v === 'Kandidaten') body = candCard();
+  else if (v === 'Backtest') body = btCard();
+  else if (v === 'Profil') { const sum = strategySummary();
+    body = card('Deine Strategie', `Depot Jakob · ${esc(pr.source || 'Profil')}${pr.updated ? ' · geändert ' + dateDe(pr.updated) : ''}`, `<p class="body strong">${esc(sum.s[1] || '')}</p>
+      <p class="body small" style="margin-top:6px">${esc(sum.s[0].replace(/^Depot Jakob: /, ''))} ${esc(sum.s[2] || '')}</p>
+      ${sum.t.length ? `<details class="qdone"><summary>Spannungen in deinem Profil (${sum.t.length})</summary><div class="rules">${sum.t.map(t => `<div class="rule">${stIcon('warn')}<div class="x">${esc(t)}</div></div>`).join('')}</div></details>` : ''}
+      ${pr.text ? `<details class="qdone"><summary>Dein Profil im Wortlaut</summary><p class="body small">${esc(pr.text)}</p></details>` : ''}`, '', 'span7')
+      + questionsCard() + checkCard() + guardCard() + playCard(); }
+  else body = lageCard() + todoCard() + idealCard() + eventsCard();
+  return `${nav}<div class="g12">${body}</div><p class="hint" style="margin-top:14px">Regelbasierte Auswahl nach deinen eigenen Angaben, nur für das Depot Jakob. Keine Anlageberatung und keine Kaufempfehlung.</p>`;
 }
 function vInsight(c) {
   const keys = insightKeys(c);
@@ -1207,13 +1190,10 @@ document.addEventListener('click', async ev => {
   else if (act === 'hv') { S.hv = v; render(); }
   else if (act === 'ans') { const q = QUESTIONS.find(x => x.id === id); if (q) { const val = q.o.find(o => String(o[0]) === v)[0]; S.pf.profile = S.pf.profile || {}; S.pf.profile.answers = Object.assign({}, S.pf.profile.answers, {[id]: val}); S.pf.profile.updated = new Date().toISOString().slice(0, 10); await savePf('Antwort gespeichert'); } }
   else if (act === 'startprof') { S.pf.profile = {answers: {}, updated: new Date().toISOString().slice(0, 10), source: 'Eigene Antworten'}; await savePf('Profil angelegt'); }
-  else if (act === 'rcm') { S.rcm = {Plan: 'plan', Depot: 'depot', Beides: 'both'}[v]; render(); }
+  else if (act === 'rcm') { S.rcm = v === 'Ideal-Depot' ? 'ideal' : 'depot'; render(); }
+  else if (act === 'sv') { S.sv = v; try { localStorage.setItem('depot_sv', v); } catch (e) { /* egal */ } render(); window.scrollTo(0, 0); }
   else if (act === 'scf') { S.scf = v; S.scAll = false; render(); }
   else if (act === 'btv') { S.btv = v; render(); }
-  else if (act === 'idealplan') { const ib = idealBook(); if (ib && ib.items.length) { const pr = S.pf.profile || {};
-    S.pf.profile = Object.assign({}, pr, {plan_prev: pr.plan, updated: new Date().toISOString().slice(0, 10), plan: {date: new Date().toISOString().slice(0, 10), total: Math.round(ib.base),
-      note: 'Ideal-Depot nach den Backtest-Regeln', reserve_pct: Math.round(ib.reserve * 100), items: ib.items.map(it => ({kind: 'stock', symbol: it.key.split(':')[1], name: shortName(it.key), pct: Math.round(it.w * 1000) / 10, eur: Math.round(it.eur)}))}});
-    await savePf('Ideal-Depot als Plan übernommen'); } }
   else if (act === 'btadopt' && S.bt) { const ch = S.bt.opt.chosen.p, a = Object.assign({}, (S.pf.profile || {}).answers);
     if (ch.exit === 'signal' || ch.exit === 'trend' || ch.exit === 'better') a.sell = ch.exit;
     a.regime = ch.regime === 'half' ? 'half' : 'full';

@@ -638,3 +638,10 @@ small .sep{font-style:normal}
 .rw{font-weight:650}.rw.good{color:var(--up)}.rw.bad{color:var(--down)}.rw.teal{color:var(--c3)}.rw.blue{color:var(--accent)}
 .chip.big{font-size:15px;padding:6px 14px}
 .tgs{display:flex;flex-wrap:wrap;gap:6px 12px}
+
+/* Strategie: Bereiche und Lage heute */
+.svbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.svbar .seg button{padding-left:14px;padding-right:14px}
+.lage .tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+.lage .tile .v .chip{font-size:13px}
+@media(max-width:760px){.lage .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}

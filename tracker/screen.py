@@ -1,6 +1,6 @@
 """Strategie (Jakobs Wunsch vom 22.11.2026): Filter für Aktien, die zu seinem Profil passen könnten, und Hinweise aufs Handy.
 
-Das Profil steht in portfolio.json → profile (answers, plan). Der Filter läuft im Tageslauf über eine feste Auswahl von
+Das Profil steht in portfolio.json → profile (answers). Der Filter läuft im Tageslauf über eine feste Auswahl von
 Titeln aus dem KI- und Halbleiterumfeld plus alle beobachteten Aktien. Je Titel entstehen Bausteine von 0 bis 1, daraus die
 „Passung für dich“ (0 bis 100). Die App rechnet die Passung mit denselben Gewichten nach (web/app.js fitOf), damit
 Antworten im Profil sofort wirken: beide Stellen ändern.
@@ -268,13 +268,13 @@ def _held(pf):
 FEAR = 25   # Angst und Gier unter 25: extreme Angst (wie bei CNN und alternative.me)
 
 
-def events(rows, prev, pf, ans, others=None, fg=None):
+def events(rows, prev, pf, ans, others=None, fg=None, ideal_keys=()):
     """Neue Hinweise gegenüber dem letzten Lauf. Jeder Hinweis höchstens einmal in 7 Tagen."""
     today = datetime.date.today()
     held = _held(pf)
     watch = {asset_key(w.get("kind") or "stock", str(w.get("symbol") or "").upper()) for w in pf.get("watchlist") or []}
     style = ans.get("style") or "dip"
-    plan = {asset_key(x.get("kind") or "stock", str(x.get("symbol") or "").upper()) for x in ((pf.get("profile") or {}).get("plan") or {}).get("items") or []}
+    plan = set(ideal_keys)      # Titel des Ideal-Depots Jakob
     old = {r["key"]: r for r in ((prev or {}).get("list") or []) + ((prev or {}).get("other") or [])}
     seen = {(e["type"], e["key"]): e["day"] for e in (prev or {}).get("events") or []}
     top = [r for r in rows if r.get("fit") is not None and r["key"] not in held]
@@ -297,7 +297,7 @@ def events(rows, prev, pf, ans, others=None, fg=None):
             ms = (r.get("mom") or {}).get("state")
             trend = "" if style == "dip" or not ms else ", Aufwärtstrend hält (über der 200-Tage-Linie)" if ms != "down" else \
                 ", aber unter der 200-Tage-Linie: nach deiner Momentum-Regel erst bei neuem Signal"
-            add(r, "dip", "−%.0f %% in 5 Tagen, Gewinnschätzungen halten%s%s" % (-r["chg5"], trend, " (dein Plan)" if r["key"] in plan else ""), mine)
+            add(r, "dip", "−%.0f %% in 5 Tagen, Gewinnschätzungen halten%s%s" % (-r["chg5"], trend, " (Ideal-Depot)" if r["key"] in plan else ""), mine)
         if mine and r.get("est90") is not None and r["est90"] <= -5 and (not o or o.get("est90") is None or o["est90"] > -5):
             add(r, "cut", "Gewinnschätzung in 90 Tagen um %.0f %% gesenkt: These prüfen" % -r["est90"], True)
         if (mine or r["key"] in top) and r.get("est90") is not None and r["est90"] >= 10 and (not o or o.get("est90") is None or o["est90"] < 10):
@@ -313,7 +313,7 @@ def events(rows, prev, pf, ans, others=None, fg=None):
             add(r, "mom", "Momentum-Signal an: über 50- und 200-Tage-Linie, %s unter dem Jahreshoch, %s%s" % (
                 ("%.0f %%" % -m["from_high"]) if m.get("from_high") else "am Hoch",
                 "stärker als der Markt" if m.get("bench") else "Kurs im Plus",
-                (", Schätzungen steigen" if est is not None and est >= 3 else "") + (" (dein Plan)" if r["key"] in plan else "")), mine)
+                (", Schätzungen steigen" if est is not None and est >= 3 else "") + (" (Ideal-Depot)" if r["key"] in plan else "")), mine)
         if mine and m.get("state") == "down" and om.get("state") in ("on", "fade", "none") and (stock or o):
             add(r, "momoff", "Trend gebrochen: Kurs unter der 200-Tage-Linie%s" % (
                 ", nach deiner Momentum-Regel nicht nachkaufen" if style in ("first", "only") else ""), r["key"] in held)
@@ -353,7 +353,7 @@ def ideal(rows, pf, ans, semis, fg):
     ex = exception(ans, semis, fg)
     filt = ans.get("regime") == "half" and (semis or {}).get("above200") is False and not ex
     share = SHARE_BY_DD.get(int(ans.get("max_dd") or 35), 75) / 100.0 * (0.5 if filt else 1.0)
-    base = float((((pf.get("profile") or {}).get("plan") or {}).get("total")) or 5000)
+    base = float(ans.get("capital") or 5000)      # Startbetrag Depot Jakob (Frage capital)
     n = max(1, min(N, int(base * share // minp)))
     tmin = {"ai": 0.6, "tech": 0.4, "none": 0.0}.get(ans.get("themes") or "ai", 0.6)
     held = _held(pf)
@@ -385,11 +385,10 @@ def ideal(rows, pf, ans, semis, fg):
 def rule_words(rows, pf, ans, ib):
     """Wort je Aktie für das Depot Jakob: Kaufen, Nachkaufen, Halten, Verkaufen, Warten (wie ruleOf in der App, ohne Beträge)."""
     held, inid = _held(pf), {x["key"] for x in ib["items"]}
-    plan = {asset_key(x.get("kind") or "stock", str(x.get("symbol") or "").upper()) for x in ((pf.get("profile") or {}).get("plan") or {}).get("items") or []}
     sell, out = ans.get("sell") or "better", {}
     for r in rows:
         k = r["key"]
-        if k not in held and k not in inid and k not in plan:
+        if k not in held and k not in inid:
             continue
         st = (r.get("mom") or {}).get("state")
         cut = r["flags"]["cut"] or (r.get("est90") is not None and r["est90"] <= -10)
@@ -440,8 +439,8 @@ def build(store, pf, out, extra, push, sp, fg=None):
         r["pros"], r["cons"] = reasons(r)
     rows.sort(key=lambda r: -(r["fit"] if r["fit"] is not None else -1))
     semis = semis_stats() or prev.get("semis")
-    new = events(rows, prev, pf, ans, others, fg)
     ib = ideal(rows, pf, ans, semis, fg)
+    new = events(rows, prev, pf, ans, others, fg, [x["key"] for x in ib["items"]])
     words = rule_words(rows, pf, ans, ib)
     new += rule_events(rows, prev, words, ib)
     keep = (datetime.date.today() - datetime.timedelta(days=45)).isoformat()

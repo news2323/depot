@@ -141,9 +141,8 @@ def asset_key(kind, symbol):
 def tracked_assets(pf):
     """Alle Titel aus Käufen/Verkäufen, Watchlist und Alerts: {key: {"kind","symbol","name"}}."""
     out = {}
-    plan = ((pf.get("profile") or {}).get("plan") or {}).get("items") or []   # geplante Käufe (Strategie) zählen mit
-    for group, rows in (("transactions", None), ("watchlist", None), ("alerts", None), ("plan", plan)):
-        for x in (rows if rows is not None else pf.get(group)) or []:
+    for group in ("transactions", "watchlist", "alerts"):
+        for x in pf.get(group) or []:
             kind, sym = x.get("kind"), str(x.get("symbol") or "").upper().strip()
             if kind not in ("stock", "crypto") or not sym:
                 continue

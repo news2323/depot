@@ -15,11 +15,19 @@ from .common import CLOUD, SourceError, asset_key, empty_portfolio, get_store, h
 BENCH = {"SP500": ("stock", "^GSPC", "S&P 500"), "BTC": ("crypto", "BTC", "Bitcoin")}
 
 
+def strategy_assets(store):
+    """Titel des Ideal-Depots Jakob (screen.json vom letzten Tageslauf) zählen mit: Kurse, Verlauf, Logos für die App."""
+    ib = (store.get("screen.json") or {}).get("ideal") or {}
+    return {x["key"]: {"kind": "stock", "symbol": x["key"].split(":", 1)[1], "name": ""} for x in ib.get("items") or [] if x.get("key")}
+
+
 # ----------------------------------------------------------------- schneller Lauf
 def run_fast(store):
     pf = store.get("portfolio.json") or empty_portfolio()
     state = store.get("state.json") or {}
     assets = tracked_assets(pf)
+    for k, v in strategy_assets(store).items():
+        assets.setdefault(k, v)
     old_market = store.get("market.json") or {}
     old = old_market.get("assets") or {}
     out, currencies = {}, set()
@@ -287,6 +295,8 @@ def run_daily(store):
     pf = store.get("portfolio.json") or empty_portfolio()
     market = (store.get("market.json") or {}).get("assets") or {}
     assets = tracked_assets(pf)
+    for k, v in strategy_assets(store).items():
+        assets.setdefault(k, v)
     # Verläufe müssen bis zum ersten Kauf reichen, sonst rechnet der Vergleich alte Käufe mit späteren Kursen
     first = min((str(t.get("date") or "")[:10] for t in pf.get("transactions") or [] if t.get("date")), default="")
     rng = "10y" if first and first < (datetime.date.today() - datetime.timedelta(days=5 * 365 - 30)).isoformat() else "5y"

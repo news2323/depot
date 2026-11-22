@@ -1054,7 +1054,8 @@ def main(repo=None):
         store = get_store()
     pf = store.get("portfolio.json") or {}
     prof = pf.get("profile") or {}
-    plan = [str(x.get("symbol") or "").upper() for x in (prof.get("plan") or {}).get("items") or []]
+    ideal = ((store.get("screen.json") or {}).get("ideal") or {}).get("items") or []      # Titel des Ideal-Depots Jakob
+    plan = [x["key"].split(":", 1)[1] for x in ideal] or [str(x.get("symbol") or "").upper() for x in (prof.get("plan") or {}).get("items") or []]
     t = time.time()
     out = run(prof.get("answers") or {}, plan)
     store.put("backtest.json", out)
