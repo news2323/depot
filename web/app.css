@@ -575,3 +575,10 @@ input:focus,select:focus{border-color:var(--accent);background:var(--surface)}
 .chip{border-radius:999px}
 .strip{border:0;border-radius:22px}
 @media(max-width:759px){.card{border-radius:20px;padding:18px 16px}.top h1{font-size:30px}}
+/* Bitcoin-Anleger im Plus oder Minus: Balken um den Einstand */
+.hbar{position:relative;height:8px;border-radius:999px;background:var(--surface3)}
+.hbar i{position:absolute;top:0;bottom:0;border-radius:999px}
+.hbar i.u{background:var(--up)}.hbar i.d{background:var(--down)}
+.hbar b{position:absolute;left:50%;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--ink3);border-radius:1px}
+.fgbox .fgax span:nth-child(2){color:var(--ink2)}
+.note.warn{background:var(--warn-bg);border-color:transparent;color:var(--warn)}

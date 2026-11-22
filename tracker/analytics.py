@@ -550,3 +550,53 @@ def smart_dumb(rows, crowd):
     return {"day": last[0], "smart": last[1], "dumb": last[2], "small": last[3], "crowd": last[4],
             "prev": {"smart": hist[-2][1], "dumb": hist[-2][2]} if len(hist) > 1 else None,
             "groups": groups, "hist": [h[:3] for h in hist[-104:]]}
+
+
+def holder_stats(cost, days, closes, years=3):
+    """Bitcoin: liegen Kurzfrist- und Langfrist-Anleger im Schnitt im Plus oder Minus?
+    cost {ISO-Datum: [Einstand kurz, Einstand lang]} (BGeometrics, 7 Tage verzögert), days/closes Tageskurse in Dollar
+    (Tage seit 1970). Für die letzten Tage ohne Einstandspreis gilt der letzte bekannte (er ändert sich langsam)."""
+    if not cost or not days or not closes:
+        return None
+    byday = {}
+    for d, v in cost.items():
+        try:
+            byday[(datetime.date.fromisoformat(d) - datetime.date(1970, 1, 1)).days] = v
+        except ValueError:
+            continue
+    if not byday:
+        return None
+    last_cost = max(byday)
+    rows, cur = [], None
+    for d, c in zip(days, closes):
+        if d in byday:
+            cur = byday[d]
+        elif cur is None or d - last_cost > 14 or d < min(byday):
+            continue
+        if c:
+            rows.append([d, round(c, 2), round(cur[0], 2), round(cur[1], 2)])
+    if not rows:
+        return None
+    d, p, s, l = rows[-1]
+    pct = lambda a, b: round((a / b - 1) * 100, 1)
+
+    def since(i):   # wie viele Tage schon auf derselben Seite (Plus oder Minus)
+        up, n = rows[-1][1] >= rows[-1][i], 0
+        for r in reversed(rows):
+            if (r[1] >= r[i]) != up:
+                return n, r[0]
+            n += 1
+        return n, None
+
+    def chg(i, back):   # Änderung des Einstandspreises in Prozent
+        old = [r for r in rows if r[0] <= d - back]
+        return pct(rows[-1][i], old[-1][i]) if old else None
+
+    sn, sl = since(2)
+    ln, ll = since(3)
+    month = [r for r in rows if r[0] <= d - 30]
+    return {"day": d, "asof": (datetime.date(1970, 1, 1) + datetime.timedelta(days=last_cost)).isoformat(),
+            "price": p, "sth": s, "lth": l, "sth_pct": pct(p, s), "lth_pct": pct(p, l),
+            "sth_month": pct(month[-1][1], month[-1][2]) if month else None, "lth_month": pct(month[-1][1], month[-1][3]) if month else None,
+            "sth_days": sn, "lth_days": ln, "sth_flip": sl, "lth_flip": ll, "sth_chg30": chg(2, 30), "lth_chg30": chg(3, 30),
+            "hist": [r for r in rows if r[0] > d - 365 * years]}

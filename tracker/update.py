@@ -375,6 +375,12 @@ def run_daily(store):
         x = analytics.smart_dumb(sources.cftc_tff(sources.COT_MARKETS[name]), crowd)
         if x:
             smart[name] = x
+    # Bitcoin: Kurzfrist- und Langfrist-Anleger im Plus oder Minus (Einstandspreise von BGeometrics, frei, 7 Tage verzögert)
+    btc = bench.get("BTC")
+    holders = analytics.holder_stats(sources.holder_cost(), btc["d"], btc["c"]) if btc else None
+    holders = holders or (store.get("smart.json") or {}).get("holders")
+    if holders:
+        smart["holders"] = holders
     if smart:
         smart["updated"] = now_iso()
         store.put("smart.json", smart)

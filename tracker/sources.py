@@ -1012,6 +1012,22 @@ def cftc_tff(code, weeks=170):
     return sorted(out, key=lambda x: x["d"])
 
 
+def holder_cost():
+    """Einstandspreis der Kurzfrist- und Langfrist-Anleger bei Bitcoin (BGeometrics, frei: 15 Abrufe am Tag,
+    letzte 7 Tage nur gegen Bezahlung). Kurzfrist = Coins seit weniger als 155 Tagen nicht bewegt.
+    Ergebnis {Datum: [kurz, lang]}, nur Tage mit beiden Werten."""
+    out = {}
+    for i, (path, field) in enumerate((("sth-realized-price", "sthRealizedPrice"), ("lth-realized-price", "lthRealizedPrice"))):
+        r = _try("BGeometrics", "https://bitcoin-data.com/v1/" + path, timeout=40)
+        if not isinstance(r, list):
+            return {}
+        for x in r:
+            v = fnum(x.get(field))
+            if x.get("d") and v:
+                out.setdefault(x["d"], [None, None])[i] = v
+    return {d: v for d, v in out.items() if None not in v}
+
+
 def crypto_fear_greed_hist(days=1200):
     """Krypto-Angst-und-Gier je Tag (alternative.me), als {Datum: Wert}."""
     r = _try("Fear & Greed", "https://api.alternative.me/fng/?limit=%d" % days, timeout=30)

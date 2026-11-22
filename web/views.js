@@ -260,6 +260,38 @@ function smartCard() {
     <p class="hint">Eigene Berechnung aus der wöchentlichen Statistik der US-Terminmarktaufsicht CFTC (${which === 'btc' ? 'Bitcoin-Future' : 'E-mini-S&amp;P-500-Future'}): Smart Money = Hedgefonds, Investmentbanken und große Fondsgesellschaften, Dumb Money = Kleinanleger, zur Hälfte gemischt mit Angst und Gier. Rang: Netto-Position im Vergleich zu den letzten drei Jahren (0 = so vorsichtig wie nie, 100 = so zuversichtlich wie nie). „Kauft zu“ oder „verkauft“: Netto-Position in einer Woche um mindestens 1 Prozentpunkt des Marktes oder in vier Wochen um 2,5 Punkte verändert. Netto short heißt: mehr auf fallende als auf steigende Kurse gesetzt, oft auch zur Absicherung. Wagniskapitalgeber (VCs) melden keine solchen Daten, sie fehlen deshalb. Nicht der kostenpflichtige Index von Sentimentrader. Ein Stimmungsbild, kein Kaufsignal.</p>`,
     seg('smk', ['Aktien', 'Bitcoin'], which === 'btc' ? 'Bitcoin' : 'Aktien'), 'span12');
 }
+// Bitcoin: Kurzfrist- und Langfrist-Anleger im Plus oder Minus (smart.json → holders, Einstandspreise von BGeometrics)
+function holderData() {
+  const h = (S.smart || {}).holders;
+  if (!h) return null;
+  const q = (S.market.assets || {})['crypto:BTC'], p = q && q.price ? q.price : h.price;   // wenn vorhanden mit dem aktuellen Kurs
+  return Object.assign({}, h, {price: p, sth_pct: (p / h.sth - 1) * 100, lth_pct: (p / h.lth - 1) * 100});
+}
+function holderCard() {
+  const h = holderData();
+  if (!h) return '';
+  const view = S.hv || 'Einstand';
+  const usd = v => nf(v, 0) + ' $', days = n => n === 1 ? 'einem Tag' : nf(n, 0) + ' Tagen';
+  const box = (title, about, pct, cost, n, flip) => `<div class="fgbox"><div class="l">${title}</div>
+    <div class="v num"><span class="${sign(pct)}" style="font-size:inherit;color:var(--${pct >= 0 ? 'up' : 'down'})">${pctS(pct, 1)}</span><span>${pct >= 0 ? 'im Plus' : 'im Minus'}</span></div>
+    <div class="hbar" role="img" aria-label="${pctS(pct, 1)} zum Einstand"><i class="${pct >= 0 ? 'u' : 'd'}" style="${pct >= 0 ? 'left:50%' : 'right:50%'};width:${Math.min(50, Math.abs(pct))}%"></i><b></b></div>
+    <div class="fgax"><span>−50 %</span><span>Einstand</span><span>+50 %</span></div>
+    <div class="n">Einstand im Schnitt ${usd(cost)} · ${flip ? `seit ${days(n)} ${pct >= 0 ? 'im Plus' : 'im Minus'}` : `seit über ${days(n)} ${pct >= 0 ? 'im Plus' : 'im Minus'}`}</div>
+    <div class="n">${about}</div></div>`;
+  const s = h.sth_pct, l = h.lth_pct;
+  const read = s < 0 && l < 0 ? ['bad', 'Beide Gruppen liegen im Minus. Das kam bisher fast nur in tiefen Bärenmärkten vor, zuletzt 2022. Solche Phasen lagen oft nahe am Tief, konnten aber Monate dauern.']
+    : s < 0 ? ['warn', `Wer in den letzten fünf Monaten gekauft hat, liegt im Schnitt ${nf(Math.abs(s), Math.abs(s) < 10 ? 1 : 0)} % im Minus, die Langfrist-Anleger noch ${nf(l, l < 10 ? 1 : 0)} % im Plus. Neue Käufer verkaufen in solchen Lagen öfter mit Verlust. In Aufwärtsphasen waren das Rücksetzer, am Beginn von Bärenmärkten ging es weiter abwärts.`]
+    : l < 0 ? ['good', 'Kurzfrist-Anleger wieder im Plus, Langfrist-Anleger noch im Minus. Das war bisher typisch für den Beginn einer Erholung nach einem Bärenmarkt.']
+    : s > 30 ? ['warn', `Kurzfrist-Anleger liegen im Schnitt ${nf(s, 0)} % im Plus. Je größer der Gewinn, desto eher nehmen sie ihn mit.`]
+    : ['good', 'Beide Gruppen liegen im Plus. Das ist typisch für einen intakten Aufwärtstrend. Der Einstand der Kurzfrist-Anleger galt dabei oft als Unterstützung.'];
+  return card('Bitcoin: Wer liegt im Plus?', `Kurs ${usd(h.price)} gegen den Einstand der Anleger · Einstand Stand ${dateDe(h.asof)}`, `<div class="fggrid">
+    ${box('Kurzfrist-Anleger', 'Coins seit weniger als 155 Tagen nicht bewegt', s, h.sth, h.sth_days, h.sth_flip)}
+    ${box('Langfrist-Anleger', 'Coins seit 155 Tagen oder länger nicht bewegt', l, h.lth, h.lth_days, h.lth_flip)}</div>
+    <div class="note ${read[0]}" style="margin-top:12px">${read[1]}</div>
+    <div class="chart" id="ch-hold" style="margin-top:8px"></div><div id="lg-hold"></div>
+    <p class="hint">Einstand: der Durchschnittspreis, zu dem die Coins der Gruppe zuletzt bewegt wurden (on-chain, „Realized Price“). Liegt der Kurs darüber, ist die Gruppe im Schnitt im Plus. Daten von BGeometrics, frei nur mit einer Woche Verzögerung; die letzten Tage rechnen mit dem letzten bekannten Einstand, der sich nur langsam ändert. Ein Stimmungsbild, kein Kaufsignal. Keine Anlageberatung.</p>`,
+    seg('hv', ['Einstand', 'Plus/Minus'], view), 'span12');
+}
 // Angst und Gier: Aktienmarkt (eigene Berechnung nach CNN-Vorbild, update.market_fg) und Krypto (alternative.me)
 function fgCard() {
   const m = S.daily.market_fg, k = S.daily.crypto_fg;
@@ -305,6 +337,7 @@ function vHome(c) {
     </div>
     ${riskCard(c)}
     ${smartCard()}
+    ${holderCard()}
     ${card('Allokation', '', allocation(c, alloc), seg('alloc', ['Anlageklasse', 'Sektor', 'Währung'], alloc), 'span7')}
     ${card('Nächste Termine', 'Deine Titel, Fed und Konjunktur', cal.length ? calCompact(cal) + `<div class="btnrow" style="margin-top:10px"><button class="btn sm ghost" data-act="tab" data-v="cal">Alle Termine</button></div>` : '<p class="empty">Keine Termine bekannt.</p>', '', 'span5')}
     ${ap ? `<details class="card fold span12"><summary><div><h2>Einschätzung der Recherche</h2><p class="sub">${esc(ap.headline)} · ${esc(ago(ap.at))}</p></div><span class="chev"></span></summary>
@@ -344,6 +377,15 @@ function drawCharts() {
     const s2 = [{name: 'Smart Money', color: 'var(--s1)', pts: smx.hist.map(h => [isoToDay(h[0]), h[1]])}, {name: 'Dumb Money', color: 'var(--s2)', pts: smx.hist.map(h => [isoToDay(h[0]), h[2]])}];
     lineChart(chs, s2, {fmt: v => nf(v, 0), height: 200, label: 'Smart Money und Dumb Money, zwei Jahre', hlines: [{y: 50, label: '', color: 'var(--line2)'}]});
     $('#lg-smart').innerHTML = legend(s2);
+  }
+  const chh = $('#ch-hold'), hd = holderData();
+  if (chh && hd && hd.hist && hd.hist.length > 1) {
+    const H = hd.hist, pc = S.hv === 'Plus/Minus';
+    const s3 = pc ? [{name: 'Kurzfrist-Anleger', color: 'var(--s2)', pts: H.map(r => [r[0], (r[1] / r[2] - 1) * 100])}, {name: 'Langfrist-Anleger', color: 'var(--s3)', pts: H.map(r => [r[0], (r[1] / r[3] - 1) * 100])}]
+      : [{name: 'Bitcoin-Kurs', color: 'var(--s1)', pts: H.map(r => [r[0], r[1]])}, {name: 'Einstand Kurzfrist-Anleger', color: 'var(--s2)', pts: H.map(r => [r[0], r[2]])}, {name: 'Einstand Langfrist-Anleger', color: 'var(--s3)', pts: H.map(r => [r[0], r[3]])}];
+    lineChart(chh, s3, {fmt: pc ? (v => (v > 0 ? '+' : v < 0 ? '−' : '') + nf(Math.abs(v), 0) + ' %') : (v => nf(v / 1000, 0) + ' Tsd.'), height: 220,
+      label: pc ? 'Gewinn oder Verlust der Anleger in Prozent, drei Jahre' : 'Bitcoin-Kurs und Einstand der Anleger, drei Jahre', hlines: pc ? [{y: 0, label: 'Einstand', color: 'var(--line2)'}] : []});
+    $('#lg-hold').innerHTML = legend(s3);
   }
   const tm = $('#tm');
   if (tm) {
@@ -840,6 +882,7 @@ document.addEventListener('click', async ev => {
   else if (act === 'hm') { S.hm = v; render(); }
   else if (act === 'cmp') { S.cmp = v; render(); }
   else if (act === 'hide') { S.hide = !S.hide; try { localStorage.setItem('depot_hide', S.hide ? '1' : ''); } catch (e) { /* egal */ } render(); if (S.sheetKey) vAsset(S.sheetKey); }
+  else if (act === 'hv') { S.hv = v; render(); }
   else if (act === 'smk') { S.smk = v === 'Bitcoin' ? 'btc' : 'stocks'; render(); }
   else if (act === 'dep') { setDep(v); render(); }
   else if (act === 'alloc') { S.alloc = v; render(); }
