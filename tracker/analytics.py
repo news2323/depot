@@ -45,6 +45,66 @@ def technicals(closes, crypto=False):
             "perf_1m": perf(month), "perf_3m": perf(quarter), "perf_1y": perf(year)}
 
 
+MOM_NEAR_HIGH = 15     # Momentum: höchstens so viele Prozent unter dem Jahreshoch
+MOM_FADE_DAYS = 20     # „lässt nach“: Signal war in so vielen Handelstagen zuletzt noch an
+
+
+def momentum(closes, bench=None, crypto=False):
+    """Momentum-Signal (Jakobs Wunsch vom 22.11.2026: mehr nach Momentum kaufen statt in fallende Kurse).
+
+    An, wenn alle vier Prüfungen zutreffen (Trendfolge nach gängigen Regeln, z. B. Faber, Minervini):
+      trend   Kurs über der 50-Tage-Linie, diese über der 200-Tage-Linie
+      rising  die 200-Tage-Linie steigt (gegen vor einem Monat)
+      high    höchstens 15 % unter dem Hoch der letzten 12 Monate
+      rel     in 6 Monaten besser als der Markt (Aktien und ETFs: S&P 500, Coins: Bitcoin; ohne Vergleich: Kurs im Plus)
+    state: on (an), fade (war in den letzten 20 Handelstagen an, Kurs jetzt unter der 50-Tage-Linie, aber über der
+    200-Tage-Linie), down (unter der 200-Tage-Linie), none (sonst). since: so viele Handelstage ist das Signal ohne Pause an.
+    bench wird vom Ende her ausgerichtet (gleicher Abstand zum letzten Kurs). Faustregel, keine Anlageberatung."""
+    year, month = (365, 30) if crypto else (252, 21)
+    half, n = year // 2, len(closes)
+    if n < 200 + month + 1 or not closes[-1]:
+        return None
+    ps = [0.0]
+    for x in closes:
+        ps.append(ps[-1] + x)
+
+    def sma(i, k):
+        return (ps[i + 1] - ps[i + 1 - k]) / k if i + 1 >= k else None
+
+    def at(i):
+        p, s50, s200, s200m = closes[i], sma(i, 50), sma(i, 200), sma(i - month, 200)
+        hi = max(closes[max(0, i - year + 1):i + 1])
+        r6 = (p / closes[i - half] - 1) * 100 if i >= half and closes[i - half] else None
+        rel = None
+        if bench and r6 is not None:
+            j = len(bench) - (n - i)
+            if j >= half and bench[j - half] and bench[j]:
+                rel = r6 - (bench[j] / bench[j - half] - 1) * 100
+        chk = {"trend": bool(s50 and s200 and p > s50 > s200), "rising": bool(s200m and s200 > s200m),
+               "high": p >= hi * (1 - MOM_NEAR_HIGH / 100.0),
+               "rel": (rel > 0) if rel is not None else (r6 is not None and r6 > 0)}
+        return chk, p, s50, s200, hi, rel, r6
+
+    look = min(60, n - 200 - month - 1)
+    hist = [all(at(n - 1 - k)[0].values()) for k in range(look + 1)]   # hist[0] = heute
+    chk, p, s50, s200, hi, rel, r6 = at(n - 1)
+    since = 0
+    while since < len(hist) and hist[since]:
+        since += 1
+    if hist[0]:
+        state = "on"
+    elif p < s200:
+        state = "down"
+    elif p < s50 and any(hist[:MOM_FADE_DAYS + 1]):
+        state = "fade"
+    else:
+        state = "none"
+    r = lambda x, d=1: None if x is None else round(x, d)
+    return {"state": state, "since": since, "met": sum(chk.values()), "checks": chk,
+            "ma50": r((p / s50 - 1) * 100), "ma200": r((p / s200 - 1) * 100), "from_high": r((p / hi - 1) * 100),
+            "rel6": r(rel), "r6": r(r6), "bench": bool(bench)}
+
+
 def swing_lows(days, closes, lookback=420, w=10):
     """Markante Tiefs der letzten Monate, nahe beieinander liegende zusammengefasst."""
     start = max(w, len(closes) - lookback)

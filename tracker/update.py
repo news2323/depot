@@ -317,6 +317,11 @@ def run_daily(store):
         lows = analytics.swing_lows(h["d"], h["c"])
         entry = {"hist": {"d": h["d"], "c": h["c"]}, "currency": h["currency"], "tech": _round(tech),
                  "levels": analytics.buy_levels(price, tech, lows)}
+        # Momentum-Signal gegen den Markt (Aktien und ETFs: S&P 500, Coins: Bitcoin; die beiden selbst ohne Vergleich)
+        bm = hist_cache.get(asset_key("crypto", "BTC") if crypto else asset_key("stock", "^GSPC"))
+        mom = analytics.momentum(h["c"], bm["c"] if bm and a["symbol"] not in ("BTC", "^GSPC") else None, crypto)
+        if mom:
+            entry["mom"] = mom
         if h.get("name"):
             entry["name"] = h["name"]
         if crypto:
@@ -388,7 +393,8 @@ def run_daily(store):
         smart["updated"] = now_iso()
         store.put("smart.json", smart)
     try:
-        screen.build(store, pf, out, extra, push, (bench.get("SP500") or {}).get("c"))
+        screen.build(store, pf, out, extra, push, (bench.get("SP500") or {}).get("c"),
+                     {"stocks": (market_fg or {}).get("value"), "crypto": (crypto_fg or {}).get("value")})
     except Exception as e:   # der Filter darf den Tageslauf nicht aufhalten
         log("Strategie: Fehler " + type(e).__name__)
     # Branchen der großen Indizes als Vergleich für die Sektoren des Depots (über die ETFs URTH und SPY)

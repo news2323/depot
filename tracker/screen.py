@@ -45,6 +45,14 @@ WEIGHTS = {
 }
 
 
+# Kaufstil (Frage „style“, Jakobs Wunsch vom 22.11.2026: weg vom Kauf in fallende Kurse, hin zu Momentum):
+# Zu- und Abschlag je Zustand des Momentum-Signals. Dieselben Zahlen in web/app.js (STYLE_MULT).
+STYLE_MULT = {
+    "first": {"on": 1.06, "down": 0.9},
+    "only":  {"on": 1.08, "fade": 0.9, "none": 0.85, "down": 0.75},
+}
+
+
 def _clamp(x, lo=0.0, hi=1.0):
     return max(lo, min(hi, x))
 
@@ -157,6 +165,7 @@ def parts(sym, e, sp):
     spec = (cap_usd is not None and cap_usd < 10e9) or (opm is not None and opm < 0) or (f.get("eps") is not None and f["eps"] < 0)
     defensive = rev is not None and rev < 0.08 and tw < 0.9 and (t.get("vol") or 30) < 35
     chg5 = _ret(hist, 5)
+    mom = e.get("mom") or analytics.momentum(hist, sp)      # Signal: Trend, Jahreshoch, stärker als der S&P 500
     c = {"theme": tw, "momentum": momentum, "revisions": revisions, "growth": growth, "quality": quality, "value": value, "rs": 0.5, "ev": ev}
     return {"theme": theme, "c": {k: round(x, 3) for k, x in c.items()},
             "flags": {"spec": bool(spec), "def": bool(defensive), "cut": bool(cut), "us": "." not in sym, "pricey": bool(pricey)},
@@ -171,7 +180,7 @@ def parts(sym, e, sp):
             "implied": vis.get("implied"), "expected": vis.get("expected"), "plan_ok": (vis.get("plan") or {}).get("realistic"),
             "earnings": e.get("earnings_date"), "rev_g": round(rev * 100, 1) if rev is not None else None, "eps_g": eps_g,
             "rev_g1": rg1, "accel": accel, "op_margin": opm, "roe": roe, "fpe": f.get("forward_pe"),
-            "c30": [round(x, 4) for x in hist[-30:]]}
+            "mom": mom, "c30": [round(x, 4) for x in hist[-30:]]}
 
 
 def rel_strength(rows):
@@ -207,6 +216,7 @@ def fit(row, ans):
         x = min(x, 45)
     if (ans.get("horizon") or "lt2") == "lt2" and (row.get("vol") or 0) > 70:
         x *= 0.9
+    x *= STYLE_MULT.get(ans.get("style"), {}).get((row.get("mom") or {}).get("state"), 1.0)
     return int(round(min(100, x)))
 
 
@@ -241,12 +251,17 @@ def _held(pf):
     return {k for k, q in qty.items() if q > 1e-9}
 
 
-def events(rows, prev, pf, ans):
+FEAR = 25   # Angst und Gier unter 25: extreme Angst (wie bei CNN und alternative.me)
+
+
+def events(rows, prev, pf, ans, others=None, fg=None):
     """Neue Hinweise gegenüber dem letzten Lauf. Jeder Hinweis höchstens einmal in 7 Tagen."""
     today = datetime.date.today()
     held = _held(pf)
+    watch = {asset_key(w.get("kind") or "stock", str(w.get("symbol") or "").upper()) for w in pf.get("watchlist") or []}
+    style = ans.get("style") or "dip"
     plan = {asset_key(x.get("kind") or "stock", str(x.get("symbol") or "").upper()) for x in ((pf.get("profile") or {}).get("plan") or {}).get("items") or []}
-    old = {r["key"]: r for r in (prev or {}).get("list") or []}
+    old = {r["key"]: r for r in ((prev or {}).get("list") or []) + ((prev or {}).get("other") or [])}
     seen = {(e["type"], e["key"]): e["day"] for e in (prev or {}).get("events") or []}
     top = [r for r in rows if r.get("fit") is not None and r["key"] not in held]
     top = {r["key"] for r in sorted(top, key=lambda r: -r["fit"])[:10]}
@@ -265,16 +280,46 @@ def events(rows, prev, pf, ans):
         if r["key"] in top and r["fit"] >= 70 and (not o or (o.get("fit") or 0) < 65):
             add(r, "neu", "passt jetzt gut zu deinem Profil (%d von 100)" % r["fit"], r["fit"] >= 75)
         if (mine or r["key"] in top) and r.get("chg5") is not None and r["chg5"] <= -8 and not r["flags"]["cut"] and (r.get("est90") is None or r["est90"] > -2):
-            add(r, "dip", "−%.0f %% in 5 Tagen, Gewinnschätzungen halten%s" % (-r["chg5"], " (dein Plan)" if r["key"] in plan else ""), mine)
+            ms = (r.get("mom") or {}).get("state")
+            trend = "" if style == "dip" or not ms else ", Aufwärtstrend hält (über der 200-Tage-Linie)" if ms != "down" else \
+                ", aber unter der 200-Tage-Linie: nach deiner Momentum-Regel erst bei neuem Signal"
+            add(r, "dip", "−%.0f %% in 5 Tagen, Gewinnschätzungen halten%s%s" % (-r["chg5"], trend, " (dein Plan)" if r["key"] in plan else ""), mine)
         if mine and r.get("est90") is not None and r["est90"] <= -5 and (not o or o.get("est90") is None or o["est90"] > -5):
             add(r, "cut", "Gewinnschätzung in 90 Tagen um %.0f %% gesenkt: These prüfen" % -r["est90"], True)
         if (mine or r["key"] in top) and r.get("est90") is not None and r["est90"] >= 10 and (not o or o.get("est90") is None or o["est90"] < 10):
             add(r, "up", "Gewinnschätzung in 90 Tagen um %.0f %% angehoben" % r["est90"], False)
+    # Momentum-Signal: geht an (frisch, höchstens 5 Handelstage) oder bricht (unter die 200-Tage-Linie)
+    for r in rows + (others or []):
+        m, o = r.get("mom") or {}, old.get(r["key"]) or {}
+        om = o.get("mom") or {}
+        mine, stock = r["key"] in held or r["key"] in plan or r["key"] in watch, "c" in r
+        if m.get("state") == "on" and m.get("since", 99) <= 5 and om.get("state") != "on" and (mine or r["key"] in top) \
+                and not (r.get("flags") or {}).get("cut"):
+            est = r.get("est90")
+            add(r, "mom", "Momentum-Signal an: über 50- und 200-Tage-Linie, %s unter dem Jahreshoch, %s%s" % (
+                ("%.0f %%" % -m["from_high"]) if m.get("from_high") else "am Hoch",
+                "stärker als der Markt" if m.get("bench") else "Kurs im Plus",
+                (", Schätzungen steigen" if est is not None and est >= 3 else "") + (" (dein Plan)" if r["key"] in plan else "")), mine)
+        if mine and m.get("state") == "down" and om.get("state") in ("on", "fade", "none") and (stock or o):
+            add(r, "momoff", "Trend gebrochen: Kurs unter der 200-Tage-Linie%s" % (
+                ", nach deiner Momentum-Regel nicht nachkaufen" if style in ("first", "only") else ""), r["key"] in held)
+    # Extreme Angst (Jakobs Wunsch vom 22.11.2026: dann kaufen): Hinweis, sobald der Index unter 25 fällt
+    was = (prev or {}).get("fg") or {}
+    for name, label in (("stocks", "Aktienmarkt"), ("crypto", "Krypto")):
+        v = (fg or {}).get(name)
+        if v is None or v >= FEAR or (was.get(name) is not None and was[name] < FEAR):
+            continue
+        if name == "crypto" and ans.get("crypto") != "part":
+            continue
+        rule = ans.get("fear") == "buy"
+        add({"key": "fg:" + name, "symbol": label}, "fear", "extreme Angst (%d von 100)%s" % (
+            v, ": nach deiner Regel ein Kaufzeitpunkt, in Teilen und nur Titel mit intakten Gewinnschätzungen" if rule else ""), rule)
     return new
 
 
-def build(store, pf, out, extra, push, sp):
-    """screen.json schreiben und neue Hinweise aufs Handy schicken. sp = Tageskurse des S&P 500."""
+def build(store, pf, out, extra, push, sp, fg=None):
+    """screen.json schreiben und neue Hinweise aufs Handy schicken. sp = Tageskurse des S&P 500,
+    fg = Angst und Gier heute ({"stocks": 0..100, "crypto": 0..100})."""
     ans = answers(pf)
     sp = sp or []
     prev = store.get("screen.json") or {}
@@ -286,19 +331,24 @@ def build(store, pf, out, extra, push, sp):
         r = parts(sym, e, sp)
         r.update(key=key, symbol=sym, name=SHORT.get(sym) or e.get("name") or "", universe=sym in THEME_OF)
         rows.append(r)
+    done = {r["key"] for r in rows}
+    others = [{"key": k, "symbol": k.split(":", 1)[1], "name": e.get("name") or "", "mom": e["mom"]}
+              for k, e in out.items() if k not in done and e.get("mom")]
     rel_strength(rows)
     for r in rows:
         r["fit"] = fit(r, ans)
         r["pros"], r["cons"] = reasons(r)
     rows.sort(key=lambda r: -(r["fit"] if r["fit"] is not None else -1))
-    new = events(rows, prev, pf, ans)
+    new = events(rows, prev, pf, ans, others, fg)
     keep = (datetime.date.today() - datetime.timedelta(days=45)).isoformat()
     evs = (new + [e for e in prev.get("events") or [] if e["day"] >= keep])[:80]
-    store.put("screen.json", {"updated": now_iso(), "list": rows, "events": evs, "semis": semis_stats() or prev.get("semis")})
+    store.put("screen.json", {"updated": now_iso(), "list": rows, "other": [{"key": o["key"], "mom": {"state": o["mom"]["state"]}} for o in others],
+                              "events": evs, "semis": semis_stats() or prev.get("semis"),
+                              "fg": {k: v for k, v in (fg or {}).items() if v is not None}})
     mode = ans.get("push") or "important"
     send = [e for e in new if mode == "all" or (mode == "important" and e["important"])]
     if send:
-        names = {r["key"]: short_name(r["name"]) or r["symbol"] for r in rows}
+        names = {r["key"]: SHORT.get(r["symbol"]) or short_name(r["name"]) or r["symbol"] for r in rows + others}
         body = "\n".join("%s: %s" % (names.get(e["key"], e["symbol"]), e["text"]) for e in send[:5])
         push(pf, "Strategie: %d %s" % (len(send), "Hinweis" if len(send) == 1 else "Hinweise"), body + "\nKeine Anlageberatung.")
     log("Strategie: %d Titel bewertet, %d neue Hinweise" % (len(rows), len(new)))
@@ -324,7 +374,15 @@ def reasons(r):
         pros.append("Kernthema: " + r["theme"])
     if r.get("r12") is not None or r.get("r6") is not None:
         rr = r["r12"] if r.get("r12") is not None else r["r6"]
-        side(rr >= 15, rr <= -15).append("Momentum: %+.0f %% gegenüber dem S&P 500 in %s" % (rr, "12 Monaten" if r.get("r12") is not None else "6 Monaten"))
+        side(rr >= 15, rr <= -15).append("Kursstärke: %+.0f %% gegenüber dem S&P 500 in %s" % (rr, "12 Monaten ohne den letzten" if r.get("r12") is not None else "6 Monaten"))
+    m = r.get("mom") or {}
+    if m.get("state") == "on":
+        pros.insert(0, "Momentum-Signal an%s: Aufwärtstrend, nahe am Jahreshoch, stärker als der S&P 500" % (
+            " seit %d Handelstagen" % m["since"] if m.get("since", 0) < 60 else ""))
+    elif m.get("state") == "down":
+        cons.append("Momentum-Signal aus: Kurs unter der 200-Tage-Linie, %.0f %% unter dem Jahreshoch" % -(m.get("from_high") or 0))
+    elif m.get("state") == "fade":
+        cons.append("Momentum lässt nach: Kurs unter die 50-Tage-Linie gefallen")
     if c["rs"] >= 0.75:
         pros.append("relativ stark: besser als %.0f %% der KI- und Halbleitertitel in 6 Monaten" % (c["rs"] * 100))
     elif c["rs"] <= 0.25 and r.get("m6") is not None:

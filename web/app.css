@@ -606,3 +606,7 @@ input:focus,select:focus{border-color:var(--accent);background:var(--surface)}
 .dots li.pos::marker{color:var(--up)}.dots li.neg::marker{color:var(--down)}
 .body.strong{color:var(--ink);font-weight:500}
 @media(max-width:759px){.cx{grid-template-columns:1fr}.fb{grid-template-columns:96px 1fr 30px}.tabs button{font-size:9.5px}}
+
+/* Momentum-Signal vor der Unterzeile (Jakobs Wunsch vom 22.11.2026) */
+.mom{font-weight:650}.mom.on{color:var(--up)}.mom.fade{color:var(--warn)}.mom.near{color:var(--ink2)}
+small .sep{font-style:normal}
