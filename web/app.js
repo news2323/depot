@@ -874,7 +874,7 @@ function jakobBook() {
 const jakobHeld = () => Object.fromEntries(jakobBook().held.filter(p => p.value > 0).map(p => [p.key, p]));
 // Ideal-Depot Jakob nach den im Backtest bestätigten Regeln: gehaltene Titel bleiben, solange deine Verkaufsregel sie hält;
 // freie Plätze bekommen Titel aus dem KI-Umfeld (wie im Backtest) mit Momentum-Signal (beste Passung zuerst), bei einer Ausnahme (extreme Angst, Halbleiter-Crash)
-// die Titel mit der besten Passung und intakten Schätzungen (im Backtest gleichwertig mit der Stärke im Thema). Gleich gewichtet, höchstens 3 Titel je Thema.
+// die Titel mit der besten Passung und intakten Schätzungen (im Backtest gleichwertig mit der Stärke im Thema). Gleich gewichtet.
 // Aktienanteil nach deiner Grenze für Rückgänge (Backtest: mit 75 % in Aktien blieb der größte Rückgang bei etwa −35 %),
 // Marktfilter halbiert ihn. Gleiche Rechnung in tracker/screen.py (ideal): beide Stellen ändern.
 const SHARE_BY_DD = {15: 30, 25: 50, 35: 75, 50: 100};
@@ -895,8 +895,8 @@ function idealBook() {
   // nur Titel aus dem Umfeld, das der Backtest geprüft hat (Schwerpunkt KI: Thema ab 0,6; Tech: ab 0,4)
   const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes') || 'ai'] ?? 0.6;
   const ok = all.filter(x => (x.r.c || {}).theme >= tmin && !(x.r.flags || {}).cut && !(x.r.est90 != null && x.r.est90 <= -5));
-  const pick = [], th = {};
-  const take = (x, via) => { if (pick.length >= n || pick.some(p => p.key === x.r.key) || (th[x.r.theme] || 0) >= 3) return; th[x.r.theme] = (th[x.r.theme] || 0) + 1; pick.push({key: x.r.key, f: x.f, via, theme: x.r.theme}); };
+  const pick = [];
+  const take = (x, via) => { if (pick.length >= n || pick.some(p => p.key === x.r.key)) return; pick.push({key: x.r.key, f: x.f, via, theme: x.r.theme}); };   // keine Grenze je Thema: kostete im Backtest Rendite
   ok.filter(x => held[x.r.key] && (keepRule(x.m, x.f, rank[x.r.key], N) || ex.on)).sort((a, b) => b.f - a.f).forEach(x => take(x, 'halten'));
   ok.filter(x => x.m.state === 'on').sort((a, b) => b.f - a.f).forEach(x => take(x, 'signal'));
   if (ex.on) ok.filter(x => (x.r.est90 == null || x.r.est90 > -2) && !(x.r.rev_g != null && x.r.rev_g < 0))

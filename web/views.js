@@ -793,7 +793,7 @@ const BT_P = {near: ['Nähe zum Jahreshoch', v => v >= 100 ? 'egal' : `höchsten
   rel: ['Stärker als der S&P 500', v => v ? 'ja, 6 Monate' : 'egal'], n_pos: ['Anzahl Titel', v => v + ' Titel'],
   fear: ['Ausnahme Angst', v => v === 'c25' ? 'unter 25 und Halbleiter −20 %' : v ? 'unter ' + v : 'keine'], crash: ['Ausnahme Halbleiter-Crash', v => v ? `${-v} % unter dem Hoch` : 'keine'],
   exit: ['Verkauf', v => ({signal: 'wenn das Signal ausgeht', trend: 'unter der 200-Tage-Linie', better: 'wenn es Besseres gibt'})[v]],
-  empty: ['Freie Plätze', v => v === 'cash' ? 'Reserve' : 'S&P 500'], ex_sort: ['Reihenfolge bei Ausnahmen', v => v === 'fit' ? 'beste Passung' : 'Stärke im Thema'], regime: ['Marktfilter', v => v === 'half' ? 'halb Reserve unter der 200-Tage-Linie der Halbleiter' : 'keiner']};
+  empty: ['Freie Plätze', v => v === 'cash' ? 'Reserve' : 'S&P 500'], ex_sort: ['Reihenfolge bei Ausnahmen', v => v === 'fit' ? 'beste Passung' : 'Stärke im Thema'], cap: ['Titel je Thema', v => v ? 'höchstens ' + v : 'keine Grenze'], regime: ['Marktfilter', v => v === 'half' ? 'halb Reserve unter der 200-Tage-Linie der Halbleiter' : 'keiner']};
 const bigE = v => v >= 1e6 ? nf(v / 1e6, 2) + ' Mio. €' : eur(v, 0);
 const pc = (v, d = 0) => v == null ? '–' : pctS(v, d);
 function btResult(b) {
@@ -887,7 +887,7 @@ function idealCard() {
       ${other.map(k => row(k, 0, 0, plan[k] ? 'in deinem Plan, nicht im Ideal-Depot' : 'im Depot, nicht im Ideal-Depot')).join('')}
       <tr><td></td><td><b>Reserve</b><div class="ts">Geld für Rücksetzer und Ausnahmen</div></td><td></td><td class="r num">${nf(ib.reserve * 100, 1)} %</td><td class="r num">${eur(ib.base * ib.reserve, 0)}</td><td class="r hm">–</td><td class="r hm">–</td><td class="hm"></td></tr></tbody></table></div>
     ${ib.items.length && !same ? `<div class="btnrow" style="margin-top:12px"><button class="btn" data-act="idealplan">Als Plan übernehmen</button><span class="small muted">ersetzt deinen Plan (${Object.keys(plan).length} Titel) durch das Ideal-Depot; der alte bleibt gespeichert</span></div>` : ''}
-    <p class="hint">So würden deine Regeln das Depot Jakob heute aufstellen. Titel im Depot bleiben, solange deine Verkaufsregel sie hält. Freie Plätze bekommen Titel aus dem KI-Umfeld mit Momentum-Signal, bei einer Ausnahme auch ohne Signal; jeweils beste Passung zuerst, Gewinnschätzungen müssen halten. Höchstens 3 Titel je Thema. Gleich gewichtet wie im Backtest; ${nf(ib.share * 100, 0)} % in Aktien, weil der größte Rückgang im Backtest damit bei etwa −${mdd} % blieb. Basis ${eur(ib.base, 0)} (Plan oder Depot Jakob, das Größere). Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`;
+    <p class="hint">So würden deine Regeln das Depot Jakob heute aufstellen. Titel im Depot bleiben, solange deine Verkaufsregel sie hält. Freie Plätze bekommen Titel aus dem KI-Umfeld mit Momentum-Signal, bei einer Ausnahme auch ohne Signal; jeweils beste Passung zuerst, Gewinnschätzungen müssen halten. Gleich gewichtet wie im Backtest; ${nf(ib.share * 100, 0)} % in Aktien, weil der größte Rückgang im Backtest damit bei etwa −${mdd} % blieb. Basis ${eur(ib.base, 0)} (Plan oder Depot Jakob, das Größere). Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`;
   return card('Ideal-Depot Jakob', 'Nach dem Backtest und deinen Regeln, Stand heute', body, '', 'span7');
 }
 function todoCard() {

@@ -365,12 +365,11 @@ def ideal(rows, pf, ans, semis, fg):
 
     def keep(r):
         return {"signal": st(r) == "on", "trend": st(r) != "down", "better": rank[r["key"]] < 2 * N}.get(sell, st(r) != "down")
-    pick, th = [], {}
+    pick = []
 
-    def take(r, via):
-        if len(pick) >= n or any(p["key"] == r["key"] for p in pick) or th.get(r["theme"], 0) >= 3:
+    def take(r, via):        # keine Grenze je Thema: kostete im Backtest Rendite (22.11.2026)
+        if len(pick) >= n or any(p["key"] == r["key"] for p in pick):
             return
-        th[r["theme"]] = th.get(r["theme"], 0) + 1
         pick.append({"key": r["key"], "via": via})
     for r in sorted([r for r in ok if r["key"] in held and (keep(r) or ex)], key=lambda r: -r["fit"]):
         take(r, "halten")
