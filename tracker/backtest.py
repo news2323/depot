@@ -794,7 +794,7 @@ def run(ans, plan_syms):
     # ------------------------------------------------- Optimierung: Regeln im Trainingszeitraum wählen, danach prüfen
     grid = {"near": (10, 15, 20, 30, 100), "trend": ("50_200", "p_200"), "rel": (0, 6), "n_pos": (5, 7, 10),
             "fear": (0, 25, 35, "c25"), "crash": (0, -20, -30), "exit": ("signal", "trend", "better"), "empty": ("cash", "index"),
-            "regime": ("none", "half")}
+            "regime": ("none", "half"), "ex_sort": ("rs", "fit")}
     soxx200 = [None] * n
     for i in range(199, n):
         if soxx and all(soxx[i - 199:i + 1]):
@@ -816,14 +816,14 @@ def run(ans, plan_syms):
             cache_on[k] = mom_on(stocks[sym], i, P, bench)
         return cache_on[k]
 
-    def fast_pick(P, fear_thr, crash_thr, n_pos):
+    def fast_pick(P, fear_thr, crash_thr, n_pos, ex_sort="rs"):
         def pick(i, keep):
             cands = avail(i)
             sel = ranked(i, [x for x in cands if P_on(x, i, P)])
             free = n_pos - len(keep) - len([x for x in sel if x not in keep])
             if exc(i, fear_thr, crash_thr) and free > 0:
                 pool = [x for x in cands if x not in sel and x not in keep and (F["fits"][(x, i)][2]["g"] is None or F["fits"][(x, i)][2]["g"] > 0)]
-                pool.sort(key=lambda x: -(rs.get((x, i)) or 0))
+                pool.sort(key=lambda x: -(rs.get((x, i)) or 0) if ex_sort == "rs" else -F["fits"][(x, i)][0])
                 sel += pool[:free]
             return sel
         return pick
@@ -847,14 +847,14 @@ def run(ans, plan_syms):
     for combo in itertools.product(*(grid[k] for k in keys)):
         g = dict(zip(keys, combo))
         P = {"near": g["near"], "trend": g["trend"], "rel": g["rel"]}
-        res = simulate(ctx, months, fast_pick(P, g["fear"], g["crash"], g["n_pos"]), fast_exit(g["exit"], P, g["n_pos"]), g["n_pos"], g["empty"],
+        res = simulate(ctx, months, fast_pick(P, g["fear"], g["crash"], g["n_pos"], g["ex_sort"]), fast_exit(g["exit"], P, g["n_pos"]), g["n_pos"], g["empty"],
                        scale=regime_scale(g["regime"], g["fear"], g["crash"]))
         tr = sub_stats(res["rets"], months, days, "", TRAIN_END)
         te = sub_stats(res["rets"], months, days, TRAIN_END, "9999")
         results.append({"p": g, "train": tr, "test": te, "invested": round(100 * sum(res["invested"]) / len(res["invested"]))})
 
     score = calmar
-    cur = {"near": 15, "trend": "50_200", "rel": 6, "n_pos": 7, "fear": 25, "crash": -20, "exit": "better", "empty": "cash", "regime": "none"}
+    cur = {"near": 15, "trend": "50_200", "rel": 6, "n_pos": 7, "fear": 25, "crash": -20, "exit": "better", "empty": "cash", "regime": "none", "ex_sort": "rs"}
     for r in results:
         r["s_train"], r["s_test"] = round(score(r["train"]), 3), round(score(r["test"]), 3)
     results.sort(key=lambda r: -r["s_train"])
@@ -873,6 +873,10 @@ def run(ans, plan_syms):
         better = [x for x in effect[k] if x["train"] > base["train"] and x["test"] > base["test"]]
         if better:
             chosen[k] = max(better, key=lambda x: min(x["train"] - base["train"], x["test"] - base["test"]))["v"]
+    # Reihenfolge bei Ausnahmen: sind beide in beiden Hälften fast gleich gut, zählt die Passung (Jakobs eigene Faktoren)
+    e = {x["v"]: x for x in effect["ex_sort"]}
+    if chosen["ex_sort"] == "rs" and abs(e["fit"]["train"] - e["rs"]["train"]) < 0.1 and abs(e["fit"]["test"] - e["rs"]["test"]) < 0.1:
+        chosen["ex_sort"] = "fit"
     now = next(x for x in strategies if x["id"] == "now")
     opt = {"current": {"p": cur, "train": now["train"], "test": now["test"], "s_train": calmar(now["train"]), "s_test": calmar(now["test"])},
            "scheme": scheme, "schemes": schemes, "buckets_new": buckets_new, "chosen": next(r for r in results if r["p"] == chosen), "best_train": results[0], "top": results[:15], "effect": effect,
@@ -884,13 +888,14 @@ def run(ans, plan_syms):
             ", ".join(x for x in ("Angst unter 25 zusammen mit Halbleitern 20 % unter dem Hoch" if g["fear"] == "c25" else "Angst unter %d" % g["fear"] if g["fear"] else "",
                                   "Halbleiter %d %% unter dem Hoch" % -g["crash"] if g["crash"] else "") if x) or "keine",
             {"better": "wenn es Besseres gibt", "signal": "wenn das Signal ausgeht", "trend": "unter der 200-Tage-Linie"}[g["exit"]],
-            ", halb Reserve, wenn Halbleiter unter ihrer 200-Tage-Linie" if g["regime"] == "half" else "")
+            ", halb Reserve, wenn Halbleiter unter ihrer 200-Tage-Linie" if g["regime"] == "half" else "") + (
+            ", bei Ausnahmen die Titel mit der besten Passung" if g.get("ex_sort") == "fit" else "")
 
     for sid, name, g, sc in (("now_half", "Deine Regeln mit Marktfilter", dict(cur, regime="half"), "heute"), ("opt", "Optimierte Regeln", chosen, scheme)):
         F["fits"] = fits_by[sc]
         rank_cache.clear()
         Pg = {"near": g["near"], "trend": g["trend"], "rel": g["rel"]}
-        res = simulate(ctx, months, fast_pick(Pg, g["fear"], g["crash"], g["n_pos"]), fast_exit(g["exit"], Pg, g["n_pos"]),
+        res = simulate(ctx, months, fast_pick(Pg, g["fear"], g["crash"], g["n_pos"], g["ex_sort"]), fast_exit(g["exit"], Pg, g["n_pos"]),
                        g["n_pos"], g["empty"], daily=True, scale=regime_scale(g["regime"], g["fear"], g["crash"]))
         add_strat(sid, name, desc(g), res)
         if sid == "opt":

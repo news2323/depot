@@ -633,3 +633,8 @@ small .sep{font-style:normal}
 .btcmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:760px){.btcmp{grid-template-columns:1fr}.pbar{grid-template-columns:26px 1fr 56px 34px;gap:8px}}
 .tbl.bt td:first-child{min-width:120px}
+
+/* Deine Regel (Depot Jakob) */
+.rw{font-weight:650}.rw.good{color:var(--up)}.rw.bad{color:var(--down)}.rw.teal{color:var(--c3)}.rw.blue{color:var(--accent)}
+.chip.big{font-size:15px;padding:6px 14px}
+.tgs{display:flex;flex-wrap:wrap;gap:6px 12px}

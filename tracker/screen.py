@@ -250,9 +250,14 @@ def semis_stats():
             "ma200": round((c[-1] / (sum(c[-200:]) / 200.0) - 1) * 100, 1)}
 
 
+STRAT_DEP = "jakob"     # Strategie nur für das Teildepot Jakob (Jakobs Wunsch vom 22.11.2026), nicht Hauptdepot oder Fenja
+
+
 def _held(pf):
     qty = {}
     for t in pf.get("transactions") or []:
+        if (t.get("depot") or "main") != STRAT_DEP:
+            continue
         k = asset_key(t.get("kind"), str(t.get("symbol") or "").upper())
         q = float(t.get("qty") or 0)
         if t.get("type") in ("buy", "sell"):
@@ -326,6 +331,93 @@ def events(rows, prev, pf, ans, others=None, fg=None):
     return new
 
 
+# ----------------------------------------------------------------- Ideal-Depot Jakob und Wort je Titel
+# Gleiche Rechnung wie idealBook und ruleOf in web/app.js: beide Stellen ändern. Hier nur für die Hinweise aufs Handy
+# (die App rechnet mit den aktuellen Antworten und Beträgen selbst).
+SHARE_BY_DD = {15: 30, 25: 50, 35: 75, 50: 100}
+FEAR_LIMIT = 25
+
+
+def exception(ans, semis, fg):
+    """Ausnahme von „Momentum zuerst“: extreme Angst am Aktienmarkt (Frage fear) oder Halbleiter 20 % unter dem Hoch (Frage crash)."""
+    v, dd = (fg or {}).get("stocks"), (semis or {}).get("from_high")
+    fear = ans.get("fear") == "buy" and v is not None and v < FEAR_LIMIT
+    crash = (ans.get("crash") or ans.get("on_loss")) == "buy" and dd is not None and dd <= -20
+    return fear or crash
+
+
+def ideal(rows, pf, ans, semis, fg):
+    lo_hi = [int(x) for x in str(ans.get("positions") or "6-8").split("-")]
+    N = int(round(sum(lo_hi) / float(len(lo_hi))))
+    minp = float(ans.get("min_pos") or 500)
+    ex = exception(ans, semis, fg)
+    filt = ans.get("regime") == "half" and (semis or {}).get("above200") is False and not ex
+    share = SHARE_BY_DD.get(int(ans.get("max_dd") or 35), 75) / 100.0 * (0.5 if filt else 1.0)
+    base = float((((pf.get("profile") or {}).get("plan") or {}).get("total")) or 5000)
+    n = max(1, min(N, int(base * share // minp)))
+    tmin = {"ai": 0.6, "tech": 0.4, "none": 0.0}.get(ans.get("themes") or "ai", 0.6)
+    held = _held(pf)
+    allr = [r for r in rows if r.get("fit") is not None]
+    rank = {r["key"]: i for i, r in enumerate(sorted(allr, key=lambda r: -r["fit"]))}
+    ok = [r for r in allr if r["c"]["theme"] >= tmin and not r["flags"]["cut"] and not (r.get("est90") is not None and r["est90"] <= -5)]
+    st = lambda r: (r.get("mom") or {}).get("state")
+    sell = ans.get("sell") or "better"
+
+    def keep(r):
+        return {"signal": st(r) == "on", "trend": st(r) != "down", "better": rank[r["key"]] < 2 * N}.get(sell, st(r) != "down")
+    pick, th = [], {}
+
+    def take(r, via):
+        if len(pick) >= n or any(p["key"] == r["key"] for p in pick) or th.get(r["theme"], 0) >= 3:
+            return
+        th[r["theme"]] = th.get(r["theme"], 0) + 1
+        pick.append({"key": r["key"], "via": via})
+    for r in sorted([r for r in ok if r["key"] in held and (keep(r) or ex)], key=lambda r: -r["fit"]):
+        take(r, "halten")
+    for r in sorted([r for r in ok if st(r) == "on"], key=lambda r: -r["fit"]):
+        take(r, "signal")
+    if ex:
+        for r in sorted([r for r in ok if (r.get("est90") is None or r["est90"] > -2) and not (r.get("rev_g") is not None and r["rev_g"] < 0)],
+                        key=lambda r: (-r["fit"], -(r["c"].get("rs") or 0))):
+            take(r, "ausnahme")
+    return {"n": n, "share": round(share, 3), "filt": filt, "ex": ex, "items": pick}
+
+
+def rule_words(rows, pf, ans, ib):
+    """Wort je Aktie für das Depot Jakob: Kaufen, Nachkaufen, Halten, Verkaufen, Warten (wie ruleOf in der App, ohne Beträge)."""
+    held, inid = _held(pf), {x["key"] for x in ib["items"]}
+    plan = {asset_key(x.get("kind") or "stock", str(x.get("symbol") or "").upper()) for x in ((pf.get("profile") or {}).get("plan") or {}).get("items") or []}
+    sell, out = ans.get("sell") or "better", {}
+    for r in rows:
+        k = r["key"]
+        if k not in held and k not in inid and k not in plan:
+            continue
+        st = (r.get("mom") or {}).get("state")
+        cut = r["flags"]["cut"] or (r.get("est90") is not None and r["est90"] <= -10)
+        dip = r.get("chg5") is not None and r["chg5"] <= -8 and st and st != "down" and not (r.get("est90") is not None and r["est90"] < -2)
+        if cut:
+            w = "Verkaufen" if k in held else "Warten"
+        elif k in held:
+            if k in inid:
+                w = "Nachkaufen" if dip else "Halten"
+            elif ib["ex"]:
+                w = "Halten"
+            else:
+                w = "Verkaufen" if sell in ("signal", "trend", "better") else "Halten"
+        else:
+            w = "Kaufen" if k in inid else "Warten"
+        out[k] = w
+    return out
+
+
+def _last_weekday_of_month(d):
+    nxt = (d.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+    last = nxt - datetime.timedelta(days=1)
+    while last.weekday() >= 5:
+        last -= datetime.timedelta(days=1)
+    return last
+
+
 def build(store, pf, out, extra, push, sp, fg=None):
     """screen.json schreiben und neue Hinweise aufs Handy schicken. sp = Tageskurse des S&P 500,
     fg = Angst und Gier heute ({"stocks": 0..100, "crypto": 0..100})."""
@@ -348,11 +440,15 @@ def build(store, pf, out, extra, push, sp, fg=None):
         r["fit"] = fit(r, ans)
         r["pros"], r["cons"] = reasons(r)
     rows.sort(key=lambda r: -(r["fit"] if r["fit"] is not None else -1))
+    semis = semis_stats() or prev.get("semis")
     new = events(rows, prev, pf, ans, others, fg)
+    ib = ideal(rows, pf, ans, semis, fg)
+    words = rule_words(rows, pf, ans, ib)
+    new += rule_events(rows, prev, words, ib)
     keep = (datetime.date.today() - datetime.timedelta(days=45)).isoformat()
     evs = (new + [e for e in prev.get("events") or [] if e["day"] >= keep])[:80]
     store.put("screen.json", {"updated": now_iso(), "list": rows, "other": [{"key": o["key"], "mom": {"state": o["mom"]["state"]}} for o in others],
-                              "events": evs, "semis": semis_stats() or prev.get("semis"),
+                              "events": evs, "semis": semis, "ideal": ib, "rules": words,
                               "fg": {k: v for k, v in (fg or {}).items() if v is not None}})
     mode = ans.get("push") or "important"
     send = [e for e in new if mode == "all" or (mode == "important" and e["important"])]
@@ -361,6 +457,33 @@ def build(store, pf, out, extra, push, sp, fg=None):
         body = "\n".join("%s: %s" % (names.get(e["key"], e["symbol"]), e["text"]) for e in send[:5])
         push(pf, "Strategie: %d %s" % (len(send), "Hinweis" if len(send) == 1 else "Hinweise"), body + "\nKeine Anlageberatung.")
     log("Strategie: %d Titel bewertet, %d neue Hinweise" % (len(rows), len(new)))
+
+
+def rule_events(rows, prev, words, ib):
+    """Hinweise zum Depot Jakob: ein Titel springt auf Kaufen, Nachkaufen oder Verkaufen; am letzten Handelstag des Monats
+    eine Übersicht. Beim ersten Lauf (noch keine Worte gespeichert) nur die Übersicht am Monatsende."""
+    today = datetime.date.today()
+    old = (prev or {}).get("rules")
+    seen = {(e["type"], e["key"]): e["day"] for e in (prev or {}).get("events") or []}
+    sym = {r["key"]: r["symbol"] for r in rows}
+    out = []
+
+    def add(key, symbol, typ, text):
+        last = seen.get((typ, key))
+        if last and (today - datetime.date.fromisoformat(last)).days < 7:
+            return
+        out.append({"day": today.isoformat(), "type": typ, "key": key, "symbol": symbol, "text": text, "important": True})
+    why = {"Kaufen": "Kaufen (Depot Jakob%s)" % (", Ausnahme" if ib["ex"] else ", Momentum-Signal"),
+           "Nachkaufen": "Nachkaufen (Depot Jakob, Rücksetzer im Aufwärtstrend)", "Verkaufen": "Verkaufen zum Monatsende (Depot Jakob, deine Verkaufsregel)"}
+    if old is not None:
+        for k, w in words.items():
+            if w in why and old.get(k) != w:
+                add(k, sym.get(k, k), "rule", "Deine Regel: " + why[w])
+    if today == _last_weekday_of_month(today):
+        names = lambda w: ", ".join(SHORT.get(sym.get(k, "")) or sym.get(k, k) for k, x in sorted(words.items()) if x == w)
+        parts = ["%s: %s" % (w, names(w)) for w in ("Verkaufen", "Kaufen", "Nachkaufen") if names(w)]
+        add("depot:jakob", "Depot Jakob", "monat", "Monatsende: " + ("; ".join(parts) if parts else "nichts zu tun, alles halten"))
+    return out
 
 
 SHORT = {"000660.KS": "SK Hynix", "005930.KS": "Samsung", "TSM": "TSMC", "GOOGL": "Google"}

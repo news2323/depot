@@ -864,35 +864,96 @@ function planRows() {
     return {key, it, eur: +it.eur || 0, pct: +it.pct || 0, chg, value: (+it.eur || 0) * (1 + (chg || 0) / 100)};
   });
 }
-// Monatsrate (Fragen monthly, rate, min_pos): wohin das neue Geld nach deiner Regel geht. Ziel ist das Plan-Gewicht,
-// gemessen am Hauptdepot. „Momentum zuerst“: Plan-Titel mit Signal; ohne Signal greift die Ausnahme (extreme Angst,
-// Halbleiter-Crash) mit den im Thema stärksten Titeln, sonst Titel über der 200-Tage-Linie, sonst Reserve.
-function monthlyRate() {
-  const m = +ansOf('monthly') || 0, rows = planRows();
-  if (!m || !rows.length) return null;
-  const rule = ansOf('rate') || 'mom', held = {}, ex = buyException();
-  for (const p of calcFor('main').held) held[p.key] = p.value;
-  const tot = rows.reduce((s, r) => s + (held[r.key] || 0), 0) + m;
-  const xs = rows.map(r => { const sr = scrRow(r.key) || {}, have = held[r.key] || 0;
-    return {key: r.key, pct: r.pct, have, gap: Math.max(0, tot * r.pct / 100 - have), mom: momOf(r.key) || {}, rs: sr.c ? sr.c.rs : null,
-      cut: !!(sr.flags && sr.flags.cut) || (sr.est90 != null && sr.est90 <= -5)}; });
-  const sm = (S.screen || {}).semis || {}, half = ansOf('regime') === 'half' && sm.above200 === false && !ex.on;
-  const mm = half ? Math.round(m / 20) * 10 : m;    // Marktfilter: halb in Aktien, halb Reserve
-  const k = Math.max(1, Math.floor(mm / (+ansOf('min_pos') || 500))), ok = xs.filter(x => !x.cut && x.gap > 0), byGap = (a, b) => b.gap - a.gap;
-  let pick = [], why = '', by = 'gap', viaEx = false;
-  if (rule === 'split') { pick = xs.filter(x => !x.cut); by = 'pct'; why = 'Nach Plan-Gewicht auf alle Plan-Titel, deren Gewinnschätzungen halten.'; }
-  else if (rule === 'gap') { pick = ok.sort(byGap).slice(0, k); why = 'Die Plan-Titel, die am weitesten unter ihrem Plan-Gewicht liegen.'; }
-  else {
-    const on = ok.filter(x => x.mom.state === 'on').sort(byGap);
-    if (on.length) { pick = on.slice(0, k); why = 'Plan-Titel mit Momentum-Signal, die noch unter ihrem Plan-Gewicht liegen.'; }
-    else if (ex.on) { pick = ok.sort((a, b) => (b.rs ?? 0) - (a.rs ?? 0) || byGap(a, b)).slice(0, k); why = 'Kein Plan-Titel hat ein Momentum-Signal, aber deine Ausnahme greift. Darum die im KI-Umfeld relativ stärksten Plan-Titel, deren Gewinnschätzungen halten.'; viaEx = true; }
-    else { pick = ok.filter(x => x.mom.state && x.mom.state !== 'down').sort(byGap).slice(0, k);
-      why = pick.length ? 'Kein Plan-Titel hat ein Momentum-Signal. Darum Titel über der 200-Tage-Linie, die am weitesten unter ihrem Plan-Gewicht liegen.' : 'Kein Plan-Titel hat ein Momentum-Signal, keiner liegt über der 200-Tage-Linie, und keine Ausnahme greift. Nach deiner Regel: Rate als Reserve parken, bis ein Signal kommt.'; }
+// Strategie nur für das Teildepot Jakob (Jakobs Wunsch vom 22.11.2026): Ideal-Depot, Wort je Titel, Monatsrate, Regel-Check.
+// Hauptdepot und Fenja bleiben außen vor. Zwischenergebnisse gelten für eine Darstellung (render setzt sie zurück).
+const STRAT_DEP = 'jakob';
+function jakobBook() {
+  if (!S._jb) S._jb = depots().some(d => d.id === STRAT_DEP) ? calcFor(STRAT_DEP) : {held: [], value: 0};
+  return S._jb;
+}
+const jakobHeld = () => Object.fromEntries(jakobBook().held.filter(p => p.value > 0).map(p => [p.key, p]));
+// Ideal-Depot Jakob nach den im Backtest bestätigten Regeln: gehaltene Titel bleiben, solange deine Verkaufsregel sie hält;
+// freie Plätze bekommen Titel aus dem KI-Umfeld (wie im Backtest) mit Momentum-Signal (beste Passung zuerst), bei einer Ausnahme (extreme Angst, Halbleiter-Crash)
+// die Titel mit der besten Passung und intakten Schätzungen (im Backtest gleichwertig mit der Stärke im Thema). Gleich gewichtet, höchstens 3 Titel je Thema.
+// Aktienanteil nach deiner Grenze für Rückgänge (Backtest: mit 75 % in Aktien blieb der größte Rückgang bei etwa −35 %),
+// Marktfilter halbiert ihn. Gleiche Rechnung in tracker/screen.py (ideal): beide Stellen ändern.
+const SHARE_BY_DD = {15: 30, 25: 50, 35: 75, 50: 100};
+const keepRule = (m, f, rank, N) => ({signal: m.state === 'on', trend: m.state !== 'down', better: rank < 2 * N}[ansOf('sell') || 'better'] ?? (m.state !== 'down'));
+function idealBook() {
+  if (S._ideal !== undefined) return S._ideal;
+  const list0 = (S.screen || {}).list || [];
+  if (!list0.length || !prof().answers) return (S._ideal = null);
+  const [lo, hi] = String(ansOf('positions') || '6-8').split('-').map(Number), N = Math.round((lo + (hi || lo)) / 2);
+  const minp = +ansOf('min_pos') || 500, ex = buyException(), sm = (S.screen || {}).semis || {};
+  const filt = ansOf('regime') === 'half' && sm.above200 === false && !ex.on;
+  const share = (SHARE_BY_DD[+ansOf('max_dd') || 35] || 75) / 100 * (filt ? 0.5 : 1);
+  const jb = jakobBook(), held = jakobHeld();
+  const base = Math.max(+(prof().plan || {}).total || 0, jb.value || 0) || 5000;
+  const n = Math.max(1, Math.min(N, Math.floor(base * share / minp)));
+  const all = list0.map(r => ({r, f: fitOf(r), m: momOf(r.key) || r.mom || {}})).filter(x => x.f != null);
+  const rank = Object.fromEntries(all.slice().sort((a, b) => b.f - a.f).map((x, i) => [x.r.key, i]));
+  // nur Titel aus dem Umfeld, das der Backtest geprüft hat (Schwerpunkt KI: Thema ab 0,6; Tech: ab 0,4)
+  const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes') || 'ai'] ?? 0.6;
+  const ok = all.filter(x => (x.r.c || {}).theme >= tmin && !(x.r.flags || {}).cut && !(x.r.est90 != null && x.r.est90 <= -5));
+  const pick = [], th = {};
+  const take = (x, via) => { if (pick.length >= n || pick.some(p => p.key === x.r.key) || (th[x.r.theme] || 0) >= 3) return; th[x.r.theme] = (th[x.r.theme] || 0) + 1; pick.push({key: x.r.key, f: x.f, via, theme: x.r.theme}); };
+  ok.filter(x => held[x.r.key] && (keepRule(x.m, x.f, rank[x.r.key], N) || ex.on)).sort((a, b) => b.f - a.f).forEach(x => take(x, 'halten'));
+  ok.filter(x => x.m.state === 'on').sort((a, b) => b.f - a.f).forEach(x => take(x, 'signal'));
+  if (ex.on) ok.filter(x => (x.r.est90 == null || x.r.est90 > -2) && !(x.r.rev_g != null && x.r.rev_g < 0))
+    .sort((a, b) => b.f - a.f || ((b.r.c || {}).rs ?? 0) - ((a.r.c || {}).rs ?? 0)).forEach(x => take(x, 'ausnahme'));
+  const w = share / n, items = pick.map(p => Object.assign(p, {w, eur: base * w}));
+  return (S._ideal = {n, N, share, filt, ex, base, items, reserve: 1 - w * items.length, minp, sm});
+}
+// „Deine Regel“: ein Wort je Aktie für das Depot Jakob, aus Ideal-Depot und Verkaufsregel. Keine Empfehlung, nur deine Regeln.
+const RULE_CLS = {Kaufen: 'good', Nachkaufen: 'teal', Halten: 'blue', Verkaufen: 'bad', Warten: ''};
+const RULE_ORDER = {Verkaufen: 0, Kaufen: 1, Nachkaufen: 2, Halten: 3, Warten: 4};
+function ruleOf(key) {
+  S._rules = S._rules || {};
+  if (key in S._rules) return S._rules[key];
+  const ib = idealBook(), sr = scrRow(key), m = momOf(key) || (sr || {}).mom;
+  if (!ib || !isStockOnly(key) || !sr) return (S._rules[key] = null);
+  const out = (word, why, amount) => (S._rules[key] = {word, cls: RULE_CLS[word], why, eur: amount});
+  const held = jakobHeld()[key], it = ib.items.find(x => x.key === key), ex = ib.ex, mm = m || {};
+  const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes') || 'ai'] ?? 0.6;
+  if (!held && !it && !planRows().some(r => r.key === key) && ((sr.c || {}).theme || 0) < tmin) return (S._rules[key] = null);   // außerhalb deines Schwerpunkts: kein Wort
+  const cut = (sr.flags || {}).cut || (sr.est90 != null && sr.est90 <= -10);
+  const dipUp = sr.chg5 != null && sr.chg5 <= -8 && mm.state && mm.state !== 'down' && !(sr.est90 != null && sr.est90 < -2);
+  const sig = mm.state === 'on' ? 'Momentum-Signal an' : mm.state === 'down' ? 'kein Momentum-Signal, Kurs unter der 200-Tage-Linie' : mm.state === 'fade' ? 'Momentum lässt nach' : 'kein Momentum-Signal';
+  if (cut) return held ? out('Verkaufen', ['Gewinnschätzung deutlich gesenkt: These gebrochen'], held.value) : out('Warten', ['Gewinnschätzung deutlich gesenkt']);
+  if (held) {
+    const v = held.value;
+    if (it) {
+      if (dipUp) return out('Nachkaufen', [`Rücksetzer ${pctS(sr.chg5, 0)} in 5 Tagen, Kurs über der 200-Tage-Linie, Schätzungen halten`], Math.max(ib.minp, it.eur - v));
+      if (it.eur - v >= ib.minp) return out('Nachkaufen', [`unter dem Ziel im Ideal-Depot (${eur(it.eur, 0)}, im Depot ${eur(v, 0)})`], it.eur - v);
+      return out('Halten', [it.via === 'ausnahme' ? 'deine Ausnahme greift: ' + ex.text : sig, `Ziel ${eur(it.eur, 0)}, im Depot ${eur(v, 0)}`]);
+    }
+    const sell = ansOf('sell') || 'better';
+    const why = {signal: ['Signal aus: nach deiner Regel zum Monatsende verkaufen'], trend: ['unter der 200-Tage-Linie: nach deiner Regel verkaufen'],
+      better: ['nicht mehr im Ideal-Depot: es gibt Besseres'], stop: held.pnlPct <= -20 ? [`${pctS(held.pnlPct, 0)} seit Kauf: Verlustgrenze erreicht`] : null, thesis: null}[sell];
+    return why ? out('Verkaufen', why, v) : out('Halten', ['nicht mehr im Ideal-Depot, deine Verkaufsregel greift noch nicht', sig]);
   }
+  if (it) return out('Kaufen', [it.via === 'ausnahme' ? `Ausnahme, ${fitPts(it.f)} von 10 für dich, Schätzungen halten` : `${sig}, ${fitPts(it.f)} von 10 für dich`, ...(it.via === 'ausnahme' ? ['deine Ausnahme greift: ' + ex.text] : [])], it.eur);
+  return out('Warten', [sig, (fitOf(sr) == null ? 'passt nach deinen Antworten nicht' : ib.items.length >= ib.n ? 'nicht unter den besten ' + ib.n : 'nicht unter den Besten')]);
+}
+// Letzter Handelstag des Monats (Mo bis Fr), für „zum Monatsende verkaufen“
+function monthEnd() { const d = new Date(); d.setMonth(d.getMonth() + 1, 0); while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1); return d; }
+// Monatsrate (Fragen monthly, rate, min_pos): Aktienanteil des Ideal-Depots in die Titel, die am weitesten unter ihrem Ziel
+// liegen (bei „Nach Plan-Gewicht“ auf alle), der Rest bleibt Reserve. Ziel und Bestand nur im Depot Jakob.
+function monthlyRate() {
+  const m = +ansOf('monthly') || 0, ib = idealBook();
+  if (!m || !ib) return null;
+  const rule = ansOf('rate') || 'mom', held = jakobHeld();
+  const mm = ib.items.length ? Math.round(m * ib.share / 10) * 10 : 0;
+  const k = Math.max(1, Math.floor(mm / ib.minp));
+  const xs = ib.items.map(it => { const have = (held[it.key] || {}).value || 0; return {key: it.key, pct: it.w * 100, have, target: it.eur, gap: Math.max(0, it.eur - have), via: it.via}; });
+  let pick = [], by = 'gap', why;
+  if (!xs.length) why = 'Das Ideal-Depot ist gerade leer: kein Titel mit Signal und keine Ausnahme. Nach deiner Regel bleibt die Rate Reserve.';
+  else if (rule === 'split') { pick = xs; by = 'pct'; why = 'Nach Gewicht auf alle Titel des Ideal-Depots.'; }
+  else { pick = xs.filter(x => x.gap > 0).sort((a, b) => b.gap - a.gap).slice(0, k); why = 'Die Titel des Ideal-Depots, die am weitesten unter ihrem Ziel liegen.'; }
   const wsum = pick.reduce((s, x) => s + (by === 'pct' ? x.pct : x.gap), 0);
   let left = mm;
   pick = pick.map((x, i) => { const v = i === pick.length - 1 ? left : Math.round(mm * (by === 'pct' ? x.pct : x.gap) / (wsum || 1) / 10) * 10; left -= v; return Object.assign({}, x, {eur: v}); });
-  return {m, mm, reserve: m - mm, half, k, rule, rows: xs, pick, why, ex, viaEx};
+  return {m, mm, reserve: m - (pick.length ? mm : 0), half: ib.filt, k, rule, rows: xs, pick, why, ex: ib.ex, viaEx: pick.some(x => x.via === 'ausnahme'), share: ib.share};
 }
 // Rückgang eines Korbs mit festen Gewichten über die letzten Jahre (heutige Gewichte zurückgerechnet, in Euro)
 function basketDD(items, years = 5) {
@@ -912,7 +973,7 @@ function basketDD(items, years = 5) {
 function strategyBook(mode) {
   const out = {};
   const add = (key, v) => { if (!v) return; out[key] = (out[key] || 0) + v; };
-  if (mode !== 'plan') for (const p of calcFor('main').held) {
+  if (mode !== 'plan') for (const p of jakobBook().held) {
     if (isCoin(p.key) && ansOf('crypto') !== 'part') continue;
     if ((isFund(p.key) || isCommodity(p.key)) && ansOf('etf') !== 'base') continue;
     add(p.key, p.value);
@@ -948,7 +1009,7 @@ function ruleCheck(mode) {
   const best = (S.screen && S.screen.list || []).map(r => [r, fitOf(r)]).filter(x => x[1] != null && !book.some(b => b.key === x[0].key)).sort((a, b) => b[1] - a[1])[0];
   if (fits.length && best && best[1] - fits[0][1] >= 15) add('info', 'Tausch prüfen', `${shortName(fits[0][0].key)} passt am schwächsten (${fitPts(fits[0][1])} von 10), ${shortName(best[0].key)} deutlich besser (${fitPts(best[1])} von 10).`);
   if (mode === 'depot' && ['50', '100'].includes(ansOf('profit'))) {
-    const c = calcFor('main'), g = c.held.filter(p => isStockOnly(p.key) && p.pnlPct >= +ansOf('profit'));
+    const c = jakobBook(), g = c.held.filter(p => isStockOnly(p.key) && p.pnlPct >= +ansOf('profit'));
     if (g.length) add('info', 'Gewinnregel', g.map(p => `${shortName(p.key)} ${pctS(p.pnlPct, 0)}`).join(', ') + `: über deiner Schwelle von +${ansOf('profit')} %.`);
   }
   return {rows, book, bd};
@@ -963,7 +1024,7 @@ function guardRails(rc) {
   add(top && top.w > mp ? 'warn' : 'ok', 'Kein Einsatz über die Hälfte des Kelly-Maßes', `Auch bei einer guten Wette nie alles auf einen Titel: höchstens ${mp} % je Aktie${top ? `, größte heute ${nf(top.w, 0)} %` : ''}. Sam Bankman-Fried wollte sogar mehr als das volle Kelly-Maß setzen.`);
   const bd = rc.bd, mdd = +a('max_dd') || 35;
   add(!bd ? 'open' : bd.dd < -mdd ? 'bad' : 'ok', 'Totalverlust vermeiden', bd ? `Größter Rückgang dieser Mischung: ${pctS(bd.dd, 0)}, deine Grenze −${mdd} %. Ein Erwartungswert hilft nichts, wenn man vorher aufgeben muss.` : 'Noch kein Verlauf für die Rechnung.');
-  if (calcFor('main').held.some(p => isCoin(p.key))) add(a('wallet') === 'exchange' ? 'warn' : a('wallet') ? 'ok' : 'open', 'Coins nicht auf der Börse lassen', a('wallet') === 'exchange' ? 'Auf einer Krypto-Börse gehören die Coins im Ernstfall der Börse, wie bei FTX.' : a('wallet') ? 'Gut: nicht auf einer Krypto-Börse.' : 'Frage offen: Wo liegen deine Coins?');
+  if (jakobBook().held.some(p => isCoin(p.key))) add(a('wallet') === 'exchange' ? 'warn' : a('wallet') ? 'ok' : 'open', 'Coins nicht auf der Börse lassen', a('wallet') === 'exchange' ? 'Auf einer Krypto-Börse gehören die Coins im Ernstfall der Börse, wie bei FTX.' : a('wallet') ? 'Gut: nicht auf einer Krypto-Börse.' : 'Frage offen: Wo liegen deine Coins?');
   add(a('on_loss') === 'buy' && a('cash') === 'no' ? 'warn' : a('cash') ? 'ok' : 'open', 'Reserve für Nachkäufe', a('cash') === 'no' && a('on_loss') === 'buy' ? 'Du willst bei Schwäche nachkaufen, hast aber keine Reserve.' : a('cash') ? 'Reserve vorhanden.' : 'Frage offen: Hast du Geld zum Nachkaufen?');
   return g;
 }
@@ -976,12 +1037,12 @@ function playbook(rc) {
   const broken = mine.filter(r => r.est90 != null && r.est90 <= -10);
   const fg = (S.daily.market_fg || {}).value, kfg = (S.daily.crypto_fg || {}).value, ms = momStyle();
   const watch = (S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol)), planK = planRows().map(r => r.key);
-  const own = new Set([...book.map(x => x.key), ...planK, ...calcFor('main').held.map(p => p.key)]), isOn = k => (momOf(k) || {}).state === 'on';
+  const own = new Set([...book.map(x => x.key), ...planK, ...jakobBook().held.map(p => p.key)]), isOn = k => (momOf(k) || {}).state === 'on';
   const sigOn = [...own].filter(isOn), sigW = [...new Set(watch)].filter(k => !own.has(k) && isOn(k));
   const broke = book.map(x => x.key).filter(k => (momOf(k) || {}).state === 'down');
   const fearThen = {buy: 'Kaufzeitpunkt nach deiner Regel, auch ohne Momentum-Signal: in Teilen, Reserve einsetzen, nur Titel mit intakten Gewinnschätzungen, die im Thema stärksten zuerst. Extreme Angst kann Wochen dauern.', wait: 'Nach deiner Regel abwarten, bis die Angst nachlässt.', ignore: 'Spielt für dich keine Rolle.'}[ansOf('fear')] || 'Frage offen: Was tust du bei extremer Angst?';
   const kn = ks => ks.map(k => shortName(k)).join(', ');
-  const sigOff = calcFor('main').held.map(p => p.key).filter(k => isStockOnly(k) && momOf(k) && momOf(k).state !== 'on');
+  const sigOff = jakobBook().held.map(p => p.key).filter(k => isStockOnly(k) && momOf(k) && momOf(k).state !== 'on');
   const earn = mine.filter(r => r.earnings && isoToDay(r.earnings) >= todayDay() && isoToDay(r.earnings) <= soon);
   const bd = rc.bd;
   return [
@@ -998,7 +1059,7 @@ function playbook(rc) {
 }
 function strategySummary() {
   const a = id => ansOf(id), L = id => ansLabel(id);
-  const s = [`${{high: 'Wachstum mit hohem Risiko', mid: 'Wachstum mit mittlerem Risiko', low: 'Vorsichtiges Wachstum'}[a('risk')] || 'Wachstum'}${a('themes') === 'ai' || !a('themes') ? ', Schwerpunkt KI und Halbleiter' : a('themes') === 'tech' ? ', Schwerpunkt Tech' : ''}, ${L('positions') || '6 bis 8'} Einzelaktien ab ${eur(+a('min_pos') || 500, 0)}.`,
+  const s = [`Depot Jakob: ${{high: 'Wachstum mit hohem Risiko', mid: 'Wachstum mit mittlerem Risiko', low: 'Vorsichtiges Wachstum'}[a('risk')] || 'Wachstum'}${a('themes') === 'ai' || !a('themes') ? ', Schwerpunkt KI und Halbleiter' : a('themes') === 'tech' ? ', Schwerpunkt Tech' : ''}, ${L('positions') || '6 bis 8'} Einzelaktien ab ${eur(+a('min_pos') || 500, 0)}.`,
     `Horizont ${{lt2: 'unter 2 Jahren', '2to5': '2 bis 5 Jahre', gt5: 'über 5 Jahre'}[a('horizon') || 'lt2']}, Rückgang bis −${+a('max_dd') || 35} % tragbar.${a('style') === 'first' ? ' Neu gekauft wird nach Momentum, wenn der Trend steht; Rücksetzer nur, solange der Kurs über der 200-Tage-Linie bleibt.' : a('style') === 'only' ? ' Gekauft wird nur mit Momentum-Signal.' : a('on_loss') === 'buy' ? ' Bei Schwäche nachkaufen, solange die Gewinnschätzungen halten.' : ''}${a('fear') === 'buy' || a('crash') === 'buy' ? ` Ausnahme: ${[a('fear') === 'buy' ? 'bei extremer Angst am Markt' : '', a('crash') === 'buy' ? 'bei einem Halbleiter-Crash' : ''].filter(Boolean).join(' und ')} wird gekauft, in Teilen und solange die Gewinnschätzungen halten.` : ''}${a('regime') === 'half' ? ' Liegen Halbleiter unter ihrer 200-Tage-Linie, nur halb investiert.' : ''}${a('sell') === 'signal' ? ' Verkauft wird, wenn das Momentum-Signal zum Monatsende aus ist.' : ''}${+a('monthly') ? ` Jeden Monat ${eur(+a('monthly'), 0)} neu, ${{mom: 'Momentum zuerst', gap: 'dorthin, wo am meisten fehlt', split: 'nach Plan-Gewicht'}[a('rate') || 'mom']}.` : ''}`,
     'Auswahl nach Momentum, Schätzungsänderungen, Wachstum und Qualität, dazu relative Stärke im KI-Umfeld. Bewertung nur als Sicherheitsnetz, Erwartungswert als Chance-Risiko-Prüfung.'];
   const t = [], sm = (S.screen || {}).semis;

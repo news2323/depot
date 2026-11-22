@@ -33,6 +33,7 @@ const CMP = {Gesamt: 'Dein Depot', Aktien: 'Deine Aktien und ETFs', Krypto: 'Dei
 
 function render() {
   if (!LOCAL && !cfg) return renderSetup();
+  S._jb = null; S._ideal = undefined; S._rules = null;   // Depot Jakob, Ideal-Depot, Wort je Titel neu rechnen
   const c = calc(), now = new Date(), upd = S.market.updated;
   const stale = upd && Date.now() - Date.parse(upd) > 45 * 6e4;
   if (!TABS.some(t => t[0] === S.tab)) S.tab = 'home';
@@ -101,6 +102,9 @@ const momTag = (key, near) => { const m = momOf(key); if (!m) return '';
   if (m.state === 'on') return `<span class="mom on" title="Momentum-Signal an${m.since < 60 ? ' seit ' + m.since + ' Handelstagen' : ''}: Aufwärtstrend, nahe am Jahreshoch, stärker als der Markt">${m.since <= 10 ? 'Momentum neu' : 'Momentum'}</span>`;
   if (m.state === 'fade') return '<span class="mom fade" title="Momentum lässt nach: Kurs unter die 50-Tage-Linie gefallen">Momentum ↘</span>';
   return near && m.state === 'none' && m.met >= 3 ? '<span class="mom near" title="3 von 4 Prüfungen erfüllt">fast Momentum</span>' : ''; };
+// „Deine Regel“ (nur Depot Jakob): Pille in Tabellen, farbiges Wort in Unterzeilen am Handy
+const ruleChip = key => { const r = ruleOf(key); return !r ? '' : r.word === 'Warten' ? `<span class="ts" title="${esc(r.why.join(' · '))}">warten</span>` : `<span class="chip ${r.cls}" title="${esc(r.why.join(' · '))}">${r.word}</span>`; };
+const ruleTag = key => { const r = ruleOf(key); return r && r.word !== 'Warten' ? `<span class="rw ${r.cls}" title="${esc(r.why.join(' · '))}">${r.word}</span>` : ''; };
 const tag = key => `<span class="tg">${logo(key)}<b>${esc(shortName(key))}</b></span>`;   // klein, in Zeilen und Fließtext
 const chgA = v => v == null || isNaN(v) ? '<span class="muted">–</span>' : `<span class="num chga ${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '▲' : '▼'} ${nf(Math.abs(v), 2)} %</span>`;
 const w7 = key => { const s = (S.market.spark || {})[key], p = A(key).price; return s && s[0] && p != null ? (p / s[0] - 1) * 100 : null; };
@@ -108,6 +112,7 @@ const keyBySym = sym => allTracked().find(k => k.split(':')[1] === sym) || 'stoc
 const COL = {
   score: {id: 'score', label: 'Punkte', cls: 'c-score', num: true, sort: r => ratingOf(r.key), html: r => score(r.key)},
   name: {id: 'name', label: 'Titel', cls: 'c-name', sort: r => shortName(r.key).toLowerCase(), html: r => nameCell(r.key, r.p ? `${nf(r.p.qty, r.p.qty % 1 ? 2 : 0)} Stück` : undefined)},
+  rule: {id: 'rule', label: 'Regel', cls: 'c-rule', num: true, sort: r => { const x = r.rj === false ? null : ruleOf(r.key); return x ? RULE_ORDER[x.word] : null; }, html: r => (r.rj === false ? '' : ruleChip(r.key)) || '<span class="ts">–</span>'},
   nameM: {id: 'name', label: 'Titel', cls: 'c-name', sort: r => shortName(r.key).toLowerCase(), html: r => nameCell(r.key, r.p ? `${nf(r.p.qty, r.p.qty % 1 ? 2 : 0)} Stück` : undefined, momTag(r.key))},
   spark: {id: 'w7', label: '7 Tage', cls: 'c-spark hm', num: true, sort: r => w7(r.key), html: r => `<div class="spk">${spark7(r.key)}<small class="num ${sign(w7(r.key))}">${w7(r.key) == null ? '' : pctS(w7(r.key), 1)}</small></div>`},
   price: {id: 'price', label: 'Kurs', cls: 'r hm', html: r => `<span class="num">${px(r.key, A(r.key).price)}</span>`},
@@ -450,7 +455,8 @@ function drawCharts() {
 
 /* ---------------------------------------------------------------- Positionen */
 function vDepot(c) {
-  const f = fltOn('depot'), rows = c.held.filter(p => f === 'Alle' || typeOf(p.key) === f).map(p => ({key: p.key, p}));
+  const jh = jakobHeld(), f = fltOn('depot'), rows = c.held.filter(p => f === 'Alle' || typeOf(p.key) === f).map(p => ({key: p.key, p, rj: !!jh[p.key]}));
+  const rcol = rows.some(r => r.rj) ? [COL.rule] : [];
   const sumV = rows.reduce((s, r) => s + (r.p.value || 0), 0), sumP = rows.reduce((s, r) => s + (r.p.pnl || 0), 0), sumD = rows.reduce((s, r) => s + (r.p.dayEur || 0), 0);
   const txs = [...c.txs].reverse();
   return `${depSeg() ? `<div class="depbar">${depSeg()}</div>` : ''}<div class="grid">
@@ -459,7 +465,7 @@ function vDepot(c) {
     <section class="card"><div class="toolbar"><div>${flt('depot', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
       <div class="sumline">Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet · Spalten per Klick sortieren, Zeile antippen für die Gründe.</div>
       <button class="btn" data-act="addtx">Kauf oder Verkauf</button></div>
-      ${c.held.length ? `<div class="wl-wide">${tbl('depot', [COL.score, COL.nameM, COL.spark, COL.price, COL.day, COL.value, COL.pnl, COL.weight], rows, ['value', -1])}</div>
+      ${c.held.length ? `<div class="wl-wide">${tbl('depot', [COL.score, ...rcol, COL.nameM, COL.spark, COL.price, COL.day, COL.value, COL.pnl, COL.weight], rows, ['value', -1])}</div>
       <div class="wl-narrow">${posList('depot', rows, ['value', -1])}</div>` : '<p class="empty">Trag oben deinen ersten Kauf ein.</p>'}</section>
     ${divCard(c)}
     <details class="card fold"><summary><div><h2>Buchungen</h2><p class="sub">${txs.length} eingetragene Käufe und Verkäufe</p></div><span class="chev"></span></summary>
@@ -511,7 +517,7 @@ function listView(id, cols, rows, def, o) {
   return sorter + `<div class="wl">${rs.map(row => { const key = row.key, r = ratingOf(key);
     return `<button class="wl-row" data-act="open" data-key="${esc(key)}">
       <span class="wl-sc${r == null ? ' none' : ' t' + tierOf(r)}" title="${r == null ? 'keine Punkte' : r + ' von 10 Punkten'}">${r == null ? '–' : r}</span>${logo(key)}
-      <span class="wl-nm"><b>${esc(shortName(key))}</b><small>${withPre(momTag(key), o.sub ? o.sub(row) : subLine(key))}</small></span>
+      <span class="wl-nm"><b>${esc(shortName(key))}</b><small>${withPre((o.pre ? o.pre(row) : ruleTag(key)) || momTag(key), o.sub ? o.sub(row) : subLine(key))}</small></span>
       <span class="wl-px num">${o.mid(row)}</span>
       <span class="wl-ch">${spark7(key)}${chgA(A(key).change_pct).replace('chga', 'chga sm')}</span></button>`; }).join('')}</div>
     <p class="wl-hint">${o.hint || ''}Links die Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet. Rechts der Verlauf über 7 Tage (gestrichelt: Stand vor 7 Tagen) und die Änderung heute. „Momentum“: Aufwärtstrend, nahe am Jahreshoch, stärker als der Markt (↘ lässt nach). Antippen für die Gründe. · Version ${esc(APP_V)}</p>`;
@@ -520,6 +526,7 @@ const watchList = (id, rows, def) => listView(id, LCOL, rows, def, {mid: r => px
 const PCOL = [COL.score, {id: 'day', label: 'Heute', num: true, sort: COL.day.sort}, {id: 'value', label: 'Wert', num: true, sort: r => r.p.value},
   {id: 'pnl', label: 'Gewinn', num: true, sort: r => r.p.pnlPct}, {id: 'name', label: 'Name', sort: r => shortName(r.key).toLowerCase()}];
 const posList = (id, rows, def) => listView(id, PCOL, rows, def, {
+  pre: r => r.rj ? ruleTag(r.key) : '',
   sub: r => [shortName(r.key) === tick(r.key) ? '' : tick(r.key), nf(r.p.weight, 1) + ' %'].filter(Boolean).join(' · '),
   mid: r => `${eur(r.p.value, 0)}<small class="${sign(r.p.pnl)}" title="${r.p.pnl == null ? '' : eurS(r.p.pnl)}">${r.p.pnl == null ? '–' : pctS(r.p.pnlPct, 1)}</small>`,
   hint: 'Mitte: Wert und Gewinn seit Kauf in Prozent. '});
@@ -529,7 +536,7 @@ function vWatch() {
   return `<div class="grid">
     <section class="card"><div class="toolbar"><div>${flt('watch', ['Alle', 'Aktien', 'ETFs', 'Krypto'])}</div>
       <div class="sumline"><b>${rows.length}</b> Titel beobachtet<span class="hm"> · Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet · Zeile antippen für die Gründe</span></div><button class="btn" data-act="addwatch">Titel hinzufügen</button></div>
-      ${wl.length ? `<div class="wl-wide">${tbl('watch', [COL.score, COL.nameM, COL.spark, COL.price, COL.day, COL.m1, COL.zone], rows, ['name', 1])}</div>
+      ${wl.length ? `<div class="wl-wide">${tbl('watch', [COL.score, ...(idealBook() ? [COL.rule] : []), COL.nameM, COL.spark, COL.price, COL.day, COL.m1, COL.zone], rows, ['name', 1])}</div>
       <div class="wl-narrow">${watchList('watch', rows, ['name', 1])}</div>` : '<p class="empty">Noch nichts auf der Watchlist.</p>'}</section>
     <div class="grid half">
     ${card('Alerts', 'Push aufs Handy, sobald eine Schwelle erreicht ist', (al.length ? `<div class="rows tight">${al.map(a => { const fd = st[a.id];
@@ -698,32 +705,34 @@ function planCard() {
   if (!pl || !rows.length) return '';
   const tot = rows.reduce((s, r) => s + r.eur, 0), val = rows.reduce((s, r) => s + r.value, 0), bd = basketDD(rows.map(r => ({key: r.key, w: r.pct})));
   const mdd = +ansOf('max_dd') || 35;
-  return card('Dein Plan', `${esc(pl.note || 'Geplante Käufe')} · Stand ${dateDe(pl.date)} · noch nicht gekauft`, `<div class="tiles" style="margin-top:0">
+  const bought = Object.keys(jakobHeld()).length;
+  return card('Depot Jakob: Plan', `${esc(pl.note || 'Geplante Käufe')} · Stand ${dateDe(pl.date)} · ${bought ? bought + ' Titel im Depot Jakob' : 'noch nicht gekauft'}${pl.reserve_pct ? ' · ' + pl.reserve_pct + ' % Reserve' : ''}`, `<div class="tiles" style="margin-top:0">
       ${tile('Geplant', eur(tot, 0), rows.length + ' Aktien')}${tile('Wert heute', eur(val, 0), 'wenn am ' + dateDe(pl.date) + ' gekauft', sign(val - tot))}
       ${tile('Größter Rückgang', bd ? pctS(bd.dd, 0) : '–', bd ? `in ${nf(bd.years, 0)} Jahren, deine Grenze −${mdd} %` : 'Verlauf fehlt noch', bd && bd.dd < -mdd ? 'neg' : '')}${tile('Unter dem Hoch', bd ? pctS(bd.fromHigh, 0) : '–', 'die Mischung heute')}</div>
-    <div class="tblwrap"><table class="tbl"><thead><tr><th>Für dich</th><th>Titel</th><th class="r">Anteil</th><th class="r hm">Betrag</th><th class="r">Seit Plan</th><th class="r hm">Punkte</th><th>Lage</th></tr></thead><tbody>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th>Für dich</th><th>Titel</th><th>Regel</th><th class="r">Anteil</th><th class="r hm">Betrag</th><th class="r">Seit Plan</th><th class="r hm">Punkte</th><th class="hm">Lage</th></tr></thead><tbody>
     ${rows.map(r => { const sr = scrRow(r.key) || {}, f = fitOf(scrRow(r.key));
       const mo = momOf(r.key) || {};
       const lage = sr.flags && sr.flags.cut ? '<span class="chip bad">Schätzung gesenkt</span>' : mo.state === 'on' ? `<span class="chip good">Momentum-Signal${mo.since <= 10 ? ' neu' : ''}</span>`
         : sr.chg5 != null && sr.chg5 <= -8 && !(sr.est90 < -2) ? `<span class="chip warn">Rücksetzer ${pctS(sr.chg5, 0)}, Schätzung hält</span>`
         : sr.earnings && isoToDay(sr.earnings) - todayDay() <= 14 && isoToDay(sr.earnings) >= todayDay() ? `<span class="chip blue">Zahlen ${dateDe(sr.earnings)}</span>`
         : mo.state === 'fade' ? '<span class="chip warn">Momentum lässt nach</span>' : mo.state === 'down' ? `<span class="chip">kein Signal · ${pctS(mo.from_high, 0)} vom Hoch</span>` : '<span class="muted">–</span>';
-      return `<tr data-act="open" data-key="${esc(r.key)}"><td>${fitBadge(f)}</td><td>${nameCell(r.key, sr.theme || '')}</td><td class="r num">${nf(r.pct, 0)} %</td><td class="r num hm">${eur(r.eur, 0)}</td>
-        <td class="r">${chgA(r.chg)}</td><td class="r hm">${score(r.key)}</td><td>${lage}</td></tr>`; }).join('')}</tbody></table></div>
+      return `<tr data-act="open" data-key="${esc(r.key)}"><td>${fitBadge(f)}</td><td>${nameCell(r.key, sr.theme || '')}</td><td>${ruleChip(r.key)}</td><td class="r num">${nf(r.pct, 0)} %</td><td class="r num hm">${eur(r.eur, 0)}</td>
+        <td class="r">${chgA(r.chg)}</td><td class="r hm">${score(r.key)}</td><td class="hm">${lage}</td></tr>`; }).join('')}</tbody></table></div>
     <p class="hint">„Seit Plan“: Kurs in Euro seit dem Plantag. „Größter Rückgang“: diese Gewichte mit den Kursen der Vergangenheit zurückgerechnet. „Momentum-Signal“: über der 50- und 200-Tage-Linie, nahe am Jahreshoch, stärker als der S&amp;P 500. Faustregel, keine Anlageberatung.</p>`, '', 'span7');
 }
 function rateCard() {
   const r = monthlyRate();
   if (!r) return '';
-  const mon = new Date().toLocaleDateString('de-DE', {month: 'long'}), L = {mom: 'Momentum zuerst', gap: 'was am meisten fehlt', split: 'nach Plan-Gewicht'}[r.rule];
-  const body = r.pick.length ? `<div class="rows tight">${r.pick.map(x => `<button class="row" data-act="open" data-key="${esc(x.key)}"><div class="l">${nameCell(x.key, `Plan ${nf(x.pct, 0)} % · im Depot ${eur(x.have, 0)}`, momTag(x.key))}</div><div class="r num"><b>${eur(x.eur, 0)}</b></div></button>`).join('')}</div>` : '';
+  const mon = new Date().toLocaleDateString('de-DE', {month: 'long'}), L = {mom: 'Momentum zuerst', gap: 'was am meisten fehlt', split: 'nach Gewicht auf alle'}[r.rule];
+  const body = r.pick.length ? `<div class="rows tight">${r.pick.map(x => `<button class="row" data-act="open" data-key="${esc(x.key)}"><div class="l">${nameCell(x.key, `Ziel ${eur(x.target, 0)} · im Depot ${eur(x.have, 0)}`, ruleTag(x.key) || momTag(x.key))}</div><div class="r num"><b>${eur(x.eur, 0)}</b></div></button>`).join('')}</div>` : '';
   return card('Monatsrate', `${eur(r.m, 0)} im ${mon} · Regel: ${L}`, `${r.viaEx ? `<div class="note warn" style="margin:0 0 10px"><b>Ausnahme aktiv:</b> ${esc(r.ex.text)}.</div>` : ''}<p class="body small" style="margin:0 0 8px">${esc(r.why)}</p>${body}
-    <p class="hint">Ziel ist dein Plan-Gewicht, gemessen am Hauptdepot. Bei ${eur(+ansOf('min_pos') || 500, 0)} Mindestgröße je Position gehen ${eur(r.m, 0)} auf höchstens ${r.k} ${r.k === 1 ? 'Titel' : 'Titel'} im Monat${r.rule === 'split' ? ' (als Sparplan auf alle)' : ''}. Titel mit gesenkten Schätzungen fallen heraus. Regel aus deinen Antworten, keine Anlageberatung.</p>`, '', 'span5');
+    ${r.pick.length ? `<p class="small" style="margin:8px 0 0">${eur(r.mm, 0)} in Aktien, ${eur(r.reserve, 0)} als Reserve.</p>` : ''}
+    <p class="hint">Ziel ist das Ideal-Depot Jakob: ${nf(r.share * 100, 0)} % in Aktien, der Rest Reserve (deine Grenze für Rückgänge${r.half ? ', dazu der Marktfilter' : ''}). Bei ${eur(+ansOf('min_pos') || 500, 0)} Mindestgröße je Position geht der Aktienteil auf höchstens ${r.k} Titel im Monat${r.rule === 'split' ? ' (als Sparplan auf alle)' : ''}. Hauptdepot und Fenja zählen nicht mit. Regel aus deinen Antworten, keine Anlageberatung.</p>`, '', 'span5');
 }
 function checkCard() {
   const mode = S.rcm || (prof().plan ? 'plan' : 'depot'), rc = ruleCheck(mode);
   const body = rc.rows.length ? `<div class="rules">${rc.rows.map(r => `<div class="rule">${stIcon(r.state)}<div><b>${esc(r.title)}</b><div class="x">${esc(r.text)}</div></div></div>`).join('')}</div>` : '<p class="empty">Keine Positionen für diese Auswahl.</p>';
-  return card('Regel-Check', 'Deine Positionen gegen dein Profil', body + `<p class="hint">Gezählt werden Einzelaktien${ansOf('etf') === 'base' ? ' und ETFs' : ''}${ansOf('crypto') === 'part' ? ' und Krypto' : ''}, beim Depot nur das Hauptdepot. Keine Anlageberatung.</p>`,
+  return card('Regel-Check', 'Deine Positionen gegen dein Profil', body + `<p class="hint">Gezählt werden Einzelaktien${ansOf('etf') === 'base' ? ' und ETFs' : ''}${ansOf('crypto') === 'part' ? ' und Krypto' : ''}, beim Depot nur das Depot Jakob. Keine Anlageberatung.</p>`,
     seg('rcm', ['Plan', 'Depot', 'Beides'], {plan: 'Plan', depot: 'Depot', both: 'Beides'}[mode]), 'span7');
 }
 function guardCard() {
@@ -734,14 +743,14 @@ function guardCard() {
 function candCard() {
   const list = ((S.screen || {}).list || []).map(r => ({r, f: fitOf(r)})).filter(x => x.f != null);
   if (!list.length) return card('Kandidaten', 'Aktien, die zu dir passen könnten', '<p class="empty">Der Filter läuft mit dem nächsten Tageslauf.</p>', '', 'span12');
-  const held = new Set(calcFor('main').held.map(p => p.key)), plan = new Set(planRows().map(r => r.key));
+  const held = new Set(Object.keys(jakobHeld())), plan = new Set(planRows().map(r => r.key));
   const fl = S.scf || 'Neu für dich';
   let xs = list.filter(x => fl === 'Alle' ? true : fl === 'Neu für dich' ? !held.has(x.r.key) && !plan.has(x.r.key)
     : fl === 'Momentum' ? (x.r.mom || {}).state === 'on' || (x.r.mom || {}).state === 'none' && (x.r.mom || {}).met >= 3
     : fl === 'Rücksetzer' ? x.r.chg5 != null && x.r.chg5 <= -8 && !x.r.flags.cut : x.r.c.theme >= 0.9);
   xs.sort((a, b) => fl === 'Momentum' ? ((b.r.mom || {}).state === 'on') - ((a.r.mom || {}).state === 'on') || b.f - a.f : b.f - a.f);
   const more = xs.length > 15 && !S.scAll; if (more) xs = xs.slice(0, 15);
-  const tagOf = k => held.has(k) ? '<span class="chip">im Depot</span>' : plan.has(k) ? '<span class="chip blue">im Plan</span>' : '';
+  const tagOf = k => held.has(k) ? '<span class="chip">im Depot Jakob</span>' : plan.has(k) ? '<span class="chip blue">im Plan</span>' : '';
   const aiOn = list.some(x => (x.r.mom || {}).state === 'on' && x.r.c.theme >= 0.6);
   const note = fl === 'Momentum' && xs.length && !aiOn ? '<div class="note" style="margin:0 0 10px">Im KI- und Halbleiterumfeld hat gerade kein Titel das Signal. Momentum haben vor allem Titel außerhalb deines Schwerpunkts, darum die niedrige Passung. Typisch nach einem starken Rückgang bei Tech.</div>' : '';
   const empty = !xs.length && fl === 'Momentum' ? '<p class="empty">Gerade hat kein Titel der Auswahl das Momentum-Signal und keiner ist nah dran. Typisch nach einem starken Rückgang: Das Signal kommt erst, wenn die Kurse wieder über ihre 200-Tage-Linie steigen.</p>' : '';
@@ -749,7 +758,7 @@ function candCard() {
     const open = S.scx === r.key, w = fitW();
     const bars = Object.keys(w).map(k => `<div class="fb"><span>${FACTOR_DE[k]}</span><i><b style="width:${Math.round((r.c[k] ?? 0.5) * 100)}%"></b></i><em>${nf(w[k] * 100, 0)} %</em></div>`).join('');
     const tracked = !!(D(r.key).hist || A(r.key).price);
-    return `<tr data-act="scx" data-key="${esc(r.key)}" class="${open ? 'open' : ''}"><td>${fitBadge(f)}</td><td>${nameCell(r.key, r.theme, momTag(r.key, fl === 'Momentum'))} ${tagOf(r.key)}</td>
+    return `<tr data-act="scx" data-key="${esc(r.key)}" class="${open ? 'open' : ''}"><td>${fitBadge(f)}</td><td>${nameCell(r.key, r.theme, ruleTag(r.key) || momTag(r.key, fl === 'Momentum'))} ${tagOf(r.key)}</td>
       <td class="r num ${sign(r.r6)}">${r.r6 == null ? '–' : pctS(r.r6, 0)}</td><td class="r num hm ${sign(r.est90)}">${r.est90 == null ? '–' : pctS(r.est90, 0)}</td>
       <td class="r num hm">${r.rev_g == null ? '–' : pctS(r.rev_g, 0)}${r.accel === 'schneller' ? ' ↗' : r.accel === 'langsamer' ? ' ↘' : ''}</td>
       <td class="r num hm ${sign(r.ev)}">${r.ev == null ? '–' : pctS(r.ev, 0)}</td><td class="r hm">${r.rating ? `<span class="score t${tierOf(r.rating)}">${r.rating}</span>` : '–'}</td>
@@ -771,7 +780,7 @@ function playCard() {
 }
 function eventsCard() {
   const ev = ((S.screen || {}).events || []).slice(0, 12);
-  const evRow = e => /^fg:/.test(e.key) ? `<div class="row"><div class="l"><div class="t"><b>${esc(e.symbol)}</b></div><div class="m">${esc(e.text)}</div></div><div class="r small muted">${dateDe(e.day)}${e.important ? ' · Push' : ''}</div></div>`
+  const evRow = e => /^(fg|depot):/.test(e.key) ? `<div class="row"><div class="l"><div class="t"><b>${esc(e.symbol)}</b></div><div class="m">${esc(e.text)}</div></div><div class="r small muted">${dateDe(e.day)}${e.important ? ' · Push' : ''}</div></div>`
     : `<button class="row" data-act="${D(e.key).hist ? 'open' : 'scx'}" data-key="${esc(e.key)}"><div class="l"><div class="t">${tag(e.key)}</div><div class="m">${esc(e.text)}</div></div><div class="r small muted">${dateDe(e.day)}${e.important ? ' · Push' : ''}</div></button>`;
   return card('Hinweise', 'Was sich bei Plan, Depot und Kandidaten getan hat', ev.length ? `<div class="rows tight">${ev.map(evRow).join('')}</div>`
     : '<p class="empty">Noch keine Hinweise.</p>', '', 'span5');
@@ -784,7 +793,7 @@ const BT_P = {near: ['Nähe zum Jahreshoch', v => v >= 100 ? 'egal' : `höchsten
   rel: ['Stärker als der S&P 500', v => v ? 'ja, 6 Monate' : 'egal'], n_pos: ['Anzahl Titel', v => v + ' Titel'],
   fear: ['Ausnahme Angst', v => v === 'c25' ? 'unter 25 und Halbleiter −20 %' : v ? 'unter ' + v : 'keine'], crash: ['Ausnahme Halbleiter-Crash', v => v ? `${-v} % unter dem Hoch` : 'keine'],
   exit: ['Verkauf', v => ({signal: 'wenn das Signal ausgeht', trend: 'unter der 200-Tage-Linie', better: 'wenn es Besseres gibt'})[v]],
-  empty: ['Freie Plätze', v => v === 'cash' ? 'Reserve' : 'S&P 500'], regime: ['Marktfilter', v => v === 'half' ? 'halb Reserve unter der 200-Tage-Linie der Halbleiter' : 'keiner']};
+  empty: ['Freie Plätze', v => v === 'cash' ? 'Reserve' : 'S&P 500'], ex_sort: ['Reihenfolge bei Ausnahmen', v => v === 'fit' ? 'beste Passung' : 'Stärke im Thema'], regime: ['Marktfilter', v => v === 'half' ? 'halb Reserve unter der 200-Tage-Linie der Halbleiter' : 'keiner']};
 const bigE = v => v >= 1e6 ? nf(v / 1e6, 2) + ' Mio. €' : eur(v, 0);
 const pc = (v, d = 0) => v == null ? '–' : pctS(v, d);
 function btResult(b) {
@@ -858,6 +867,56 @@ function btCard() {
     fn(b) + `<p class="hint">Grenzen: Die Auswahl der Titel ist von heute, die Gewinner von heute sind also dabei und Pleiten fehlen. Darum zählt vor allem der Vergleich mit „Alle Titel der Auswahl“. Monatlich umgeschichtet, ohne Steuern. Vergangene Renditen sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p>`,
     seg('btv', ['Ergebnis', 'Signale', 'Punkte', 'Deine Titel', 'Regeln'], v), 'span12');
 }
+// Depot Jakob (Jakobs Wunsch vom 22.11.2026): Ideal-Depot nach den Backtest-Regeln und was deine Regeln heute sagen
+const viaTxt = v => ({ausnahme: 'Ausnahme: beste Passung, Schätzungen halten', halten: 'im Depot, deine Regel hält', signal: 'Momentum-Signal'})[v] || '';
+function idealCard() {
+  const ib = idealBook();
+  if (!ib) return '';
+  const jh = jakobHeld(), plan = Object.fromEntries(planRows().map(r => [r.key, r])), mdd = +ansOf('max_dd') || 35;
+  const row = (key, w, amount, via) => { const sr = scrRow(key) || {}, f = fitOf(scrRow(key));
+    return `<tr data-act="open" data-key="${esc(key)}"><td>${fitBadge(f)}</td><td>${nameCell(key, sr.theme || '', momTag(key))}</td><td>${ruleChip(key)}</td>
+      <td class="r num">${w ? nf(w * 100, 1) + ' %' : '–'}</td><td class="r num">${amount ? eur(amount, 0) : '–'}</td><td class="r num hm">${plan[key] ? nf(plan[key].pct, 0) + ' %' : '–'}</td>
+      <td class="r num hm">${jh[key] ? eur(jh[key].value, 0) : '–'}</td><td class="small hm">${esc(via)}</td></tr>`; };
+  const other = [...new Set([...Object.keys(plan), ...Object.keys(jh)])].filter(k => !ib.items.some(x => x.key === k));
+  const same = ib.items.length && ib.items.every(it => plan[it.key]) && Object.keys(plan).length === ib.items.length;
+  const body = `<div class="tiles" style="margin-top:0">${tile('In Aktien', nf(ib.share * 100, 0) + ' %', `${ib.items.length} von ${ib.n} Plätzen`)}${tile('Reserve', nf(ib.reserve * 100, 0) + ' %', eur(ib.base * ib.reserve, 0))}
+      ${tile('Je Titel', ib.items.length ? eur(ib.items[0].eur, 0) : '–', 'gleich gewichtet')}${tile('Rückgang im Backtest', `etwa −${mdd} %`, ib.filt ? 'mit Marktfilter weniger' : 'deine Grenze')}</div>
+    ${ib.ex.on ? `<div class="note warn" style="margin:0 0 10px"><b>Ausnahme aktiv:</b> ${esc(ib.ex.text)}. Kein Titel muss dafür ein Signal haben, die Schätzungen müssen halten.</div>` : ib.filt ? `<div class="note" style="margin:0 0 10px"><b>Marktfilter aktiv:</b> Halbleiter ${pctS(ib.sm.ma200, 0)} zur 200-Tage-Linie, darum nur halb investiert.</div>` : ''}
+    <div class="tblwrap"><table class="tbl"><thead><tr><th>Für dich</th><th>Titel</th><th>Regel</th><th class="r">Anteil</th><th class="r">Betrag</th><th class="r hm">Dein Plan</th><th class="r hm">Im Depot</th><th class="hm">Warum</th></tr></thead><tbody>
+      ${ib.items.map(it => row(it.key, it.w, it.eur, viaTxt(it.via))).join('')}
+      ${other.map(k => row(k, 0, 0, plan[k] ? 'in deinem Plan, nicht im Ideal-Depot' : 'im Depot, nicht im Ideal-Depot')).join('')}
+      <tr><td></td><td><b>Reserve</b><div class="ts">Geld für Rücksetzer und Ausnahmen</div></td><td></td><td class="r num">${nf(ib.reserve * 100, 1)} %</td><td class="r num">${eur(ib.base * ib.reserve, 0)}</td><td class="r hm">–</td><td class="r hm">–</td><td class="hm"></td></tr></tbody></table></div>
+    ${ib.items.length && !same ? `<div class="btnrow" style="margin-top:12px"><button class="btn" data-act="idealplan">Als Plan übernehmen</button><span class="small muted">ersetzt deinen Plan (${Object.keys(plan).length} Titel) durch das Ideal-Depot; der alte bleibt gespeichert</span></div>` : ''}
+    <p class="hint">So würden deine Regeln das Depot Jakob heute aufstellen. Titel im Depot bleiben, solange deine Verkaufsregel sie hält. Freie Plätze bekommen Titel aus dem KI-Umfeld mit Momentum-Signal, bei einer Ausnahme auch ohne Signal; jeweils beste Passung zuerst, Gewinnschätzungen müssen halten. Höchstens 3 Titel je Thema. Gleich gewichtet wie im Backtest; ${nf(ib.share * 100, 0)} % in Aktien, weil der größte Rückgang im Backtest damit bei etwa −${mdd} % blieb. Basis ${eur(ib.base, 0)} (Plan oder Depot Jakob, das Größere). Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`;
+  return card('Ideal-Depot Jakob', 'Nach dem Backtest und deinen Regeln, Stand heute', body, '', 'span7');
+}
+function todoCard() {
+  const ib = idealBook();
+  if (!ib) return '';
+  const jh = jakobHeld(), keys = [...new Set([...ib.items.map(x => x.key), ...Object.keys(jh), ...planRows().map(r => r.key)])];
+  const rs = keys.map(k => ({key: k, r: ruleOf(k)})).filter(x => x.r), grp = w => rs.filter(x => x.r.word === w), me = monthEnd();
+  const sec = (w, note) => { const xs = grp(w); return xs.length ? `<p class="sh">${w}${note ? ` <span class="muted small">· ${note}</span>` : ''}</p><div class="rows tight">${xs.map(x => `<button class="row" data-act="open" data-key="${esc(x.key)}"><div class="l"><div class="t">${tag(x.key)}</div><div class="m">${esc(x.r.why[0])}</div></div><div class="r num">${x.r.eur ? `<b>${eur(x.r.eur, 0)}</b>` : ''}</div></button>`).join('')}</div>` : ''; };
+  const empty = !Object.keys(jh).length ? `<p class="body small" style="margin:0 0 6px">Depot Jakob ist noch leer. Zum Start nach dem Ideal-Depot: ${eur(ib.base * ib.share, 0)} in ${ib.items.length} Aktien, ${eur(ib.base * ib.reserve, 0)} Reserve. Buchungen dafür im Depot „Jakob“ eintragen.</p>` : '';
+  const wait = grp('Warten'), stat = ib.ex.on ? `<div class="note warn" style="margin:0 0 8px"><b>Ausnahme aktiv:</b> ${esc(ib.ex.text)}. Kaufen in Teilen, nur mit intakten Gewinnschätzungen.</div>`
+    : ib.filt ? `<div class="note" style="margin:0 0 8px"><b>Marktfilter aktiv:</b> Halbleiter ${pctS(ib.sm.ma200, 0)} zur 200-Tage-Linie, nur halb investiert.</div>` : '';
+  return card('Heute zu tun', 'Depot Jakob · was deine Regeln heute sagen', stat + empty + sec('Verkaufen', `zum Monatsende, ${WT[me.getDay()]} ${me.getDate()}.${me.getMonth() + 1}.`) + sec('Kaufen') + sec('Nachkaufen', 'Rücksetzer im Aufwärtstrend') + sec('Halten')
+    + (wait.length ? `<p class="sh">Warten</p><div class="tgs">${wait.map(x => tag(x.key)).join('')}</div>` : '')
+    + `<p class="hint">Kaufen und Verkaufen zum Monatsende wie im Backtest, Nachkaufen bei Rücksetzern sofort. Es zählt nur das Depot Jakob. Deine Regeln, keine Anlageberatung.</p>`, '', 'span5');
+}
+// Detailansicht: was deine Regel für diesen Titel sagt, mit dem passenden Ergebnis aus dem Backtest
+function ruleCard(key) {
+  const r = ruleOf(key), ib = idealBook();
+  if (!r) return '';
+  const held = jakobHeld()[key], it = ib.items.find(x => x.key === key), b = S.bt;
+  const sg = b && Object.fromEntries((b.signals || []).map(x => [x.id, x.h])), st = b && Object.fromEntries((b.strategies || []).map(x => [x.id, x]));
+  const note = !b ? '' : {Kaufen: st.opt && st.ew ? `Im Backtest brachten diese Regeln ${pctS(st.opt.all.cagr, 0)} pro Jahr, alle Titel der Auswahl ${pctS(st.ew.all.cagr, 0)}.` : '',
+    Nachkaufen: sg.dip_up && sg.dip_up['126'] ? `Im Backtest lagen Rücksetzer über der 200-Tage-Linie 6 Monate später ${pctS(sg.dip_up['126'].ex_ew, 1)} vor der Auswahl.` : '',
+    Verkaufen: sg.trend_break && sg.trend_break['252'] ? `Im Backtest lag ein Titel nach einem Trendbruch 12 Monate später ${nf(Math.abs(sg.trend_break['252'].ex_ew), 1)} % hinter der Auswahl.` : ''}[r.word] || '';
+  return card('Deine Regel', 'Depot Jakob', `<div class="ratehead"><span class="chip big ${r.cls}">${r.word}</span><div class="ratemain">${r.eur ? `<div class="ratelabel num">${eur(r.eur, 0)}</div>` : ''}
+    <div class="muted small">${held ? 'Im Depot Jakob: ' + eur(held.value, 0) : 'Nicht im Depot Jakob'}${it ? ' · Ziel im Ideal-Depot ' + eur(it.eur, 0) : ''}</div></div></div>
+    <ul class="dots" style="margin-top:10px">${r.why.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${note ? `<p class="small muted" style="margin:6px 0 0">${esc(note)}</p>` : ''}
+    <p class="tiny muted" style="margin:8px 0 0">Was deine Regeln sagen (Ideal-Depot, Verkaufsregel, Ausnahmen), keine Empfehlung. Keine Anlageberatung.</p>`);
+}
 function vStrat(c) {
   const pr = prof();
   if (!pr.answers) return `<div class="grid">${card('Deine Strategie', 'Noch kein Profil', `<p class="body">Beantworte ein paar Fragen. Danach filtert die App Aktien, die zu dir passen könnten, und prüft dein Depot gegen deine Regeln.</p>
@@ -869,6 +928,8 @@ function vStrat(c) {
       ${sum.t.length ? `<p class="sh">Spannungen in deinem Profil</p><div class="rules">${sum.t.map(t => `<div class="rule">${stIcon('warn')}<div class="x">${esc(t)}</div></div>`).join('')}</div>` : ''}
       ${pr.text ? `<details class="qdone"><summary>Dein Profil im Wortlaut</summary><p class="body small">${esc(pr.text)}</p></details>` : ''}`, '', 'span7')}
     ${questionsCard()}
+    ${idealCard()}
+    ${todoCard()}
     ${planCard()}
     ${rateCard()}
     ${checkCard()}
@@ -1011,6 +1072,7 @@ function vAsset(key) {
     <div class="chart" id="ch-asset" data-key="${esc(key)}"></div>
     <div class="tiles">${tile('1 Monat', pctS(t.perf_1m, 1), '', sign(t.perf_1m))}${tile('1 Jahr', pctS(t.perf_1y, 1), '', sign(t.perf_1y))}
     ${tile('52-Wochen-Spanne', t.low52 ? px(key, t.low52) + ' – ' + px(key, t.high52) : '–')}${tile('Abstand zum Hoch', t.from_high != null ? nf(t.from_high, 1) + ' %' : '–')}</div></section>`;
+  h += ruleCard(key);
   h += momCard(key);
   h += profileCard(key);
   if (v) { const r = ratingOf(key);
@@ -1145,6 +1207,10 @@ document.addEventListener('click', async ev => {
   else if (act === 'rcm') { S.rcm = {Plan: 'plan', Depot: 'depot', Beides: 'both'}[v]; render(); }
   else if (act === 'scf') { S.scf = v; S.scAll = false; render(); }
   else if (act === 'btv') { S.btv = v; render(); }
+  else if (act === 'idealplan') { const ib = idealBook(); if (ib && ib.items.length) { const pr = S.pf.profile || {};
+    S.pf.profile = Object.assign({}, pr, {plan_prev: pr.plan, updated: new Date().toISOString().slice(0, 10), plan: {date: new Date().toISOString().slice(0, 10), total: Math.round(ib.base),
+      note: 'Ideal-Depot nach den Backtest-Regeln', reserve_pct: Math.round(ib.reserve * 100), items: ib.items.map(it => ({kind: 'stock', symbol: it.key.split(':')[1], name: shortName(it.key), pct: Math.round(it.w * 1000) / 10, eur: Math.round(it.eur)}))}});
+    await savePf('Ideal-Depot als Plan übernommen'); } }
   else if (act === 'btadopt' && S.bt) { const ch = S.bt.opt.chosen.p, a = Object.assign({}, (S.pf.profile || {}).answers);
     if (ch.exit === 'signal' || ch.exit === 'trend' || ch.exit === 'better') a.sell = ch.exit;
     a.regime = ch.regime === 'half' ? 'half' : 'full';
