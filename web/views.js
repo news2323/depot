@@ -901,6 +901,7 @@ function howCard() {
   const ib = idealBook() || {}, mdd = +ansOf('max_dd') || 35;
   const pts = ['Nur das Depot Jakob, nur Titel aus dem KI-Umfeld (wie im Backtest). Hauptdepot und Fenja zählen nicht.',
     'Kaufen: Titel mit Momentum-Signal (über 50- und 200-Tage-Linie, nahe am Jahreshoch, stärker als der S&P 500), beste Passung zuerst.',
+    'Toleranz: Ein Titel im Ideal-Depot wird erst ersetzt, wenn ein anderer mehr als 5 von 100 Punkten besser passt. Mit Signal aufgenommen bleibt er, solange das Signal nur nachlässt.',
     'Ausnahmen: Bei extremer Angst (unter 25) oder Halbleitern 20 % unter dem Hoch wird auch ohne Signal gekauft, in Teilen und nur mit intakten Gewinnschätzungen.',
     'Marktfilter: Liegen Halbleiter unter ihrer 200-Tage-Linie, ist nur die Hälfte investiert, außer eine Ausnahme greift.',
     `Verkaufen: ${({signal: 'wenn das Momentum-Signal zum Monatsende aus ist', trend: 'wenn der Kurs unter die 200-Tage-Linie fällt', better: 'wenn es Besseres gibt', thesis: 'wenn die These bricht', stop: 'bei −20 % seit Kauf'})[ansOf('sell') || 'better']}, außer eine Ausnahme greift; sofort bei deutlich gesenkten Schätzungen.`,

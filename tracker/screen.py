@@ -349,7 +349,14 @@ def exception(ans, semis, fg):
     return fear or crash
 
 
-def ideal(rows, pf, ans, semis, fg):
+# Toleranz (Jakobs Wunsch vom 23.11.2026: nur wechseln, wenn ein Unterschied da ist). Ein Titel im Ideal-Depot wird erst
+# ersetzt, wenn ein anderer mehr als KEEP_MARGIN von 100 Punkten besser passt; bei Gleichstand bleibt er. Mit Signal
+# aufgenommen bleibt er vorn, solange das Signal nur nachlässt (fade) und der Kurs über der 200-Tage-Linie liegt.
+# Gleiche Regel in web/app.js (idealBook).
+KEEP_MARGIN = 5
+
+
+def ideal(rows, pf, ans, semis, fg, prev=()):
     lo_hi = [int(x) for x in str(ans.get("positions") or "6-8").split("-")]
     N = int(round(sum(lo_hi) / float(len(lo_hi))))
     minp = float(ans.get("min_pos") or 500)
@@ -365,6 +372,8 @@ def ideal(rows, pf, ans, semis, fg):
     ok = [r for r in allr if r["c"]["theme"] >= tmin and not r["flags"]["cut"] and not (r.get("est90") is not None and r["est90"] <= -5)]
     st = lambda r: (r.get("mom") or {}).get("state")
     sell = ans.get("sell") or "better"
+    was = {x["key"]: x.get("via") for x in prev or [] if x.get("key")}
+    order = lambda r: (-(r["fit"] + (KEEP_MARGIN if r["key"] in was else 0)), r["key"] not in was)
 
     def keep(r):
         return {"signal": st(r) == "on", "trend": st(r) != "down", "better": rank[r["key"]] < 2 * N}.get(sell, st(r) != "down")
@@ -376,11 +385,11 @@ def ideal(rows, pf, ans, semis, fg):
         pick.append({"key": r["key"], "via": via})
     for r in sorted([r for r in ok if r["key"] in held and (keep(r) or ex)], key=lambda r: -r["fit"]):
         take(r, "halten")
-    for r in sorted([r for r in ok if st(r) == "on"], key=lambda r: -r["fit"]):
+    for r in sorted([r for r in ok if st(r) == "on" or (was.get(r["key"]) == "signal" and st(r) == "fade")], key=order):
         take(r, "signal")
     if ex:
         for r in sorted([r for r in ok if (r.get("est90") is None or r["est90"] > -2) and not (r.get("rev_g") is not None and r["rev_g"] < 0)],
-                        key=lambda r: (-r["fit"], -(r["c"].get("rs") or 0))):
+                        key=lambda r: order(r) + (-(r["c"].get("rs") or 0),)):
             take(r, "ausnahme")
     return {"n": n, "share": round(share, 3), "filt": filt, "ex": ex, "items": pick}
 
@@ -443,7 +452,7 @@ def build(store, pf, out, extra, push, sp, fg=None, semis=None, mfg=None):
         r["pros"], r["cons"] = reasons(r)
     rows.sort(key=lambda r: -(r["fit"] if r["fit"] is not None else -1))
     semis = semis or semis_stats() or prev.get("semis")
-    ib = ideal(rows, pf, ans, semis, fg)
+    ib = ideal(rows, pf, ans, semis, fg, (prev.get("ideal") or {}).get("items"))
     new = events(rows, prev, pf, ans, others, fg, [x["key"] for x in ib["items"]])
     words = rule_words(rows, pf, ans, ib)
     new += rule_events(rows, prev, words, ib)
