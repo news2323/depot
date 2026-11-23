@@ -350,10 +350,10 @@ def exception(ans, semis, fg):
 
 
 # Toleranz (Jakobs Wunsch vom 23.11.2026: nur wechseln, wenn ein Unterschied da ist). Ein Titel im Ideal-Depot wird erst
-# ersetzt, wenn ein anderer mehr als KEEP_MARGIN von 100 Punkten besser passt; bei Gleichstand bleibt er. Mit Signal
+# ersetzt, wenn ein anderer mindestens KEEP_MARGIN von 100 Punkten besser passt (Jakobs Vorgabe: 2 Punkte). Mit Signal
 # aufgenommen bleibt er vorn, solange das Signal nur nachlässt (fade) und der Kurs über der 200-Tage-Linie liegt.
 # Gleiche Regel in web/app.js (idealBook).
-KEEP_MARGIN = 5
+KEEP_MARGIN = 2
 
 
 def ideal(rows, pf, ans, semis, fg, prev=()):
@@ -373,7 +373,7 @@ def ideal(rows, pf, ans, semis, fg, prev=()):
     st = lambda r: (r.get("mom") or {}).get("state")
     sell = ans.get("sell") or "better"
     was = {x["key"]: x.get("via") for x in prev or [] if x.get("key")}
-    order = lambda r: (-(r["fit"] + (KEEP_MARGIN if r["key"] in was else 0)), r["key"] not in was)
+    order = lambda r: (-(r["fit"] + (KEEP_MARGIN if r["key"] in was else 0)), r["key"] in was)   # gleich: der Bessere wechselt ein
 
     def keep(r):
         return {"signal": st(r) == "on", "trend": st(r) != "down", "better": rank[r["key"]] < 2 * N}.get(sell, st(r) != "down")

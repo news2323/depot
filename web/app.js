@@ -880,7 +880,7 @@ const jakobHeld = () => Object.fromEntries(jakobBook().held.filter(p => p.value 
 // Marktfilter halbiert ihn. Gleiche Rechnung in tracker/screen.py (ideal): beide Stellen ändern.
 const SHARE_BY_DD = {15: 30, 25: 50, 35: 75, 50: 100};
 const keepRule = (m, f, rank, N) => ({signal: m.state === 'on', trend: m.state !== 'down', better: rank < 2 * N}[ansOf('sell') || 'better'] ?? (m.state !== 'down'));
-const KEEP_MARGIN = 5;
+const KEEP_MARGIN = 2;
 function idealBook() {
   if (S._ideal !== undefined) return S._ideal;
   const list0 = (S.screen || {}).list || [];
@@ -898,9 +898,9 @@ function idealBook() {
   const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes') || 'ai'] ?? 0.6;
   const ok = all.filter(x => (x.r.c || {}).theme >= tmin && !(x.r.flags || {}).cut && !(x.r.est90 != null && x.r.est90 <= -5));
   // Toleranz (Jakobs Wunsch vom 23.11.2026, gleiche Regel in tracker/screen.py KEEP_MARGIN): bisherige Titel bleiben, bis ein
-  // anderer mehr als 5 von 100 Punkten besser passt; mit Signal aufgenommene bleiben vorn, solange das Signal nur nachlässt
+  // anderer mindestens 2 von 100 Punkten besser passt; mit Signal aufgenommene bleiben vorn, solange das Signal nur nachlässt
   const was = Object.fromEntries((((S.screen || {}).ideal || {}).items || []).map(x => [x.key, x.via]));
-  const sc = x => x.f + (x.r.key in was ? KEEP_MARGIN : 0), byFit = (a, b) => sc(b) - sc(a) || (b.r.key in was) - (a.r.key in was);
+  const sc = x => x.f + (x.r.key in was ? KEEP_MARGIN : 0), byFit = (a, b) => sc(b) - sc(a) || (a.r.key in was) - (b.r.key in was);
   const pick = [];
   const take = (x, via) => { if (pick.length >= n || pick.some(p => p.key === x.r.key)) return; pick.push({key: x.r.key, f: x.f, via, theme: x.r.theme}); };   // keine Grenze je Thema: kostete im Backtest Rendite
   ok.filter(x => held[x.r.key] && (keepRule(x.m, x.f, rank[x.r.key], N) || ex.on)).sort((a, b) => b.f - a.f).forEach(x => take(x, 'halten'));
