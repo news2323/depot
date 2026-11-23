@@ -37,6 +37,12 @@ function ago(iso) {
   const m = Math.round((Date.now() - Date.parse(iso)) / 6e4);
   return m < 2 ? 'gerade eben' : m < 60 ? `vor ${m} Min.` : m < 1440 ? `vor ${Math.round(m / 60)} Std.` : `vor ${Math.round(m / 1440)} Tagen`;
 }
+// Zeitpunkt kurz: heute „17:20 Uhr“, sonst „23. Nov. 17:20 Uhr“
+function stampDe(iso) {
+  const d = new Date(iso); if (isNaN(d)) return '–';
+  const t = d.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'}) + ' Uhr';
+  return d.toDateString() === new Date().toDateString() ? t : `${d.getDate()}. ${MON_K[d.getMonth()]} ${t}`;
+}
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)).slice(0, 12);
 const keyOf = (kind, symbol) => kind + ':' + String(symbol || '').toUpperCase().trim();
 function toast(msg, ms = 2600) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, ms); }
@@ -823,14 +829,19 @@ const scrRow = key => (S.scr || {})[key];
 // Kaufstil: Zu- und Abschlag je Zustand des Momentum-Signals (gleich in tracker/screen.py STYLE_MULT)
 const STYLE_MULT = {first: {on: 1.06, down: 0.9}, only: {on: 1.08, fade: 0.9, none: 0.85, down: 0.75}};
 // Momentum-Signal (tracker/analytics.momentum, Jakobs Wunsch vom 22.11.2026): on, fade, down, none
-const momOf = key => D(key).mom || (scrRow(key) || {}).mom || null;
+// Strategie mit aktuellen Kursen (Jakobs Wunsch vom 23.11.2026): der Kurslauf rechnet screen.json alle 15 Minuten neu
+// (update.refresh_strategy). Ist es neuer als daily.json, gelten seine Werte für Momentum und Angst und Gier.
+const scrNew = () => !!(S.screen && (S.screen.updated || '') > (S.daily.updated || ''));
+const scrMom = key => { const r = scrRow(key) || ((S.screen || {}).other || []).find(o => o.key === key); return r && r.mom && r.mom.checks ? r.mom : null; };
+const momOf = key => (scrNew() && scrMom(key)) || D(key).mom || (scrRow(key) || {}).mom || null;
+const marketFg = () => (scrNew() && S.screen.mfg) || S.daily.market_fg;
 const momStyle = () => ['first', 'only'].includes(ansOf('style'));
 // Ausnahmen von „Momentum zuerst“: extreme Angst am Aktienmarkt (Frage fear) oder Halbleiter-Crash (Frage crash)
 const FEAR = 25;
 function buyException() {
-  const fg = (S.daily.market_fg || {}).value, sm = ((S.screen || {}).semis || {}).from_high;
+  const fg = (marketFg() || {}).value, sm = ((S.screen || {}).semis || {}).from_high;
   const fear = ansOf('fear') === 'buy' && fg != null && fg < FEAR, crash = (ansOf('crash') || ansOf('on_loss')) === 'buy' && sm != null && sm <= -20;
-  const text = [fear ? `extreme Angst am Aktienmarkt (${fg} von 100)` : '', crash ? `Halbleiter ${pctS(sm, 0)} unter dem Hoch` : ''].filter(Boolean).join(' und ');
+  const text = [fear ? `extreme Angst am Aktienmarkt (${fg} von 100)` : '', crash ? `Halbleiter ${nf(Math.abs(sm), 0)} % unter dem Hoch` : ''].filter(Boolean).join(' und ');
   return {on: fear || crash, fear, crash, text};
 }
 function fitOf(r) {
@@ -1025,7 +1036,7 @@ function playbook(rc) {
   const names = xs => xs.map(r => shortName(r.key)).join(', ');
   const dipOk = mine.filter(r => (r.from_high || 0) <= -20 && (r.est90 == null || r.est90 >= 0) && (r.c.rs >= 0.4));
   const broken = mine.filter(r => r.est90 != null && r.est90 <= -10);
-  const fg = (S.daily.market_fg || {}).value, kfg = (S.daily.crypto_fg || {}).value, ms = momStyle();
+  const fg = (marketFg() || {}).value, kfg = (S.daily.crypto_fg || {}).value, ms = momStyle();
   const watch = (S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol)), planK = ((idealBook() || {}).items || []).map(x => x.key);
   const own = new Set([...book.map(x => x.key), ...planK, ...jakobBook().held.map(p => p.key)]), isOn = k => (momOf(k) || {}).state === 'on';
   const sigOn = [...own].filter(isOn), sigW = [...new Set(watch)].filter(k => !own.has(k) && isOn(k));

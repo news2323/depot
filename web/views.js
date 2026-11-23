@@ -307,7 +307,7 @@ function holderCard() {
 }
 // Angst und Gier: Aktienmarkt (eigene Berechnung nach CNN-Vorbild, update.market_fg) und Krypto (alternative.me)
 function fgCard() {
-  const m = S.daily.market_fg, k = S.daily.crypto_fg;
+  const m = marketFg(), k = S.daily.crypto_fg;
   if (!m && !k) return '';
   const gauge = (title, v, label, sub) => `<div class="fgbox"><div class="l">${title}</div><div class="v num">${v}<span>${esc(label)}</span></div>
     <div class="fgbar" role="img" aria-label="${v} von 100"><b style="left:${Math.max(0, Math.min(100, v))}%"></b></div><div class="fgax"><span>Angst</span><span>Gier</span></div>
@@ -849,14 +849,14 @@ const kiList = () => { const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes'
 function stratHero() {
   const ib = idealBook();
   if (!ib) return '';
-  const sm = (S.screen || {}).semis || {}, fg = (S.daily.market_fg || {}).value, list = kiList();
+  const sm = (S.screen || {}).semis || {}, fg = (marketFg() || {}).value, list = kiList();
   const on = list.filter(r => (momOf(r.key) || r.mom || {}).state === 'on').length;
   const st = ib.ex.on ? ['warn', 'Kaufen in Teilen', `Deine Ausnahme greift: ${ib.ex.text}. Gekauft wird auch ohne Momentum-Signal, nur Titel mit intakten Gewinnschätzungen.`]
     : ib.filt ? ['', 'Halb investiert', `Halbleiter liegen ${pctS(sm.ma200, 0)} zu ihrer 200-Tage-Linie. Der Marktfilter hält die Hälfte als Reserve.`]
     : ib.items.length ? ['good', 'Momentum zuerst', `${on} KI-${on === 1 ? 'Titel hat' : 'Titel haben'} ein Momentum-Signal. Gekauft wird, was ein Signal hat; verkauft, was es verliert.`]
     : ['', 'Abwarten', 'Kein KI-Titel hat ein Signal und keine Ausnahme greift. Neues Geld bleibt Reserve, bis ein Signal kommt.'];
   const kv = (l, v, n, cls = '') => `<div class="kv"><span>${l}</span><b class="num ${cls}">${v}</b><small>${n}</small></div>`;
-  return `<section class="card span12 shero"><div class="shero-l"><div class="eyebrow">Depot Jakob · heute</div><div class="shero-t"><i class="sdot ${st[0]}"></i>${st[1]}</div><p>${esc(st[2])}</p></div>
+  return `<section class="card span12 shero"><div class="shero-l"><div class="eyebrow">Depot Jakob · Stand ${S.screen && S.screen.updated ? stampDe(S.screen.updated) : 'heute'}</div><div class="shero-t"><i class="sdot ${st[0]}"></i>${st[1]}</div><p>${esc(st[2])}</p></div>
     <div class="shero-r">${kv('Stimmung', fg ?? '–', fg == null ? '' : fg < FEAR ? 'extreme Angst' : fg < 45 ? 'Angst' : fg <= 55 ? 'neutral' : 'Gier', fg != null && fg < FEAR ? 'neg' : '')}
       ${kv('Halbleiter', sm.from_high != null ? pctS(sm.from_high, 0) : '–', 'vom Hoch', sm.from_high <= -20 ? 'neg' : '')}${kv('Signale', `${on}<small> / ${list.length}</small>`, 'KI-Titel')}</div></section>`;
 }

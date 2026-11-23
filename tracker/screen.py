@@ -91,7 +91,7 @@ def fetch(tracked, yf, market_6m):
         fund = yf.get(a["symbol"]) or {}
         div = analytics.dividend_info(h["div"], h["c"][-1], fund)
         out[key] = {"hist": {"d": h["d"], "c": h["c"]}, "currency": h["currency"], "name": h.get("name") or "", "tech": tech,
-                    "fund": fund, "valuation": analytics.stock_valuation(h["c"][-1], tech, fund, div)}
+                    "fund": fund, "div": div, "valuation": analytics.stock_valuation(h["c"][-1], tech, fund, div)}
     log("Strategie: %d zusätzliche Titel geladen" % len(out))
     return out
 
@@ -227,9 +227,10 @@ def fit(row, ans):
     return int(round(min(100, x)))
 
 
-def semis_stats():
-    """Halbleiter-ETF (SOXX) über 5 Jahre: größter Rückgang, wie lange die Erholung dauerte, Abstand zum Hoch heute."""
-    h = sources.stock_history("SOXX", "5y")
+def semis_stats(h=None):
+    """Halbleiter-ETF (SOXX) über 5 Jahre: größter Rückgang, wie lange die Erholung dauerte, Abstand zum Hoch heute.
+    h = Verlauf (d, c), sonst wird er geholt."""
+    h = h or sources.stock_history("SOXX", "5y")
     if not h or len(h["c"]) < 250:
         return None
     d, c = h["d"], h["c"]
@@ -418,9 +419,10 @@ def _last_weekday_of_month(d):
     return last
 
 
-def build(store, pf, out, extra, push, sp, fg=None):
+def build(store, pf, out, extra, push, sp, fg=None, semis=None, mfg=None):
     """screen.json schreiben und neue Hinweise aufs Handy schicken. sp = Tageskurse des S&P 500,
-    fg = Angst und Gier heute ({"stocks": 0..100, "crypto": 0..100})."""
+    fg = Angst und Gier heute ({"stocks": 0..100, "crypto": 0..100}), semis = semis_stats, mfg = Angst und Gier am
+    Aktienmarkt mit Bausteinen (für die App, wenn neuer als daily.json)."""
     ans = answers(pf)
     sp = sp or []
     prev = store.get("screen.json") or {}
@@ -440,16 +442,18 @@ def build(store, pf, out, extra, push, sp, fg=None):
         r["fit"] = fit(r, ans)
         r["pros"], r["cons"] = reasons(r)
     rows.sort(key=lambda r: -(r["fit"] if r["fit"] is not None else -1))
-    semis = semis_stats() or prev.get("semis")
+    semis = semis or semis_stats() or prev.get("semis")
     ib = ideal(rows, pf, ans, semis, fg)
     new = events(rows, prev, pf, ans, others, fg, [x["key"] for x in ib["items"]])
     words = rule_words(rows, pf, ans, ib)
     new += rule_events(rows, prev, words, ib)
     keep = (datetime.date.today() - datetime.timedelta(days=45)).isoformat()
     evs = (new + [e for e in prev.get("events") or [] if e["day"] >= keep])[:80]
-    store.put("screen.json", {"updated": now_iso(), "list": rows, "other": [{"key": o["key"], "mom": {"state": o["mom"]["state"]}} for o in others],
-                              "events": evs, "semis": semis, "ideal": ib, "rules": words,
-                              "fg": {k: v for k, v in (fg or {}).items() if v is not None}})
+    doc = {"updated": now_iso(), "list": rows, "other": [{"key": o["key"], "mom": o["mom"]} for o in others],
+           "events": evs, "semis": semis, "ideal": ib, "rules": words, "fg": {k: v for k, v in (fg or {}).items() if v is not None}}
+    if mfg:
+        doc["mfg"] = {k: v for k, v in mfg.items() if k != "hist"}
+    store.put("screen.json", doc)
     mode = ans.get("push") or "important"
     send = [e for e in new if mode == "all" or (mode == "important" and e["important"])]
     if send:

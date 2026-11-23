@@ -105,12 +105,113 @@ def run_fast(store):
     for sym in list(oi_mem):
         if asset_key("crypto", sym) not in assets:
             del oi_mem[sym]
+    try:
+        refresh_strategy(store, pf, out, state)
+    except Exception as e:   # die Strategie darf den Kurslauf nicht aufhalten
+        log("Strategie live: Fehler " + type(e).__name__)
     spark, spark_t, spark_at = refresh_spark(assets, old_market)
     store.put("market.json", {"updated": now_iso(), "fx": fx, "assets": out, "indices": indices, "spark": spark, "spark_t": spark_t, "spark_at": spark_at,
                               "sources": sources.STATUS})
     store.put("state.json", state)
     log("Kurse: %d Titel, %d ohne Daten, %d Alerts ausgelöst, %d Bewegungen gemeldet" % (
         len(out), sum(1 for q in out.values() if q.get("error")), fired, moved))
+
+
+# ----------------------------------------------------------------- Strategie mit aktuellen Kursen
+
+# Jakobs Wunsch vom 23.11.2026: Strategie, Momentum, Angst und Gier, Halbleiter und Ideal-Depot immer mit aktuellen
+# Kursen, nicht nur mit dem Stand des Tageslaufs. Der Kurslauf rechnet sie alle 15 Minuten neu (werktags 8 bis 23 Uhr
+# deutscher Zeit): Tagesverläufe aus daily.json bzw. screen_base.json, der heutige Kurs als letzter Schlusskurs.
+# Kennzahlen, Schätzungen und Analystenziele bleiben vom Tageslauf (ändern sich untertags kaum).
+STRAT_EVERY = 15 * 60
+TZ_H = {"USD": -5, "CAD": -5, "EUR": 1, "CHF": 1, "DKK": 1, "SEK": 1, "NOK": 1, "GBP": 0, "KRW": 9, "JPY": 9, "TWD": 8, "HKD": 8}
+
+
+def _strat_hours(ts):
+    try:
+        from zoneinfo import ZoneInfo
+        t = datetime.datetime.fromtimestamp(ts, ZoneInfo("Europe/Berlin"))
+    except Exception:
+        t = datetime.datetime.utcfromtimestamp(ts) + datetime.timedelta(hours=1)
+    return t.weekday() < 5 and 8 <= t.hour < 23
+
+
+def _with_live(h, q, crypto=False):
+    """Tagesverlauf {d, c} mit dem aktuellen Kurs als heutigem Schluss (ersetzt den Tag, wenn es ihn schon gibt)."""
+    if not h or not h.get("c") or not h.get("d") or not q or q.get("error") or q.get("stale") or not q.get("price"):
+        return h
+    t = q.get("time") or (time.time() if crypto else None)
+    if not t:
+        return h
+    day = int((t + (0 if crypto else TZ_H.get(q.get("currency"), 0) * 3600)) // 86400)
+    d, c = list(h["d"]), list(h["c"])
+    if day < d[-1]:
+        return h
+    if day == d[-1]:
+        c[-1] = q["price"]
+    else:
+        d.append(day)
+        c.append(q["price"])
+    return dict(h, d=d, c=c)
+
+
+def refresh_strategy(store, pf, live, state, force=False):
+    now = time.time()
+    if not force and (now - (state.get("strat_at") or 0) < STRAT_EVERY or not _strat_hours(now)):
+        return
+    base, daily = store.get("screen_base.json"), store.get("daily.json") or {}
+    if not base or not daily.get("assets"):
+        return
+    state["strat_at"] = int(now)
+    research = (store.get("analysis.json") or {}).get("assets") or {}
+    quotes, de_map, fx = {}, state.setdefault("de_map", {}), {}
+
+    def quote(sym, name=""):
+        if sym not in quotes:
+            q = sources.stock_quote(sym)
+            if q and q.get("currency") == "USD" and "." not in sym and not sym.startswith("^") and sym != "SOXX" and not us_session(now):
+                if "eur" not in fx:
+                    fx["eur"] = (sources.stock_quote("EURUSD=X") or {}).get("price") or 0
+                q = german_quote(sym, q, de_map, fx["eur"], name)
+            quotes[sym] = q
+        return quotes[sym]
+    sp = _with_live(base.get("sp"), quote("^GSPC"))
+    btc = (daily["assets"].get(asset_key("crypto", "BTC")) or {}).get("hist") or (daily.get("bench") or {}).get("BTC")
+    btc = _with_live(btc, live.get(asset_key("crypto", "BTC")) or sources.crypto_quote("BTC"), True)
+    m6 = {"stock": _perf_6m(sp, False), "crypto": _perf_6m(btc, True)}
+
+    def fresh(key, e, h, crypto):
+        tech = analytics.technicals(h["c"], crypto)
+        own, mkt = _perf_6m(h, crypto), m6["crypto" if crypto else "stock"]
+        if tech and own is not None and mkt is not None and key not in ("crypto:BTC", "stock:^GSPC"):
+            tech["rel_6m"] = own - mkt
+        x = dict(e, hist=h, tech=_round(tech))
+        bm = None if key in ("crypto:BTC", "stock:^GSPC") else (btc if crypto else sp)
+        mom = analytics.momentum(h["c"], (bm or {}).get("c"), crypto)
+        if mom:
+            x["mom"] = mom
+        if not crypto and e.get("fund"):
+            x["valuation"] = analytics.stock_valuation(h["c"][-1], tech, e["fund"], e.get("div"), (research.get(key) or {}).get("claude"))
+        return x
+    out = {}
+    for key, e in daily["assets"].items():
+        crypto = key.startswith("crypto:")
+        h = _with_live(e.get("hist"), live.get(key), crypto)
+        out[key] = fresh(key, e, h, crypto) if h and len(h["c"]) >= 20 else e
+    extra = {}
+    for key, e in (base.get("extra") or {}).items():
+        h = _with_live(e.get("hist"), quote(key.split(":", 1)[1], e.get("name")))
+        if h and len(h["c"]) >= 60:
+            extra[key] = fresh(key, e, h, False)
+    fg_hist = {}
+    for s, (d, c) in (base.get("fg") or {}).items():
+        h = _with_live({"d": d, "c": c}, quote(s))
+        fg_hist[s] = (h["d"], h["c"])
+    mfg = analytics.market_fear_greed(fg_hist) if fg_hist else None
+    soxx = _with_live(base.get("soxx"), quote("SOXX"))
+    prev_fg = (store.get("screen.json") or {}).get("fg") or {}
+    fg = {"stocks": (mfg or {}).get("value", prev_fg.get("stocks")), "crypto": (daily.get("crypto_fg") or {}).get("value", prev_fg.get("crypto"))}
+    screen.build(store, pf, out, extra, push, (sp or {}).get("c"), fg, semis=screen.semis_stats(soxx) if soxx else None, mfg=mfg)
 
 
 SPARK_EVERY = 55 * 60   # 7-Tage-Verlauf (Stundenkurse) für die Watchlist am Handy: höchstens stündlich neu
@@ -436,8 +537,18 @@ def run_daily(store):
         smart["updated"] = now_iso()
         store.put("smart.json", smart)
     try:
-        screen.build(store, pf, out, extra, push, (bench.get("SP500") or {}).get("c"),
-                     {"stocks": (market_fg or {}).get("value"), "crypto": (crypto_fg or {}).get("value")})
+        soxx = sources.stock_history("SOXX", "5y")
+        sp = bench.get("SP500") or {}
+        screen.build(store, pf, out, extra, push, sp.get("c"),
+                     {"stocks": (market_fg or {}).get("value"), "crypto": (crypto_fg or {}).get("value")},
+                     semis=screen.semis_stats(soxx) if soxx else None, mfg=market_fg)
+        # Grundlage für die Zwischenläufe mit aktuellen Kursen (refresh_strategy): was nicht in daily.json steht
+        store.put("screen_base.json", {
+            "updated": now_iso(),
+            "extra": {k: {x: e.get(x) for x in ("hist", "currency", "name", "fund", "div", "earnings_date")} for k, e in extra.items()},
+            "sp": {"d": sp.get("d", [])[-400:], "c": sp.get("c", [])[-400:]},
+            "soxx": {"d": soxx["d"], "c": soxx["c"]} if soxx else None,
+            "fg": {s: [d, c] for s, (d, c) in fg_hist.items()}})
     except Exception as e:   # der Filter darf den Tageslauf nicht aufhalten
         log("Strategie: Fehler " + type(e).__name__)
     # Branchen der großen Indizes als Vergleich für die Sektoren des Depots (über die ETFs URTH und SPY)
