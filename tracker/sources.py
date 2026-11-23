@@ -85,6 +85,34 @@ def stock_quote(symbol):
             "type": m.get("instrumentType") or "", "time": m.get("regularMarketTime")}
 
 
+# Deutsche Börse für US-Aktien (Jakobs Wunsch vom 23.11.2026): Vor US-Börsenbeginn (15:30 Uhr) gelten die Kurse von
+# Xetra bzw. Frankfurt, damit ab 9 Uhr aktuelle Kurse da sind. Das Kürzel sucht Yahoo über den Namen; geprüft wird,
+# ob der Kurs in Dollar umgerechnet zum US-Kurs passt (höchstens 12 % Abstand), sonst gilt es als falscher Treffer.
+DE_EXCHANGES = ("GER", "FRA", "TDG", "STU", "MUN", "DUS", "BER", "HAM")
+
+
+DE_KNOWN = {"GOOGL": "ABEA.DE", "GOOG": "ABEC.DE", "TSM": "TSFA.F"}   # findet die Yahoo-Suche nicht
+
+
+def german_listing(symbol, name, us_price, eurusd):
+    cands = [{"symbol": DE_KNOWN[symbol], "exchange": "GER"}] if symbol in DE_KNOWN else []
+    for q in ((name or "").replace(",", " ").replace(".", " ").strip(), symbol):
+        if not q:
+            continue
+        r = _try("Yahoo Suche", "https://query2.finance.yahoo.com/v1/finance/search?q=%s&quotesCount=20&newsCount=0" % urllib.parse.quote(q))
+        cands += sorted([x for x in (r or {}).get("quotes") or [] if x.get("exchange") in DE_EXCHANGES and x.get("quoteType") == "EQUITY"],
+                        key=lambda x: DE_EXCHANGES.index(x["exchange"]))
+    seen = set()
+    for x in cands:
+        if x["symbol"] in seen or len(seen) >= 4:
+            continue
+        seen.add(x["symbol"])
+        dq = stock_quote(x["symbol"])
+        if dq and dq.get("currency") == "EUR" and us_price and eurusd and abs(dq["price"] * eurusd / us_price - 1) < 0.12:
+            return x["symbol"]
+    return ""
+
+
 def stock_history(symbol, rng="5y"):
     res = yahoo_chart(symbol, rng=rng, events=True)
     if not res:

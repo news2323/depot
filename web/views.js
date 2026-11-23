@@ -1073,7 +1073,7 @@ function vAsset(key) {
   const ir = safeUrl((ai || {}).ir_url) || safeUrl(f.ir_website) || safeUrl(f.website);
   let h = sheetTop(`<span class="ahead">${logo(key)}<span><small>${esc(tick(key))} · ${esc(assetClass(key))}</small>${esc(shortName(key))}</span></span>`,
     [nameOf(key) !== shortName(key) ? nameOf(key) : '', SECTOR_DE[f.sector] || f.sector, f.industry].filter(Boolean).map(esc).join(' · '));
-  h += `<section class="card"><div class="pricehead"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="p num">${px(key, a.price)}</span> ${pill(a.change_pct)} ${v ? score(key) : ''}</div>${seg('arange', ['1W', '1M', '3M', '1J', '3J', 'Max'], S.assetRange || '1J')}</div>
+  h += `<section class="card"><div class="pricehead"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="p num">${px(key, a.price)}</span> ${pill(a.change_pct)}${a.venue ? `<span class="small muted" title="Vor US-Börsenbeginn: Kurs von ${esc(a.venue)}, Änderung gegen den letzten US-Schluss">${esc(a.venue)}</span>` : ''} ${v ? score(key) : ''}</div>${seg('arange', ['1W', '1M', '3M', '1J', '3J', 'Max'], S.assetRange || '1J')}</div>
     <div class="chart" id="ch-asset" data-key="${esc(key)}"></div>
     <div class="tiles">${tile('1 Monat', pctS(t.perf_1m, 1), '', sign(t.perf_1m))}${tile('1 Jahr', pctS(t.perf_1y, 1), '', sign(t.perf_1y))}
     ${tile('52-Wochen-Spanne', t.low52 ? px(key, t.low52) + ' – ' + px(key, t.high52) : '–')}${tile('Abstand zum Hoch', t.from_high != null ? nf(t.from_high, 1) + ' %' : '–')}</div></section>`;

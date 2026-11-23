@@ -21,6 +21,34 @@ def strategy_assets(store):
     return {x["key"]: {"kind": "stock", "symbol": x["key"].split(":", 1)[1], "name": ""} for x in ib.get("items") or [] if x.get("key")}
 
 
+def us_session(ts):
+    """Läuft gerade der reguläre US-Handel (Mo bis Fr, 9:30 bis 16 Uhr New Yorker Zeit)?"""
+    try:
+        from zoneinfo import ZoneInfo
+        t = datetime.datetime.fromtimestamp(ts, ZoneInfo("America/New_York"))
+    except Exception:
+        t = datetime.datetime.utcfromtimestamp(ts) - datetime.timedelta(hours=5)
+    return t.weekday() < 5 and (9, 30) <= (t.hour, t.minute) < (16, 0)
+
+
+def german_quote(sym, q, de_map, eurusd, name):
+    """Außerhalb des US-Handels: neuerer Kurs von Xetra oder Frankfurt, in Dollar umgerechnet, Änderung gegen den letzten
+    US-Schluss. Das deutsche Kürzel wird einmal gesucht und gemerkt (leer = keins gefunden, nach 14 Tagen neu)."""
+    if not eurusd:
+        return q
+    m = de_map.get(sym)
+    if m is None or (not m.get("s") and time.time() - m.get("t", 0) > 14 * 86400):
+        m = de_map[sym] = {"s": sources.german_listing(sym, name or q.get("name"), q["price"], eurusd), "t": int(time.time())}
+    if not m.get("s"):
+        return q
+    dq = sources.stock_quote(m["s"])
+    if not dq or dq.get("currency") != "EUR" or not dq.get("time") or dq["time"] <= (q.get("time") or 0):
+        return q
+    p = dq["price"] * eurusd
+    return dict(q, price=p, change_pct=(p / q["price"] - 1) * 100 if q.get("price") else dq.get("change_pct"),
+                time=dq["time"], venue=dq.get("exchange") or "Deutsche Börse", us_close=q["price"])
+
+
 # ----------------------------------------------------------------- schneller Lauf
 def run_fast(store):
     pf = store.get("portfolio.json") or empty_portfolio()
@@ -33,9 +61,14 @@ def run_fast(store):
     out, currencies = {}, set()
     oi_mem = state.setdefault("oi", {})
     now = time.time()
+    de_map, eurusd = state.setdefault("de_map", {}), None
     for key, a in assets.items():
         if a["kind"] == "stock":
             q = sources.stock_quote(a["symbol"])
+            if q and q.get("currency") == "USD" and "." not in a["symbol"] and not a["symbol"].startswith("^") and not us_session(now):
+                if eurusd is None:
+                    eurusd = (sources.stock_quote("EURUSD=X") or {}).get("price") or 0
+                q = german_quote(a["symbol"], q, de_map, eurusd, a["name"] or (old.get(key) or {}).get("name"))
         else:
             q = sources.crypto_quote(a["symbol"])
             if q:
