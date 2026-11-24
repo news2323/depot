@@ -596,8 +596,7 @@ function sectorMix(c) {
 /* ---------------------------------------------------------------- Rückrechnung der heutigen Positionen
    Wie ein Fonds-Factsheet: Was hätten die heutigen Bestände in der Vergangenheit gemacht? Grundlage für
    Wertentwicklung, Schwankung, größten Rückgang und Beta, solange die echten Kaufdaten noch kurz zurückreichen. */
-function backcast() {
-  const c = calc();
+function backcast(c = calc()) {   // c: Ergebnis von calc (auch für ein Teildepot, z. B. jakobBook)
   if (c.bc !== undefined) return c.bc;
   const held = c.held.filter(p => p.value > 0 && D(p.key).hist && D(p.key).hist.d.length > 1);
   if (!held.length) return (c.bc = null);

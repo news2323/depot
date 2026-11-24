@@ -639,50 +639,135 @@ small .sep{font-style:normal}
 .chip.big{font-size:15px;padding:6px 14px}
 .tgs{display:flex;flex-wrap:wrap;gap:6px 12px}
 
-/* Strategie: Bereiche und Lage heute */
-.svbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.svbar .seg button{padding-left:14px;padding-right:14px}
-.lage .tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
-.lage .tile .v .chip{font-size:13px}
-@media(max-width:760px){.lage .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
-
-/* Strategie „Heute“ (überarbeitet 22.11.2026): Kopf, Ideal-Depot als Liste mit Balken, nächste Schritte */
-.shero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px 32px;align-items:center}
-.shero-t{display:flex;align-items:center;gap:10px;font-size:28px;font-weight:700;letter-spacing:-.025em;color:var(--ink);margin:6px 0 6px}
-.shero-l p{margin:0;font-size:14px;line-height:1.5;color:var(--ink2);max-width:640px}
-.sdot{width:11px;height:11px;border-radius:50%;background:var(--ink3);flex:none;box-shadow:0 0 0 4px color-mix(in srgb,var(--ink3) 18%,transparent)}
-.sdot.warn{background:var(--warn);box-shadow:0 0 0 4px var(--warn-bg)}.sdot.good{background:var(--up);box-shadow:0 0 0 4px var(--up-bg)}
-.sdot.bad{background:var(--down);box-shadow:0 0 0 4px var(--down-bg)}
-.ustat{display:flex;align-items:center;gap:10px;font-size:20px;letter-spacing:-.02em;margin:2px 0 0}.ustat b{font-weight:700}
-.tiles.three{grid-template-columns:repeat(3,minmax(0,1fr))}
-.shero-r{display:flex;gap:10px}
-.kv{background:var(--surface2);border-radius:16px;padding:12px 16px;min-width:120px;display:flex;flex-direction:column;gap:2px}
-.kv span{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)}
-.kv b{font-size:24px;font-weight:650;letter-spacing:-.02em;color:var(--ink)}.kv b small{font-size:14px;font-weight:600;color:var(--ink3)}
-.kv b.neg{color:var(--down)}.kv>small{font-size:12px;color:var(--ink3)}
-.abar{display:flex;gap:3px;height:12px;margin:2px 0 6px}
-.abar i{display:block;border-radius:4px;min-width:4px}
-.abar i.res{background:repeating-linear-gradient(135deg,var(--surface3) 0 4px,var(--surface2) 4px 8px)}
-.ilist{display:flex;flex-direction:column}
-.irow{display:grid;grid-template-columns:4px 28px 28px minmax(0,1fr) auto 96px;align-items:center;gap:12px;padding:11px 0;border:0;border-bottom:1px solid var(--line);background:none;text-align:left;width:100%;cursor:pointer;font:inherit;color:inherit}
-.irow:last-child{border-bottom:0}.irow:hover .irow-n b{color:var(--accent)}
-.irow .cdot{width:4px;height:30px;border-radius:2px}
-.irow .lg{width:28px;height:28px;font-size:12px;border-radius:8px}
-.irow-n{min-width:0}.irow-n b{display:block;font-size:14.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.irow-n small{display:block;font-size:12px;color:var(--ink3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.irow-v{text-align:right}.irow-v b{display:block;font-size:14.5px;font-weight:650}.irow-v small{display:block;font-size:12px;color:var(--ink3);margin-top:2px;white-space:nowrap}
+/* ---------------------------------------------------------------- Strategie (Redesign vom 24.11.2026, Jakobs Wunsch)
+   Ein System für die ganze Seite: Reiter mit Unterzeile, Karten mit gleichem Innenabstand und Überschriften in 17 px,
+   Kennzahlen als Leiste mit Haarlinien statt Kacheln, Listen statt verschachtelter Karten, Hinweise nach Art
+   (Info grau, Deine Regel blau, Warnung orange, Handeln rot) nur als Punkt und Wort. Präfix sx-. */
+.strat .g12{gap:16px}
+.strat .card{padding:24px}
+.strat .card h2{font-size:17px;font-weight:650;letter-spacing:-.015em}
+.strat .card .head{margin-bottom:14px}
+.strat .card h3,.sx-side h3{margin:0 0 12px;font-size:15px;font-weight:650;letter-spacing:-.01em}
+.strat .hint{margin-top:12px}
+.strat .note{font-size:13px}
+.sx-tabs{display:flex;gap:2px;margin:2px 0 18px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.sx-tabs::-webkit-scrollbar{display:none}
+.sx-tabs button{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:6px 18px 12px 0;margin-right:18px;border:0;background:none;font:inherit;color:var(--ink3);cursor:pointer;white-space:nowrap;text-align:left}
+.sx-tabs button b{font-size:15px;font-weight:600;color:inherit;letter-spacing:-.01em}
+.sx-tabs button small{font-size:12px;font-weight:500;color:var(--ink3)}
+.sx-tabs button:hover{color:var(--ink)}
+.sx-tabs button.on{color:var(--ink)}
+.sx-tabs button.on::after{content:'';position:absolute;left:0;right:18px;bottom:-1px;height:2px;border-radius:2px;background:var(--ink)}
+.sdot{width:8px;height:8px;border-radius:50%;background:var(--ink3);flex:none}
+.sdot.warn{background:var(--warn)}.sdot.good{background:var(--up)}.sdot.bad{background:var(--down)}
+/* Karte Depot Jakob */
+.sx-top{display:flex;flex-direction:column;gap:20px}
+.sx-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px 20px;flex-wrap:wrap}
+.sx-val{font-size:40px;font-weight:700;letter-spacing:-.035em;line-height:1.05;margin-top:8px;color:var(--ink)}
+.sx-val.sm{font-size:28px;letter-spacing:-.025em}
+.sx-chgs{display:flex;gap:6px 18px;flex-wrap:wrap;margin-top:8px;font-size:14.5px;font-weight:600}
+.sx-chgs small{font-weight:500;color:var(--ink3);margin-left:6px;font-size:13px}
+.sx-status,.sx-mode{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:var(--surface2);font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap}
+.sx-lead{font-size:14px;color:var(--ink2);line-height:1.5;margin:6px 0 0;max-width:720px}
+.sx-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.sx-kpis:has(> .sx-kpi:nth-child(4):last-child){grid-template-columns:repeat(4,minmax(0,1fr))}
+.sx-kpi{padding:14px 16px;border-left:1px solid var(--line);min-width:0}
+.sx-kpi:first-child{border-left:0;padding-left:0}
+.sx-kpi>span{display:block;font-size:12px;font-weight:500;color:var(--ink3)}
+.sx-kpi>b{display:block;font-size:20px;font-weight:650;letter-spacing:-.02em;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+.sx-kpi>b small{font-size:13px;font-weight:600;color:var(--ink3)}
+.sx-kpi>small{display:block;font-size:12px;color:var(--ink3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sx-kpi .sx-bar{margin-top:8px}
+.sx-bar{display:block;height:4px;border-radius:2px;background:var(--surface3);overflow:hidden}
+.sx-bar>i{display:block;height:100%;border-radius:2px;background:var(--accent)}
+.sx-bar.off>i{background:var(--line2)}
+.sx-charthead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.sx-charthead h3{margin:0!important}
+.sx-top .chart{margin-top:-6px}
+/* Karten Plan und Lage: zwei Spalten mit Haarlinie dazwischen */
+.sx-cols{display:grid;grid-template-columns:minmax(0,1fr) 360px}
+.sx-lage .sx-cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.sx-main{padding-right:28px;min-width:0}
+.sx-side{padding-left:28px;border-left:1px solid var(--line);min-width:0}
+.sx-plan .head{align-items:flex-start;margin-bottom:6px}
+.sx-alloc{display:flex;gap:4px;margin:18px 0 6px}
+.sx-alloc>i{flex:1;height:6px;border-radius:3px;background:var(--surface3);overflow:hidden;position:relative}
+.sx-alloc>i>b{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:3px}
+.sx-alloc>i.res{background:repeating-linear-gradient(135deg,var(--surface3) 0 4px,var(--surface2) 4px 8px)}
+.sx-allocl{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--ink3)}
+.sx-th,.sx-prow{display:grid;grid-template-columns:28px 28px minmax(0,1fr) 104px 64px 72px 104px;align-items:center;column-gap:12px}
+.sx-th{font-size:11.5px;font-weight:600;color:var(--ink3);padding:18px 0 8px;border-bottom:1px solid var(--line)}
+.sx-th>span:first-child{grid-column:1/4}.sx-th .r{text-align:right}
+.sx-prow{padding:11px 0;border:0;border-bottom:1px solid var(--line);background:none;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
+.sx-prow:last-child{border-bottom:0;padding-bottom:0}
+.sx-prow:hover .sx-pn b{color:var(--accent)}
+.sx-prow .lg{width:28px;height:28px;font-size:12px;border-radius:8px}
+.sx-pn{min-width:0}
+.sx-pn b{display:block;font-size:14.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sx-pn small{display:block;font-size:12px;color:var(--ink3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sx-pn small.m{display:none}
+.sx-pc{text-align:right;font-size:13.5px;font-weight:600}
+.sx-pv{text-align:right;min-width:0}
+.sx-pv b{display:block;font-size:14.5px;font-weight:650}
+.sx-pv small{display:block;font-size:11.5px;color:var(--ink3);margin-top:1px;white-space:nowrap}
+.sx-pv .sx-bar{margin-top:6px}
+.sx-pv small.m{display:none}
+/* Hinweise: Art als Punkt und Wort, keine farbigen Kästen */
+.sx-evs{display:flex;flex-direction:column}
+.sx-ev{display:block;padding:11px 0;border:0;border-top:1px solid var(--line);background:none;width:100%;text-align:left;font:inherit;color:inherit}
+.sx-ev:first-child{border-top:0;padding-top:2px}
+button.sx-ev{cursor:pointer}button.sx-ev:hover .tg b{color:var(--accent)}
+.sx-evh{display:flex;align-items:center;gap:10px;min-width:0}
+.sx-evh .tg,.sx-evh>b{min-width:0;font-size:13.5px;font-weight:650}
+.sx-evd{margin-left:auto;font-size:12px;color:var(--ink3);white-space:nowrap}
+.sx-ev p{margin:4px 0 0;font-size:13px;line-height:1.45;color:var(--ink2)}
+.sx-lvl{display:inline-flex;align-items:center;gap:6px;flex:none;width:92px;font-size:11.5px;font-weight:600;color:var(--ink3);white-space:nowrap}
+.sx-lvl::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+.sx-lvl.rule{color:var(--accent)}.sx-lvl.warn{color:var(--warn)}.sx-lvl.act{color:var(--down)}
+.sx-ev p{padding-left:102px}
+/* Nächste Schritte */
 .steps{list-style:none;margin:0;padding:0}
-.steps>li{display:grid;grid-template-columns:26px minmax(0,1fr);gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.steps>li{display:grid;grid-template-columns:24px minmax(0,1fr);gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
 .steps>li:first-child{padding-top:2px}.steps>li:last-child{border-bottom:0;padding-bottom:0}
-.sn{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12.5px;font-weight:700;background:var(--accent-bg);color:var(--accent)}
-.sh2{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:2px 0 8px}.sh2 b{font-size:14.5px}.sh2 span{font-size:12.5px;color:var(--ink3);text-align:right}
+.sn{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:var(--surface3);color:var(--ink2)}
+.steps>li:first-child .sn{background:var(--ink);color:var(--surface)}
+.sh2{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:1px 0 6px}.sh2 b{font-size:14px;font-weight:650}.sh2 span{font-size:12.5px;color:var(--ink3);text-align:right}
 .srows{display:flex;flex-direction:column}
-.srow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border:0;background:none;width:100%;cursor:pointer;font:inherit;color:inherit}
-.srow b{font-size:14px}
+.srow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:5px 0;border:0;background:none;width:100%;cursor:pointer;font:inherit;color:inherit}
+.srow b{font-size:13.5px;font-weight:650}
+.srow:hover .tg b{color:var(--accent)}
 .how .dots li{margin:6px 0;color:var(--ink2);font-size:13.5px;line-height:1.5}
-.evl .row .m{font-size:12.5px}
-@media(max-width:760px){
-  .shero{grid-template-columns:1fr}.shero-t{font-size:24px}
-  .shero-r{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.kv{min-width:0;padding:10px 12px}.kv b{font-size:20px}
-  .irow{grid-template-columns:4px 26px minmax(0,1fr) auto 78px;gap:10px}.ulist .irow{grid-template-columns:4px 26px minmax(0,1fr) auto auto}.irow .score{display:none}.irow .lg{width:26px;height:26px}
+.strat details.how h2{font-size:15px}
+@media(max-width:1099px){
+  .sx-cols,.sx-lage .sx-cols{grid-template-columns:minmax(0,1fr)}
+  .sx-main{padding-right:0}
+  .sx-side{padding-left:0;border-left:0;border-top:1px solid var(--line);margin-top:20px;padding-top:20px}
+}
+@media(max-width:759px){
+  .strat .card{padding:18px 16px}
+  .sx-tabs{margin-bottom:14px}
+  .sx-tabs button{padding:4px 0 10px;margin-right:20px}.sx-tabs button.on::after{right:0}
+  .sx-tabs button small{display:none}
+  .sx-val{font-size:34px}
+  .sx-status{order:-1}
+  .sx-kpis,.sx-kpis:has(> .sx-kpi:nth-child(4):last-child){grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sx-kpi{padding:11px 0 11px 14px;border-top:1px solid var(--line)}.sx-kpi>b{font-size:18px}
+  .sx-kpi:nth-child(-n+2){border-top:0}
+  .sx-kpi:nth-child(odd){border-left:0;padding-left:0}
+  .sx-kpi:last-child:nth-child(odd){grid-column:1/-1}
+  .sx-th{display:none}
+  .sx-prow{grid-template-columns:26px minmax(0,1fr) 104px;column-gap:10px}
+  .sx-prow .score,.sx-pc,.sx-pw,.sx-pv small.d{display:none}.sx-pv small.m{display:block}
+  .sx-prow .lg{width:26px;height:26px}
+  .sx-pn small.d{display:none}.sx-pn small.m{display:block}
+  .sx-plan .head{flex-direction:column;gap:8px}
+  .sx-allocl span:last-child{display:none}
+  .sx-lvl{width:auto}.sx-ev p{padding-left:0}
+  .strat .tbl.cand{table-layout:fixed;width:100%}
+  .strat .tbl.cand th:first-child,.strat .tbl.cand td:first-child{width:40px;padding-right:0}
+  .strat .tbl.cand th:nth-child(3),.strat .tbl.cand td:nth-child(3){width:58px}
+  .strat .tbl.cand th:last-child,.strat .tbl.cand td:last-child{width:76px}
+  .strat .tbl.cand td:nth-child(2){overflow:hidden}
+  .strat .tbl.cand .nmt{min-width:0}.strat .tbl.cand .nmt b,.strat .tbl.cand .nmt small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .strat .tbl.cand thead th{white-space:normal;line-height:1.25}
 }

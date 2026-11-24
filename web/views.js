@@ -335,7 +335,7 @@ function vHome(c) {
       ${perf}
       <div class="charthead"><div style="display:flex;gap:8px;flex-wrap:wrap">${seg('mode', Object.values(MODES), MODES[S.mode])}${S.mode === 'kauf' ? seg('cmp', Object.keys(CMP), CMP[S.cmp] ? S.cmp : 'Gesamt') : ''}</div>${seg('range', Object.keys(RANGES), S.range)}</div>
       <div class="chart" id="ch-main"></div><div id="lg-main"></div>
-      ${S.mode === 'kauf' ? cmpTable(c) : '<p class="hint">Deine heutigen Bestände, mit den Kursen der Vergangenheit zurückgerechnet. So sieht man, wie sich das Depot in seiner jetzigen Zusammensetzung entwickelt hätte.</p>'}</section>
+      ${S.mode === 'kauf' && c.series.d.length > 1 ? cmpTable(c) : `<p class="hint">${S.mode === 'kauf' ? 'Seit Kauf gibt es erst ab dem zweiten Tag einen Verlauf. Bis dahin: ' : ''}Deine heutigen Bestände, mit den Kursen der Vergangenheit zurückgerechnet. So sieht man, wie sich das Depot in seiner jetzigen Zusammensetzung entwickelt hätte.</p>`}</section>
     ${card('Heatmap', 'Fläche nach Anteil am Depot, Farbe nach ' + (hm === 'Heute' ? 'Tagesbewegung' : 'Gewinn seit Kauf'), `<div class="tm" id="tm"></div>
       <div class="scale"><span class="num">${hm === 'Heute' ? '−3 %' : '−50 %'}</span><i></i><span class="num">${hm === 'Heute' ? '+3 %' : '+50 %'}</span><span style="margin-left:auto">Krypto-Skala doppelt so weit</span></div>`, seg('hm', ['Heute', 'Seit Kauf'], hm), 'o4')}
     </div>
@@ -363,7 +363,7 @@ function vHome(c) {
 function drawCharts() {
   const c = calc();
   if ($('#ch-main')) {
-    if (S.mode === 'positionen') {
+    if (S.mode === 'positionen' || c.series.d.length < 2) {   // am ersten Tag gibt es noch keinen Verlauf seit Kauf
       const bc = backcast();
       if (bc && bc.d.length > 1) {
         const from = bc.d[bc.d.length - 1] - RANGES[S.range];
@@ -386,6 +386,8 @@ function drawCharts() {
       $('#lg-main').innerHTML = legend(s);
     }
   }
+  const cj = $('#ch-jk');
+  if (cj) drawJakob(cj);
   const chs = $('#ch-smart'), smx = (S.smart || {})[(S.smart || {})[S.smk] ? S.smk : 'stocks'];
   if (chs && smx && smx.hist && smx.hist.length > 1) {
     const s2 = [{name: 'Smart Money', color: 'var(--s1)', pts: smx.hist.map(h => [isoToDay(h[0]), h[1]])}, {name: 'Dumb Money', color: 'var(--s2)', pts: smx.hist.map(h => [isoToDay(h[0]), h[2]])}];
@@ -750,13 +752,6 @@ function playCard() {
   return card('Wenn … dann', 'Deine Regeln und was davon heute zutrifft', `<div class="rules">${pb.map(r => `<div class="rule ${r.on ? 'on' : ''}">${stIcon(r.on ? 'warn' : 'ok')}<div><b>Wenn ${esc(r.when)}</b><div class="x">Dann: ${esc(r.then)}</div>${r.now ? `<div class="m">Heute: ${esc(r.now)}</div>` : ''}</div></div>`).join('')}</div>
     <p class="hint">Regeln aus deinem Profil. Gelb heißt: trifft gerade zu. Keine Anlageberatung.</p>`, '', 'span12');
 }
-function eventsCard() {
-  const ev = ((S.screen || {}).events || []).slice(0, 12);
-  const evRow = e => /^(fg|depot):/.test(e.key) ? `<div class="row"><div class="l"><div class="t"><b>${esc(e.symbol)}</b></div><div class="m">${esc(e.text)}</div></div><div class="r small muted">${dateDe(e.day)}${e.important ? ' · Push' : ''}</div></div>`
-    : `<button class="row" data-act="${D(e.key).hist ? 'open' : 'scx'}" data-key="${esc(e.key)}"><div class="l"><div class="t">${tag(e.key)}</div><div class="m">${esc(e.text)}</div></div><div class="r small muted">${dateDe(e.day)}${e.important ? ' · Push' : ''}</div></button>`;
-  return card('Hinweise', 'Die letzten Meldungen, Push markiert', ev.length ? `<div class="rows tight evl">${ev.slice(0, 6).map(evRow).join('')}</div>`
-    : '<p class="empty">Noch keine Hinweise.</p>', '', 'span12');
-}
 /* ---------------------------------------------------------------- Backtest (Jakobs Wunsch vom 22.11.2026)
    tracker/backtest.py → backtest.json: 10 Jahre, nur Daten, die es am jeweiligen Tag gab. Ansichten Ergebnis, Signale,
    Punkte, Deine Titel, Regeln (S.btv). Das Diagramm zeichnet drawCharts (#ch-bt). */
@@ -841,32 +836,23 @@ function btCard() {
     fn(b) + `<p class="hint">Grenzen: Die Auswahl der Titel ist von heute, die Gewinner von heute sind also dabei und Pleiten fehlen. Darum zählt vor allem der Vergleich mit „Alle Titel der Auswahl“. Monatlich umgeschichtet, ohne Steuern. Vergangene Renditen sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p>`,
     seg('btv', ['Ergebnis', 'Signale', 'Punkte', 'Deine Titel', 'Regeln'], v), 'span12');
 }
-// Depot Jakob (Jakobs Wunsch vom 22.11.2026): Ideal-Depot nach den Backtest-Regeln und was deine Regeln heute sagen
 const kiList = () => { const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes') || 'ai'] ?? 0.6; return ((S.screen || {}).list || []).filter(r => (r.c || {}).theme >= tmin); };
-// Kopf: was deine Regeln heute sagen, in einem Satz, dahinter die drei Werte, an denen es hängt
-function stratHero() {
-  const ib = idealBook();
-  if (!ib) return '';
-  const sm = (S.screen || {}).semis || {}, fg = (marketFg() || {}).value, list = kiList();
-  const on = list.filter(r => (momOf(r.key) || r.mom || {}).state === 'on').length;
-  const st = ib.ex.on ? ['warn', 'Kaufen in Teilen', `Deine Ausnahme greift: ${ib.ex.text}. Gekauft wird auch ohne Momentum-Signal, nur Titel mit intakten Gewinnschätzungen.`]
+/* ---------------------------------------------------------------- Strategie, Ansicht „Heute“ (Redesign vom 24.11.2026, Jakobs Wunsch)
+   Drei Karten statt fünf: Depot Jakob (Wert, Lage, Kennzahlen, Diagramm gegen S&P 500 und Halbleiter), Plan (Kaufen in Teilen,
+   Ideal-Depot als Ziel je Titel mit Bestand und Wort deiner Regel, daneben die nächsten Schritte), Lage (Prüfungen und Hinweise),
+   dazu die Erklärung zum Aufklappen. Bausteine mit Präfix sx- (app.css). Rechnungen unverändert in app.js. */
+const meTxt = () => { const me = monthEnd(); return `${WT[me.getDay()]} ${me.getDate()}.${me.getMonth() + 1}.`; };
+// Betriebsart deiner Regeln heute: Ausnahme, Marktfilter, Momentum oder Abwarten
+function stratState(ib) {
+  const sm = (S.screen || {}).semis || {}, on = kiList().filter(r => (momOf(r.key) || r.mom || {}).state === 'on').length;
+  return ib.ex.on ? ['warn', 'Kaufen in Teilen', `Deine Ausnahme greift: ${ib.ex.text}. Gekauft wird auch ohne Momentum-Signal, nur Titel mit intakten Gewinnschätzungen.`]
     : ib.filt ? ['', 'Halb investiert', `Halbleiter liegen ${pctS(sm.ma200, 0)} zu ihrer 200-Tage-Linie. Der Marktfilter hält die Hälfte als Reserve.`]
     : ib.items.length ? ['good', 'Momentum zuerst', `${on} KI-${on === 1 ? 'Titel hat' : 'Titel haben'} ein Momentum-Signal. Gekauft wird, was ein Signal hat; verkauft, was es verliert.`]
     : ['', 'Abwarten', 'Kein KI-Titel hat ein Signal und keine Ausnahme greift. Neues Geld bleibt Reserve, bis ein Signal kommt.'];
-  const kv = (l, v, n, cls = '') => `<div class="kv"><span>${l}</span><b class="num ${cls}">${v}</b><small>${n}</small></div>`;
-  return `<section class="card span12 shero"><div class="shero-l"><div class="eyebrow">Depot Jakob · Stand ${S.screen && S.screen.updated ? stampDe(S.screen.updated) : 'heute'}</div><div class="shero-t"><i class="sdot ${st[0]}"></i>${st[1]}</div><p>${esc(st[2])}</p></div>
-    <div class="shero-r">${kv('Stimmung', fg ?? '–', fg == null ? '' : fg < FEAR ? 'extreme Angst' : fg < 45 ? 'Angst' : fg <= 55 ? 'neutral' : 'Gier', fg != null && fg < FEAR ? 'neg' : '')}
-      ${kv('Halbleiter', sm.from_high != null ? pctS(sm.from_high, 0) : '–', 'vom Hoch', sm.from_high <= -20 ? 'neg' : '')}${kv('Signale', `${on}<small> / ${list.length}</small>`, 'KI-Titel')}</div></section>`;
 }
-// Was sich getan hat (Jakobs Wunsch vom 24.11.2026, ersetzt die Karte Ideal-Depot): auf einen Blick, ob sich im Depot Jakob
-// etwas Grundlegendes geändert hat. Prüft Schätzungen, Ausnahme, Ideal-Depot, Momentum und Termine, darunter die Titel mit dem
-// Wort deiner Regel. Das Ideal-Depot rechnet weiter im Hintergrund (Wort je Titel, Nächste Schritte, Monatsrate).
-function updCard() {
-  const ib = idealBook();
-  if (!ib) return '';
-  const jb = jakobBook(), jh = jakobHeld(), keys = Object.keys(jh);
-  if (!keys.length) return card('Was sich getan hat', 'Depot Jakob', '<p class="empty">Noch keine Käufe im Depot Jakob eingetragen.</p>', '', 'span7');
-  const me = monthEnd(), meTxt = `${WT[me.getDay()]} ${me.getDate()}.${me.getMonth() + 1}.`, nm = k => shortName(k), list = ks => ks.map(nm).join(', ');
+// Prüfungen „Hat sich Grundlegendes geändert?“ (Jakobs Wunsch vom 24.11.2026): Schätzungen, Ausnahme, Ideal-Depot, Momentum, Termine
+function stratChecks(ib) {
+  const jb = jakobBook(), jh = jakobHeld(), keys = Object.keys(jh), nm = k => shortName(k), list = ks => ks.map(nm).join(', ');
   const sr = k => scrRow(k) || {}, est = k => sr(k).est90, st = k => (momOf(k) || sr(k).mom || {}).state, word = k => (ruleOf(k) || {}).word;
   const chk = [];
   // Gewinnschätzungen: ab −10 % in 90 Tagen sofort verkaufen (deine Regel), darunter beobachten
@@ -878,12 +864,12 @@ function updCard() {
   // Ausnahme: solange sie greift, bleiben Titel auch ohne Signal; danach zählt zum Monatsende wieder das Signal
   const sell = keys.filter(k => word(k) === 'Verkaufen' && !cut.includes(k));
   chk.push(ib.ex.on ? ['ok', 'Ausnahme greift weiter', `${ib.ex.text[0].toUpperCase() + ib.ex.text.slice(1)}. Deine Titel bleiben auch ohne Momentum-Signal.`]
-    : sell.length ? ['bad', 'Ausnahme greift nicht mehr', `Zum Monatsende (${meTxt}) verkaufen nach deiner Regel: ${list(sell)}.`]
+    : sell.length ? ['bad', 'Ausnahme greift nicht mehr', `Zum Monatsende (${meTxt()}) verkaufen nach deiner Regel: ${list(sell)}.`]
     : ['ok', 'Verkaufsregel hält', 'Keine Ausnahme nötig: Deine Titel halten die Verkaufsregel.']);
   // Ideal-Depot: rausgefallene Titel werden zum Monatsende getauscht, offene mit dem Rest des Startbetrags gekauft
   const inIb = new Set(ib.items.map(x => x.key)), out = keys.filter(k => !inIb.has(k) && !sell.includes(k) && !cut.includes(k));
   const open = ib.items.filter(x => !jh[x.key]), rest = Math.max(0, (+ansOf('capital') || 0) - jb.cost);
-  chk.push(out.length ? ['warn', 'Aus dem Ideal-Depot gefallen', `${list(out)}: Ein anderer Titel passt mindestens 2 Punkte besser. Nach deiner Regel Tausch zum Monatsende (${meTxt}).`]
+  chk.push(out.length ? ['warn', 'Aus dem Ideal-Depot gefallen', `${list(out)}: Ein anderer Titel passt mindestens 2 Punkte besser. Nach deiner Regel Tausch zum Monatsende (${meTxt()}).`]
     : ['ok', 'Alle Titel noch im Ideal-Depot', open.length ? `Noch nicht gekauft: ${open.map(x => `${nm(x.key)} (Ziel ${eur(x.eur, 0)})`).join(', ')}${rest >= 1 ? `. Vom Startbetrag offen: ${eur(rest, 0)}` : ''}.` : 'Kein Tausch nötig.']);
   // Momentum: kommt das Signal, ist der Titel nicht mehr nur über die Ausnahme drin
   const on = keys.filter(k => st(k) === 'on'), fade = keys.filter(k => st(k) === 'fade');
@@ -894,44 +880,131 @@ function updCard() {
   const soon = keys.filter(k => sr(k).earnings && sr(k).earnings >= d0 && sr(k).earnings <= d21).sort((a, b) => sr(a).earnings.localeCompare(sr(b).earnings));
   if (soon.length) chk.push(['info', 'Quartalszahlen bald', soon.map(k => `${nm(k)} am ${dateDe(sr(k).earnings)}`).join(', ') + '. Danach ändern sich oft die Schätzungen.']);
   const nb = chk.filter(x => x[0] === 'bad').length, nw = chk.filter(x => x[0] === 'warn').length;
-  const head = nb ? ['bad', 'Handeln nach deinen Regeln'] : nw ? ['warn', nw === 1 ? '1 Punkt beobachten' : nw + ' Punkte beobachten'] : ['good', 'Nichts Grundlegendes geändert'];
-  const dayPct = jb.dayPct;
-  const tiles = `<div class="tiles three">${tile('Wert', eur(jb.value, 0))}${tile('Heute', pctS(dayPct, 1), eurS(jb.dayEur), sign(dayPct))}${tile('Seit Kauf', pctS(jb.pnlPct, 1), eurS(jb.pnl), sign(jb.pnlPct))}</div>`;
-  const rules = `<div class="rules">${chk.map(([s2, t, x]) => `<div class="rule">${stIcon(s2)}<div><b>${esc(t)}</b><div class="x">${esc(x)}</div></div></div>`).join('')}</div>`;
-  const CD = {bad: 'var(--down)', good: 'var(--up)', teal: 'var(--up)'};
-  const rows = jb.held.filter(p => p.value > 0).map(p => { const r = ruleOf(p.key) || {};
-    return `<button class="irow" data-act="open" data-key="${esc(p.key)}"><span class="cdot" style="background:${CD[r.cls] || 'var(--line2)'}"></span>${fitBadge(fitOf(scrRow(stratKey(p.key))))}${logo(p.key)}
-      <span class="irow-n"><b>${esc(shortName(p.key))}</b><small>${chgA(p.dayPct).replace('chga', 'chga sm')} heute</small></span><span class="irow-w">${r.word ? `<span class="chip ${r.cls}">${r.word}</span>` : ''}</span>
-      <span class="irow-v num"><b>${eur(p.value, 0)}</b><small class="${sign(p.pnlPct)}">${pctS(p.pnlPct, 1)} seit Kauf</small></span></button>`; }).join('');
-  return card('Was sich getan hat', `Depot Jakob · Stand ${S.screen && S.screen.updated ? stampDe(S.screen.updated) : 'heute'} · nächste Prüfung ${meTxt}`,
-    `<div class="ustat"><i class="sdot ${head[0]}"></i><b>${head[1]}</b></div>${tiles}${rules}<p class="sh">Deine Titel</p><div class="ilist ulist">${rows}</div>
-    <p class="hint">Rechnet alle 15 Minuten mit aktuellen Kursen neu. Grundlegend heißt: Schätzungen, Ausnahme, Ideal-Depot und Momentum-Signal. Tagesschwankungen allein ändern nach deinen Regeln nichts. Keine Anlageberatung.</p>`, '', 'span7');
+  return {chk, head: nb ? ['bad', 'Handeln nach deinen Regeln'] : nw ? ['warn', nw === 1 ? '1 Punkt beobachten' : nw + ' Punkte beobachten'] : ['good', 'Nichts Grundlegendes geändert']};
 }
-// Nächste Schritte im Depot Jakob, nummeriert: Startkäufe oder Kaufen/Verkaufen/Nachkaufen, Monatsrate, Monatsende
-function todoCard() {
-  const ib = idealBook();
-  if (!ib) return '';
+// Nächste Schritte im Depot Jakob: Startkäufe oder Rest vom Startbetrag, Kaufen/Verkaufen/Nachkaufen, Monatsrate, Monatsende, Halten
+function stratSteps(ib) {
   const jh = jakobHeld(), empty = !Object.keys(jh).length, keys = [...new Set([...ib.items.map(x => x.key), ...Object.keys(jh)])];
-  const rs = keys.map(k => ({key: k, r: ruleOf(k)})).filter(x => x.r), grp = w => rs.filter(x => x.r.word === w), me = monthEnd();
-  const meTxt = `${WT[me.getDay()]} ${me.getDate()}.${me.getMonth() + 1}.`;
+  const rs = keys.map(k => ({key: k, r: ruleOf(k)})).filter(x => x.r), grp = w => rs.filter(x => x.r.word === w);
   const lines = xs => `<div class="srows">${xs.map(x => `<button class="srow" data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<b class="num">${x.r.eur ? eur(x.r.eur, 0) : ''}</b></button>`).join('')}</div>`;
   const steps = [];
-  // Rest vom Startbetrag (Jakobs Wunsch vom 24.11.2026: Startbetrag in Teilen angelegt): fehlende Titel und
-  // Auffüllen auf gleiches Gewicht in einem Schritt; die Monatsrate beginnt erst, wenn der Startbetrag angelegt ist
+  // Rest vom Startbetrag (Jakobs Wunsch vom 24.11.2026: Startbetrag in Teilen angelegt): fehlende Titel und Auffüllen auf
+  // gleiches Gewicht in einem Schritt; die Monatsrate beginnt erst, wenn der Startbetrag angelegt ist
   const rest = empty ? 0 : Math.max(0, (+ansOf('capital') || 0) - jakobBook().cost);
   const gaps = rest >= ib.minp ? ib.items.map(it => ({key: it.key, gap: Math.max(0, it.eur - ((jh[it.key] || {}).value || 0))})).filter(x => x.gap > 0) : [];
   const gsum = gaps.reduce((a, x) => a + x.gap, 0);
   if (empty && grp('Kaufen').length) steps.push(['Startkäufe', `${grp('Kaufen').length} Aktien, je ${eur(ib.items[0].eur, 0)}`, `<div class="tgs">${grp('Kaufen').map(x => tag(x.key)).join('')}</div><p class="small muted" style="margin:6px 0 0">Im Depot „Jakob“ eintragen.</p>`]);
-  if (!empty && grp('Verkaufen').length) steps.push(['Verkaufen', 'zum Monatsende, ' + meTxt, lines(grp('Verkaufen'))]);
-  if (gaps.length) steps.push(['Startbetrag auffüllen', `${eur(rest, 0)} offen, auf gleiches Gewicht`, `<div class="srows">${gaps.sort((a, b) => b.gap - a.gap).map(x => `<button class="srow" data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<b class="num">${eur(Math.round(x.gap * Math.min(1, rest / gsum) / 10) * 10, 0)}</b></button>`).join('')}</div>`]);
+  if (!empty && grp('Verkaufen').length) steps.push(['Verkaufen', 'zum Monatsende, ' + meTxt(), lines(grp('Verkaufen'))]);
+  if (gaps.length) steps.push(['Startbetrag auffüllen', `${eur(rest, 0)} offen`, `<div class="srows">${gaps.sort((a, b) => b.gap - a.gap).map(x => `<button class="srow" data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<b class="num">${eur(Math.round(x.gap * Math.min(1, rest / gsum) / 10) * 10, 0)}</b></button>`).join('')}</div><p class="small muted" style="margin:4px 0 0">Auf gleiches Gewicht, fehlende Titel zuerst.</p>`]);
   else if (!empty && grp('Kaufen').length) steps.push(['Kaufen', '', lines(grp('Kaufen'))]);
   if (grp('Nachkaufen').length && !gaps.length) steps.push(['Nachkaufen', 'Rücksetzer im Aufwärtstrend', lines(grp('Nachkaufen'))]);
   const r = gaps.length ? null : monthlyRate();
   if (r) steps.push([`Monatsrate ${new Date().toLocaleDateString('de-DE', {month: 'long'})}`, eur(r.m, 0) + (r.reserve ? ` · ${eur(r.reserve, 0)} Reserve` : ''),
     r.pick.length ? `<div class="srows">${r.pick.map(x => `<button class="srow" data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<b class="num">${eur(x.eur, 0)}</b></button>`).join('')}</div>` : `<p class="small muted" style="margin:0">${esc(r.why)}</p>`]);
-  if (!grp('Verkaufen').length) steps.push(['Monatsende prüfen', meTxt, `<p class="small muted" style="margin:0">Signale neu prüfen: Was kein Signal mehr hat, wird verkauft; freie Plätze bekommen neue Titel.</p>`]);
+  if (!grp('Verkaufen').length) steps.push(['Monatsende prüfen', meTxt(), `<p class="small muted" style="margin:0">Signale neu prüfen: Was kein Signal mehr hat, wird verkauft; freie Plätze bekommen neue Titel.</p>`]);
   if (grp('Halten').length) steps.push(['Halten', '', `<div class="tgs">${grp('Halten').map(x => tag(x.key)).join('')}</div>`]);
-  return card('Nächste Schritte', 'Depot Jakob', `<ol class="steps">${steps.map((x, i) => `<li><span class="sn">${i + 1}</span><div><div class="sh2"><b>${x[0]}</b>${x[1] ? `<span>${x[1]}</span>` : ''}</div>${x[2]}</div></li>`).join('')}</ol>`, '', 'span5');
+  return steps;
+}
+// Diagramm Depot Jakob: seit Kauf (Gewinn in % gegen gleiche Käufe im S&P 500) oder die heutigen Positionen zurückgerechnet
+// gegen S&P 500 und Halbleiter (SOXX), in Prozent ab Beginn des Zeitraums
+const JK_DAYS = {'1M': 30, '3M': 91, '1J': 365};
+const jkRanges = () => ((jakobBook().series || {d: []}).d.length > 1 ? ['Seit Kauf'] : []).concat(Object.keys(JK_DAYS));
+const jkRange = () => { const rs = jkRanges(); return rs.includes(S.jkr) ? S.jkr : rs[0] === 'Seit Kauf' && jakobBook().series.d.length >= 5 ? 'Seit Kauf' : '3M'; };
+function drawJakob(el) {
+  const jb = jakobBook(), r = jkRange();
+  let s, label;
+  if (r === 'Seit Kauf') {
+    const sr = jb.series, at = f => sr.d.map((d, i) => [d, f(i)]);
+    s = [{name: 'Depot Jakob', color: 'var(--accent)', area: true, pts: at(i => sr.inv[i] ? (sr.v[i] / sr.inv[i] - 1) * 100 : 0)}];
+    if (sr.bench) s.push({name: 'Gleiche Käufe im S&P 500', color: 'var(--ink3)', pts: at(i => sr.inv[i] ? ((sr.as[i] + sr.ks[i]) / sr.inv[i] - 1) * 100 : 0)});
+    label = 'Gewinn seit Kauf in Prozent, verglichen mit gleichen Käufen im S&P 500';
+  } else {
+    const bc = backcast(jb);
+    if (!bc || bc.d.length < 2) { el.innerHTML = '<p class="empty">Die Rückrechnung kommt mit der nächsten täglichen Aktualisierung.</p>'; return; }
+    const from = bc.d[bc.d.length - 1] - JK_DAYS[r];
+    let i0 = bc.d.findIndex(d => d >= from); if (i0 < 0) i0 = 0;
+    const d = bc.d.slice(i0), v = bc.v.slice(i0), pct = x => d.map((dd, i) => [dd, (x[i] - 1) * 100]);
+    s = [{name: 'Depot Jakob, heutige Positionen', color: 'var(--accent)', area: true, pts: d.map((dd, i) => [dd, v[0] ? (v[i] / v[0] - 1) * 100 : 0])}];
+    const sp = benchIndex('SP500', d), sx = benchIndex('SOXX', d);
+    if (sx) s.push({name: 'Halbleiter (SOXX)', color: 'var(--s2)', pts: pct(sx)});
+    if (sp) s.push({name: 'S&P 500', color: 'var(--ink3)', pts: pct(sp)});
+    label = 'Heutige Positionen mit den Kursen der Vergangenheit zurückgerechnet, in Prozent';
+  }
+  lineChart(el, s, {fmt: v => pctS(v, 0), height: 220, label, hlines: [{y: 0, label: '', color: 'var(--line2)'}]});
+  $('#lg-jk').innerHTML = legend(s);
+}
+// Karte 1: Depot Jakob auf einen Blick
+function stratTop(ib) {
+  const jb = jakobBook(), has = jb.held.some(p => p.value > 0), st = stratState(ib), ck = has ? stratChecks(ib).head : null;
+  const sm = (S.screen || {}).semis || {}, fg = (marketFg() || {}).value, list = kiList();
+  const on = list.filter(r => (momOf(r.key) || r.mom || {}).state === 'on').length, cap = +ansOf('capital') || 0;
+  const kpi = (l, v, n, extra = '') => `<div class="sx-kpi"><span>${l}</span><b class="num">${v}</b>${n ? `<small>${n}</small>` : ''}${extra}</div>`;
+  const stamp = S.screen && S.screen.updated ? stampDe(S.screen.updated) : 'heute';
+  const lead = has ? `<div class="sx-val num">${eur(jb.value, 0)}</div>
+      <div class="sx-chgs"><span class="num ${sign(jb.pnl)}">${eurS(jb.pnl)} · ${pctS(jb.pnlPct, 1)}<small>seit Kauf</small></span><span class="num ${sign(jb.dayEur)}">${pctS(jb.dayPct, 1)}<small>heute</small></span></div>`
+    : `<div class="sx-val sm">${esc(st[1])}</div><p class="sx-lead">${esc(st[2])}</p>`;
+  const status = ck || [st[0], st[1]];
+  const kpis = `<div class="sx-kpis">
+      ${cap ? kpi('Angelegt', `${eur(jb.cost || 0, 0)}<small> / ${eur(cap, 0)}</small>`, `Startbetrag, ${nf(Math.min(100, (jb.cost || 0) / cap * 100), 0)} %`, `<i class="sx-bar"><i style="width:${Math.min(100, (jb.cost || 0) / cap * 100)}%"></i></i>`) : ''}
+      ${kpi('Stimmung', `<span class="${fg != null && fg < FEAR ? 'neg' : ''}">${fg ?? '–'}</span>`, fg == null ? '' : fg < FEAR ? 'extreme Angst' : fg < 45 ? 'Angst' : fg <= 55 ? 'neutral' : 'Gier')}
+      ${kpi('Halbleiter', `<span class="${sm.from_high <= -20 ? 'neg' : ''}">${sm.from_high != null ? pctS(sm.from_high, 0) : '–'}</span>`, 'vom Hoch')}
+      ${kpi('Signale', `${on}<small> / ${list.length}</small>`, 'KI-Titel mit Momentum')}
+      ${kpi('Nächste Prüfung', meTxt(), 'zum Monatsende')}</div>`;
+  const chart = has ? `<div class="sx-charthead"><h3>Wertentwicklung</h3>${seg('jkr', jkRanges(), jkRange())}</div><div class="chart" id="ch-jk"></div><div id="lg-jk"></div>` : '';
+  return `<section class="card span12 sx-top"><div class="sx-row"><div><div class="eyebrow">Depot Jakob · Stand ${stamp}</div>${lead}</div>
+      <span class="sx-status"><i class="sdot ${status[0]}"></i>${esc(status[1])}</span></div>${kpis}${chart}</section>`;
+}
+// Karte 2: Plan – Betriebsart (z. B. Kaufen in Teilen), Ideal-Depot als Ziel je Titel mit Bestand, daneben die nächsten Schritte
+const VIA = {ausnahme: 'über die Ausnahme', halten: 'im Depot, Regel hält', signal: 'Momentum-Signal'};
+function planCard(ib) {
+  const jh = jakobHeld(), st = stratState(ib), keys = [...new Set([...ib.items.map(x => x.key), ...Object.keys(jh)])];
+  const xr = ((S.bt || {}).opt || {}).exposure, row0 = xr && xr.slice().sort((a, b) => Math.abs(a.share - ib.share * 100) - Math.abs(b.share - ib.share * 100))[0];
+  const meta = `Ideal-Depot: ${ib.items.length} Aktien · je ${ib.items.length ? eur(ib.items[0].eur, 0) : '–'} · ${nf(ib.share * 100, 0)} % investiert${ib.reserve >= 0.005 ? ' · ' + eur(ib.base * ib.reserve, 0) + ' Reserve' : ''}${row0 ? ' · Rückgang im Backtest ' + pctS(row0.dd, 0) : ''}`;
+  const rows = keys.map(k => {
+    const it = ib.items.find(x => x.key === k), h = jh[k], r = ruleOf(k) || {}, sr = scrRow(k) || {}, show = h && h.via ? h.via[0] : k;
+    const v = h ? h.value : 0, tgt = it ? it.eur : 0, fill = tgt ? Math.min(1, v / tgt) : 1;
+    const pnl = h && h.cost ? (h.value / h.cost - 1) * 100 : null, day = h && h.dayEur != null && h.value - h.dayEur > 0 ? h.dayEur / (h.value - h.dayEur) * 100 : null;
+    const sub = [sr.theme, it ? VIA[it.via] : 'nicht mehr im Ideal-Depot'].filter(Boolean).join(' · ');
+    return `<button class="sx-prow" data-act="open" data-key="${esc(show)}">${fitBadge(fitOf(scrRow(k)))}${logo(show)}
+      <span class="sx-pn"><b>${esc(shortName(k))}</b><small class="d">${esc(sub)}</small><small class="m">${r.word ? `<span class="rw ${r.cls}">${r.word}</span> · ` : ''}${h ? `<span class="${sign(day)}">${pctS(day, 1)}</span> heute` : esc(it ? VIA[it.via] : '')}</small></span>
+      <span class="sx-pw">${r.word ? `<span class="chip ${r.cls}">${r.word}</span>` : ''}</span>
+      <span class="sx-pc num ${sign(day)}">${h ? pctS(day, 1) : '–'}</span><span class="sx-pc num ${sign(pnl)}">${h ? pctS(pnl, 1) : '–'}</span>
+      <span class="sx-pv num"><b>${h ? eur(v, 0) : 'offen'}</b><small class="d">${tgt ? 'Ziel ' + eur(tgt, 0) : 'kein Ziel'}</small><small class="m">${h ? `<span class="${sign(pnl)}">${pctS(pnl, 1)}</span> seit Kauf` : tgt ? 'Ziel ' + eur(tgt, 0) : ''}</small><i class="sx-bar${it ? '' : ' off'}"><i style="width:${fill * 100}%"></i></i></span></button>`;
+  }).join('');
+  const done = ib.items.filter(x => jh[x.key]).length;
+  const alloc = ib.items.length ? `<div class="sx-alloc" role="img" aria-label="${done} von ${ib.items.length} Titeln gekauft">${ib.items.map(it => `<i title="${esc(shortName(it.key))}: ${eur((jh[it.key] || {}).value || 0, 0)} von ${eur(it.eur, 0)}"><b style="width:${Math.min(100, ((jh[it.key] || {}).value || 0) / it.eur * 100)}%"></b></i>`).join('')}${ib.reserve >= 0.005 ? `<i class="res" style="flex:${ib.reserve / (ib.items[0].w || 1)}" title="Reserve ${nf(ib.reserve * 100, 0)} %"></i>` : ''}</div>
+    <div class="sx-allocl"><span>${done} von ${ib.items.length} Titeln im Depot</span><span>je Feld ein Titel, gefüllt = Bestand am Ziel</span></div>` : '';
+  const steps = stratSteps(ib);
+  return `<section class="card span12 sx-plan"><div class="sx-cols"><div class="sx-main">
+      <div class="head"><div><h2>Plan</h2><p class="sub">${esc(meta)}</p></div><span class="sx-mode"><i class="sdot ${st[0]}"></i>${esc(st[1])}</span></div>
+      <p class="sx-lead">${esc(st[2])}</p>${alloc}
+      ${ib.items.length || keys.length ? `<div class="sx-th"><span>Titel</span><span>Deine Regel</span><span class="r">Heute</span><span class="r">Seit Kauf</span><span class="r">Bestand / Ziel</span></div><div class="sx-plist">${rows}</div>`
+        : '<p class="empty">Gerade leer: kein KI-Titel mit Signal und keine Ausnahme. Das Geld bleibt Reserve.</p>'}</div>
+    <div class="sx-side"><h3>Nächste Schritte</h3><ol class="steps">${steps.map((x, i) => `<li><span class="sn">${i + 1}</span><div><div class="sh2"><b>${x[0]}</b>${x[1] ? `<span>${x[1]}</span>` : ''}</div>${x[2]}</div></li>`).join('')}</ol></div></div></section>`;
+}
+// Karte 3: Lage – Prüfungen links, Hinweise rechts. Hinweise nach Art: Info, Deine Regel, Warnung, Handeln
+function evLevel(e) {
+  const held = !!jakobHeld()[e.key];
+  if ((e.type === 'cut' && held) || (e.type === 'rule' && /Verkaufen/.test(e.text))) return ['act', 'Handeln'];
+  if (e.type === 'rule' || e.type === 'monat' || e.type === 'fear') return ['rule', 'Deine Regel'];
+  if (e.type === 'cut' || e.type === 'momoff') return ['warn', 'Warnung'];
+  return ['info', 'Info'];
+}
+function lageCard(ib) {
+  const has = Object.keys(jakobHeld()).length, ck = has ? stratChecks(ib) : null, ev = ((S.screen || {}).events || []).slice(0, 12);
+  const evRow = e => { const [cls, lbl] = evLevel(e), own = /^(fg|depot):/.test(e.key);
+    return `<${own ? 'div' : `button data-act="${D(e.key).hist ? 'open' : 'scx'}" data-key="${esc(e.key)}"`} class="sx-ev"><div class="sx-evh"><span class="sx-lvl ${cls}">${lbl}</span>${own ? `<b>${esc(e.symbol)}</b>` : tag(e.key)}<span class="sx-evd">${dateDe(e.day)}${e.important ? ' · Push' : ''}</span></div><p>${esc(e.text)}</p></${own ? 'div' : 'button'}>`; };
+  const checks = ck ? `<div class="rules">${ck.chk.map(([s2, t, x]) => `<div class="rule">${stIcon(s2)}<div><b>${esc(t)}</b><div class="x">${esc(x)}</div></div></div>`).join('')}</div>`
+    : '<p class="empty">Sobald Käufe im Depot Jakob stehen, prüft die App hier Schätzungen, Ausnahme, Ideal-Depot und Momentum.</p>';
+  return `<section class="card span12 sx-lage"><div class="sx-cols"><div class="sx-main"><h3>Hat sich Grundlegendes geändert?</h3>${checks}
+      <p class="hint">Rechnet alle 15 Minuten mit aktuellen Kursen neu. Tagesschwankungen allein ändern nach deinen Regeln nichts.</p></div>
+    <div class="sx-side"><h3>Hinweise</h3>${ev.length ? `<div class="sx-evs">${ev.slice(0, 6).map(evRow).join('')}</div>` : '<p class="empty">Noch keine Hinweise.</p>'}
+      <p class="hint">Die letzten Meldungen, Push markiert. Keine Anlageberatung.</p></div></div></section>`;
+}
+// Reiter der Strategie: Name und darunter, was dort steht
+function stratNav(v, open) {
+  const meta = {Heute: 'Lage und Plan', Kandidaten: `${((S.screen || {}).list || []).length} Titel im Filter`, Backtest: '10 Jahre, deine Regeln', Profil: open ? `${open} ${open === 1 ? 'Frage' : 'Fragen'} offen` : 'Antworten und Regeln'};
+  return `<nav class="sx-tabs" role="tablist">${SV.map(x => `<button role="tab" aria-selected="${x === v}" data-act="sv" data-v="${x}" class="${x === v ? 'on' : ''}"><b>${x}</b><small>${esc(meta[x])}</small></button>`).join('')}</nav>`;
 }
 // Erklärung an einer Stelle statt unter jeder Karte
 function howCard() {
@@ -970,7 +1043,7 @@ function vStrat(c) {
     <div class="btnrow"><button class="btn" data-act="startprof">Profil anlegen</button></div>`)}</div>`;
   if (S.bt === undefined) setTimeout(loadBacktest, 0);   // für den Rückgang im Ideal-Depot und die Detailansicht
   const v = SV.includes(S.sv) ? S.sv : 'Heute', open = QUESTIONS.filter(q => ansOf(q.id) == null).length;
-  const nav = `<div class="depbar svbar">${seg('sv', SV, v)}${open ? `<span class="small muted">${open} ${open === 1 ? 'Frage' : 'Fragen'} offen unter Profil</span>` : ''}</div>`;
+  const nav = stratNav(v, open);
   let body;
   if (v === 'Kandidaten') body = candCard();
   else if (v === 'Backtest') body = btCard();
@@ -980,8 +1053,9 @@ function vStrat(c) {
       ${sum.t.length ? `<details class="qdone"><summary>Spannungen in deinem Profil (${sum.t.length})</summary><div class="rules">${sum.t.map(t => `<div class="rule">${stIcon('warn')}<div class="x">${esc(t)}</div></div>`).join('')}</div></details>` : ''}
       ${pr.text ? `<details class="qdone"><summary>Dein Profil im Wortlaut</summary><p class="body small">${esc(pr.text)}</p></details>` : ''}`, '', 'span7')
       + questionsCard() + checkCard() + guardCard() + playCard(); }
-  else body = stratHero() + updCard() + todoCard() + eventsCard() + howCard();
-  return `${nav}<div class="g12">${body}</div>${v === 'Heute' ? '' : '<p class="hint" style="margin-top:14px">Regelbasierte Auswahl nach deinen eigenen Angaben, nur für das Depot Jakob. Keine Anlageberatung.</p>'}`;
+  else { const ib = idealBook();
+    body = ib ? stratTop(ib) + planCard(ib) + lageCard(ib) + howCard() : card('Heute', 'Depot Jakob', '<p class="empty">Der Filter läuft mit dem nächsten Tageslauf.</p>', '', 'span12'); }
+  return `<div class="strat">${nav}<div class="g12">${body}</div>${v === 'Heute' ? '' : '<p class="hint" style="margin-top:14px">Regelbasierte Auswahl nach deinen eigenen Angaben, nur für das Depot Jakob. Keine Anlageberatung.</p>'}</div>`;
 }
 function vInsight(c) {
   const keys = insightKeys(c);
@@ -1245,6 +1319,7 @@ document.addEventListener('click', async ev => {
   else if (act === 'cmp') { S.cmp = v; render(); }
   else if (act === 'hide') { S.hide = !S.hide; try { localStorage.setItem('depot_hide', S.hide ? '1' : ''); } catch (e) { /* egal */ } render(); if (S.sheetKey) vAsset(S.sheetKey); }
   else if (act === 'hv') { S.hv = v; render(); }
+  else if (act === 'jkr') { S.jkr = v; render(); }
   else if (act === 'ans') { const q = QUESTIONS.find(x => x.id === id); if (q) { const val = q.o.find(o => String(o[0]) === v)[0]; S.pf.profile = S.pf.profile || {}; S.pf.profile.answers = Object.assign({}, S.pf.profile.answers, {[id]: val}); S.pf.profile.updated = new Date().toISOString().slice(0, 10); await savePf('Antwort gespeichert'); } }
   else if (act === 'startprof') { S.pf.profile = {answers: {}, updated: new Date().toISOString().slice(0, 10), source: 'Eigene Antworten'}; await savePf('Profil angelegt'); }
   else if (act === 'rcm') { S.rcm = v === 'Ideal-Depot' ? 'ideal' : 'depot'; render(); }

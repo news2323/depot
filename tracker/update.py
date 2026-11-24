@@ -12,7 +12,8 @@ import time
 from . import analytics, screen, sources
 from .common import CLOUD, SourceError, asset_key, empty_portfolio, get_store, http_json, log, now_iso, tracked_assets
 
-BENCH = {"SP500": ("stock", "^GSPC", "S&P 500"), "BTC": ("crypto", "BTC", "Bitcoin")}
+BENCH = {"SP500": ("stock", "^GSPC", "S&P 500"), "BTC": ("crypto", "BTC", "Bitcoin"),
+         "SOXX": ("stock", "SOXX", "Halbleiter (SOXX)")}   # Halbleiter: Vergleich im Diagramm Depot Jakob
 
 
 def strategy_assets(store):
