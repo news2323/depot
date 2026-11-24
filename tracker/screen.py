@@ -255,11 +255,13 @@ STRAT_DEP = "jakob"     # Strategie nur für das Teildepot Jakob (Jakobs Wunsch 
 
 
 def _held(pf):
+    """Gehaltene Titel im Depot Jakob. Eine Buchung mit `alias` (z. B. Hinterlegungsschein) zählt als die Aktie mit diesem
+    Kürzel, mit der die Strategie rechnet (Jakobs Wunsch vom 24.11.2026; gleiche Regel in web/app.js stratKey)."""
     qty = {}
     for t in pf.get("transactions") or []:
         if (t.get("depot") or "main") != STRAT_DEP:
             continue
-        k = asset_key(t.get("kind"), str(t.get("symbol") or "").upper())
+        k = asset_key(t.get("kind"), str(t.get("alias") or t.get("symbol") or "").upper())
         q = float(t.get("qty") or 0)
         if t.get("type") in ("buy", "sell"):
             qty[k] = qty.get(k, 0) + (q if t["type"] == "buy" else -q)

@@ -254,11 +254,12 @@ function calc() {
     qty: +t.qty || 0, price: +t.price || 0, fee: +t.fee || 0, currency: t.currency || 'EUR'}))
     .filter(t => !isNaN(t.day)).sort((a, b) => a.day - b.day || (a.type === 'buy' ? -1 : 1));
   // Positionen (FIFO)
-  const lots = {}, realized = {}, native = {};
+  const lots = {}, realized = {}, native = {}, boughtToday = {}, td0 = todayDay();
   for (const t of txs) {
     const rate = fxAt(t.currency, t.day) || 1, q = lots[t.key] = lots[t.key] || [];
     if (t.type === 'buy') {
       q.push([t.qty, (t.qty * t.price + t.fee) / rate]);
+      if (t.day === td0) { const b = boughtToday[t.key] = boughtToday[t.key] || {q: 0, c: 0}; b.q += t.qty; b.c += (t.qty * t.price + t.fee) / rate; }
       const n = native[t.key] = native[t.key] || {q: 0, c: 0};
       n.q += t.qty; n.c += t.qty * t.price / rate * (fxAt(curOf(t.key), t.day) || 1);
     } else {
@@ -279,9 +280,12 @@ function calc() {
     // Noch kein Kurs (z. B. Börsengang am selben Tag): bis zum ersten Kurs mit dem Kaufkurs rechnen
     if (price == null && !(D(key).hist || {}).d && avgNative != null) { price = avgNative; noQuote = true; chg = null; }
     const rate = fxNow(curOf(key)) || 1, value = price == null ? null : qty * price / rate;
+    // Heute gekauft: zählt ab dem Kaufkurs, nicht ab dem Schluss von gestern (wie im Broker)
+    const bt = boughtToday[key], tq = bt && qty > 0 ? Math.min(bt.q, qty) : 0, vNew = value == null ? null : value * tq / (qty || 1), vOld = value == null ? null : value - vNew;
+    const dayEur = value == null || chg == null || chg <= -100 ? (tq && value != null ? vNew - bt.c * tq / bt.q : null) : vOld - vOld / (1 + chg / 100) + (tq ? vNew - bt.c * tq / bt.q : 0);
     return {key, kind: key.split(':')[0], symbol: key.split(':')[1], name: nameOf(key), qty, cost, value, price, cur: curOf(key),
       realized: realized[key] || 0, pnl: value == null ? null : value - cost, pnlPct: value != null && cost > 0 ? (value / cost - 1) * 100 : null,
-      dayPct: chg, dayEur: value != null && chg != null && chg > -100 ? value - value / (1 + chg / 100) : null,
+      dayPct: chg, dayEur,
       avgNative, noQuote};
   });
   const held = pos.filter(p => p.qty > 1e-12).sort((a, b) => (b.value || 0) - (a.value || 0));
@@ -872,7 +876,24 @@ function jakobBook() {
   if (!S._jb) S._jb = depots().some(d => d.id === STRAT_DEP) ? calcFor(STRAT_DEP) : {held: [], value: 0};
   return S._jb;
 }
-const jakobHeld = () => Object.fromEntries(jakobBook().held.filter(p => p.value > 0).map(p => [p.key, p]));
+// Eine Buchung mit `alias` (z. B. Hinterlegungsschein) zählt als die Aktie mit diesem Kürzel, mit der die Strategie rechnet.
+// Gleiche Regel in tracker/screen.py (_held): beide Stellen ändern.
+function stratKey(key) {
+  if (!S._alias) { S._alias = {}; for (const t of S.pf.transactions || []) if (t.alias) S._alias[keyOf(t.kind, t.symbol)] = keyOf(t.kind, t.alias); }
+  return S._alias[key] || key;
+}
+function jakobHeld() {
+  const jb = jakobBook();
+  if (!jb._held) {
+    const out = {};
+    for (const p of jb.held.filter(p => p.value > 0)) {
+      const k = stratKey(p.key), o = out[k];
+      out[k] = o ? Object.assign({}, o, {value: o.value + p.value, cost: o.cost + p.cost, dayEur: (o.dayEur || 0) + (p.dayEur || 0), via: [...(o.via || [o.key]), p.key]}) : (k === p.key ? p : Object.assign({}, p, {via: [p.key]}));
+    }
+    jb._held = out;
+  }
+  return jb._held;
+}
 // Ideal-Depot Jakob nach den im Backtest bestätigten Regeln: gehaltene Titel bleiben, solange deine Verkaufsregel sie hält;
 // freie Plätze bekommen Titel aus dem KI-Umfeld (wie im Backtest) mit Momentum-Signal (beste Passung zuerst), bei einer Ausnahme (extreme Angst, Halbleiter-Crash)
 // die Titel mit der besten Passung und intakten Schätzungen (im Backtest gleichwertig mit der Stärke im Thema). Gleich gewichtet.
@@ -914,6 +935,7 @@ function idealBook() {
 const RULE_CLS = {Kaufen: 'good', Nachkaufen: 'teal', Halten: 'blue', Verkaufen: 'bad', Warten: ''};
 const RULE_ORDER = {Verkaufen: 0, Kaufen: 1, Nachkaufen: 2, Halten: 3, Warten: 4};
 function ruleOf(key) {
+  key = stratKey(key);
   S._rules = S._rules || {};
   if (key in S._rules) return S._rules[key];
   const ib = idealBook(), sr = scrRow(key), m = momOf(key) || (sr || {}).mom;
