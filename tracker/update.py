@@ -34,15 +34,21 @@ def us_session(ts):
 DE_SEARCH_V = 2   # Suche verbessert (24.11.2026): ältere Fehlschläge neu suchen
 
 
-def german_quote(sym, q, de_map, eurusd, name):
-    """Außerhalb des US-Handels: neuerer Kurs von Xetra oder Frankfurt, in Dollar umgerechnet, Änderung gegen den letzten
-    US-Schluss. Das deutsche Kürzel wird einmal gesucht und gemerkt (leer = keins gefunden, nach 2 Tagen neu; scheiterte
-    die Suche selbst, beim nächsten Lauf)."""
-    if not eurusd:
+def german_quote(sym, q, de_map, fx, name):
+    """Neuerer Kurs von Xetra oder Frankfurt, in die Handelswährung umgerechnet (fx = Einheiten je Euro).
+    US-Aktien außerhalb des US-Handels: Änderung gegen den letzten US-Schluss. Asiatische Aktien (`sources.DE_LATE`),
+    wenn ihre Börse geschlossen ist: Änderung der deutschen Notiz gegen ihren Vortag, so wie in Jakobs Broker; der
+    Heimatschluss vom Morgen ist dort schon im Kurs von gestern Abend enthalten.
+    Das deutsche Kürzel wird einmal gesucht und gemerkt (leer = keins gefunden, nach 2 Tagen neu; scheiterte die Suche
+    selbst, beim nächsten Lauf)."""
+    if not fx or not q.get("price"):
+        return q
+    late = q.get("currency") in sources.DE_LATE
+    if late and time.time() - (q.get("time") or 0) < 1800:      # Heimatbörse handelt noch
         return q
     m = de_map.get(sym)
     if m is None or (not m.get("s") and (m.get("v") != DE_SEARCH_V or time.time() - m.get("t", 0) > 2 * 86400)):
-        found = sources.german_listing(sym, name or q.get("name"), q["price"], eurusd)
+        found = sources.german_listing(sym, name or q.get("name"), q["price"], fx)
         if found is None:
             return q
         m = de_map[sym] = {"s": found, "t": int(time.time()), "v": DE_SEARCH_V}
@@ -51,9 +57,33 @@ def german_quote(sym, q, de_map, eurusd, name):
     dq = sources.stock_quote(m["s"])
     if not dq or dq.get("currency") != "EUR" or not dq.get("time") or dq["time"] <= (q.get("time") or 0):
         return q
-    p = dq["price"] * eurusd
-    return dict(q, price=p, change_pct=(p / q["price"] - 1) * 100 if q.get("price") else dq.get("change_pct"),
-                time=dq["time"], venue=dq.get("exchange") or "Deutsche Börse", us_close=q["price"])
+    p = dq["price"] * fx / sources.DE_RATIO.get(m["s"], 1)
+    if late:
+        if dq.get("change_pct") is None or abs(p / q["price"] - 1) > 0.25:   # unplausibel: Heimatkurs behalten
+            return q
+        return dict(q, price=p, change_pct=dq["change_pct"], time=dq["time"], venue=dq.get("exchange") or "Deutsche Börse",
+                    home_close=q["price"])
+    return dict(q, price=p, change_pct=(p / q["price"] - 1) * 100, time=dq["time"], venue=dq.get("exchange") or "Deutsche Börse",
+                us_close=q["price"])
+
+
+def _german_fx(cur, cache):
+    """Einheiten der Währung je Euro für german_quote, je Lauf einmal geholt."""
+    if cur not in cache:
+        if cur == "USD":
+            cache[cur] = (sources.stock_quote("EURUSD=X") or {}).get("price") or 0
+        else:
+            cache[cur] = sources.fx_rate(cur) or 0
+    return cache[cur]
+
+
+def _german_ok(sym, q, now):
+    """Kommt für den deutschen Kurs in Frage: US-Aktie außerhalb des US-Handels oder Aktie einer asiatischen Börse."""
+    if not q or sym.startswith("^"):
+        return False
+    if q.get("currency") == "USD":
+        return "." not in sym and not us_session(now)
+    return q.get("currency") in sources.DE_LATE
 
 
 # ----------------------------------------------------------------- schneller Lauf
@@ -68,14 +98,12 @@ def run_fast(store):
     out, currencies = {}, set()
     oi_mem = state.setdefault("oi", {})
     now = time.time()
-    de_map, eurusd = state.setdefault("de_map", {}), None
+    de_map, de_fx = state.setdefault("de_map", {}), {}
     for key, a in assets.items():
         if a["kind"] == "stock":
             q = sources.stock_quote(a["symbol"])
-            if q and q.get("currency") == "USD" and "." not in a["symbol"] and not a["symbol"].startswith("^") and not us_session(now):
-                if eurusd is None:
-                    eurusd = (sources.stock_quote("EURUSD=X") or {}).get("price") or 0
-                q = german_quote(a["symbol"], q, de_map, eurusd, a["name"] or (old.get(key) or {}).get("name"))
+            if _german_ok(a["symbol"], q, now):
+                q = german_quote(a["symbol"], q, de_map, _german_fx(q["currency"], de_fx), a["name"] or (old.get(key) or {}).get("name"))
         else:
             q = sources.crypto_quote(a["symbol"])
             if q:
@@ -171,15 +199,13 @@ def refresh_strategy(store, pf, live, state, force=False):
         return
     state["strat_at"] = int(now)
     research = (store.get("analysis.json") or {}).get("assets") or {}
-    quotes, de_map, fx = {}, state.setdefault("de_map", {}), {}
+    quotes, de_map, de_fx = {}, state.setdefault("de_map", {}), {}
 
     def quote(sym, name=""):
         if sym not in quotes:
             q = sources.stock_quote(sym)
-            if q and q.get("currency") == "USD" and "." not in sym and not sym.startswith("^") and sym != "SOXX" and not us_session(now):
-                if "eur" not in fx:
-                    fx["eur"] = (sources.stock_quote("EURUSD=X") or {}).get("price") or 0
-                q = german_quote(sym, q, de_map, fx["eur"], name)
+            if sym != "SOXX" and _german_ok(sym, q, now):
+                q = german_quote(sym, q, de_map, _german_fx(q["currency"], de_fx), name)
             quotes[sym] = q
         return quotes[sym]
     sp = _with_live(base.get("sp"), quote("^GSPC"))

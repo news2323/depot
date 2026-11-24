@@ -91,7 +91,10 @@ def stock_quote(symbol):
 DE_EXCHANGES = ("GER", "FRA", "TDG", "STU", "MUN", "DUS", "BER", "HAM")
 
 
-DE_KNOWN = {"GOOGL": "ABEA.DE", "GOOG": "ABEC.DE", "TSM": "TSFA.F"}   # findet die Yahoo-Suche nicht
+DE_KNOWN = {"GOOGL": "ABEA.DE", "GOOG": "ABEC.DE", "TSM": "TSFA.F", "005930.KS": "SSU.F"}   # findet die Yahoo-Suche nicht
+DE_RATIO = {"SSU.F": 25}   # Hinterlegungsscheine (GDR): so viele Aktien je Stück, sonst 1
+# Asiatische Börsen schließen vor dem deutschen Handel: danach gilt ebenfalls der deutsche Kurs (Jakobs Wunsch vom 24.11.2026).
+DE_LATE = ("KRW", "JPY", "TWD", "HKD", "CNY", "SGD", "AUD", "INR")
 
 
 LEGAL = {"inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "n", "v", "nv", "sa", "se",
@@ -112,8 +115,9 @@ def _name_queries(name, symbol):
     return out
 
 
-def german_listing(symbol, name, us_price, eurusd):
-    """Deutsches Kürzel oder "" (keins gefunden). None, wenn die Suche selbst scheiterte (dann nichts merken)."""
+def german_listing(symbol, name, home_price, fx):
+    """Deutsches Kürzel oder "" (keins gefunden). None, wenn die Suche selbst scheiterte (dann nichts merken).
+    fx = Einheiten der Heimatwährung je Euro."""
     tried, failed = set(), False
 
     def check(sym):
@@ -121,7 +125,8 @@ def german_listing(symbol, name, us_price, eurusd):
             return False
         tried.add(sym)
         dq = stock_quote(sym)
-        return bool(dq and dq.get("currency") == "EUR" and us_price and eurusd and abs(dq["price"] * eurusd / us_price - 1) < 0.12)
+        return bool(dq and dq.get("currency") == "EUR" and home_price and fx
+                    and abs(dq["price"] * fx / DE_RATIO.get(sym, 1) / home_price - 1) < 0.12)
 
     if symbol in DE_KNOWN and check(DE_KNOWN[symbol]):
         return DE_KNOWN[symbol]
