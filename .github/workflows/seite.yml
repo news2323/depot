@@ -22,12 +22,12 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v6
       - name: Version an Skripte und Styles hängen (Browser laden nach jedem Update neu)
         run: sed -i "s/?v=dev/?v=${GITHUB_SHA::7}/g" web/index.html
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
