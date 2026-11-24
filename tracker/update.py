@@ -31,14 +31,21 @@ def us_session(ts):
     return t.weekday() < 5 and (9, 30) <= (t.hour, t.minute) < (16, 0)
 
 
+DE_SEARCH_V = 2   # Suche verbessert (24.11.2026): ältere Fehlschläge neu suchen
+
+
 def german_quote(sym, q, de_map, eurusd, name):
     """Außerhalb des US-Handels: neuerer Kurs von Xetra oder Frankfurt, in Dollar umgerechnet, Änderung gegen den letzten
-    US-Schluss. Das deutsche Kürzel wird einmal gesucht und gemerkt (leer = keins gefunden, nach 14 Tagen neu)."""
+    US-Schluss. Das deutsche Kürzel wird einmal gesucht und gemerkt (leer = keins gefunden, nach 2 Tagen neu; scheiterte
+    die Suche selbst, beim nächsten Lauf)."""
     if not eurusd:
         return q
     m = de_map.get(sym)
-    if m is None or (not m.get("s") and time.time() - m.get("t", 0) > 14 * 86400):
-        m = de_map[sym] = {"s": sources.german_listing(sym, name or q.get("name"), q["price"], eurusd), "t": int(time.time())}
+    if m is None or (not m.get("s") and (m.get("v") != DE_SEARCH_V or time.time() - m.get("t", 0) > 2 * 86400)):
+        found = sources.german_listing(sym, name or q.get("name"), q["price"], eurusd)
+        if found is None:
+            return q
+        m = de_map[sym] = {"s": found, "t": int(time.time()), "v": DE_SEARCH_V}
     if not m.get("s"):
         return q
     dq = sources.stock_quote(m["s"])

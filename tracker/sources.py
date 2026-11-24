@@ -94,23 +94,49 @@ DE_EXCHANGES = ("GER", "FRA", "TDG", "STU", "MUN", "DUS", "BER", "HAM")
 DE_KNOWN = {"GOOGL": "ABEA.DE", "GOOG": "ABEC.DE", "TSM": "TSFA.F"}   # findet die Yahoo-Suche nicht
 
 
+LEGAL = {"inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "n", "v", "nv", "sa", "se",
+         "ag", "holdings", "holding", "the", "com", "class", "a", "b", "adr"}
+
+
+def _name_queries(name, symbol):
+    """Suchwörter der Reihe nach: Name ohne Rechtsform („Muster Group N.V.“ → „Muster Group“), voller Name, erstes Wort,
+    Kürzel. Die Yahoo-Suche liefert nur wenige Treffer und mit dem vollen Namen oft keinen deutschen."""
+    words = re.sub(r"[,.()]", " ", name or "").split()
+    full = " ".join(words)
+    while words and words[-1].lower() in LEGAL:
+        words.pop()
+    out = []
+    for q in (" ".join(words), full, words[0] if words and len(words[0]) >= 4 else "", symbol.split("-")[0]):
+        if q and q not in out:
+            out.append(q)
+    return out
+
+
 def german_listing(symbol, name, us_price, eurusd):
-    cands = [{"symbol": DE_KNOWN[symbol], "exchange": "GER"}] if symbol in DE_KNOWN else []
-    for q in ((name or "").replace(",", " ").replace(".", " ").strip(), symbol):
-        if not q:
+    """Deutsches Kürzel oder "" (keins gefunden). None, wenn die Suche selbst scheiterte (dann nichts merken)."""
+    tried, failed = set(), False
+
+    def check(sym):
+        if sym in tried or len(tried) >= 8:
+            return False
+        tried.add(sym)
+        dq = stock_quote(sym)
+        return bool(dq and dq.get("currency") == "EUR" and us_price and eurusd and abs(dq["price"] * eurusd / us_price - 1) < 0.12)
+
+    if symbol in DE_KNOWN and check(DE_KNOWN[symbol]):
+        return DE_KNOWN[symbol]
+    for q in _name_queries(name, symbol):
+        r = _try("Yahoo Suche", "https://query2.finance.yahoo.com/v1/finance/search?q=%s&quotesCount=20&newsCount=0"
+                 "&lang=de-DE&region=DE" % urllib.parse.quote(q))
+        if r is None:
+            failed = True
             continue
-        r = _try("Yahoo Suche", "https://query2.finance.yahoo.com/v1/finance/search?q=%s&quotesCount=20&newsCount=0" % urllib.parse.quote(q))
-        cands += sorted([x for x in (r or {}).get("quotes") or [] if x.get("exchange") in DE_EXCHANGES and x.get("quoteType") == "EQUITY"],
-                        key=lambda x: DE_EXCHANGES.index(x["exchange"]))
-    seen = set()
-    for x in cands:
-        if x["symbol"] in seen or len(seen) >= 4:
-            continue
-        seen.add(x["symbol"])
-        dq = stock_quote(x["symbol"])
-        if dq and dq.get("currency") == "EUR" and us_price and eurusd and abs(dq["price"] * eurusd / us_price - 1) < 0.12:
-            return x["symbol"]
-    return ""
+        hits = sorted([x for x in r.get("quotes") or [] if x.get("exchange") in DE_EXCHANGES and x.get("quoteType") == "EQUITY"],
+                      key=lambda x: DE_EXCHANGES.index(x["exchange"]))
+        for x in hits:
+            if check(x["symbol"]):
+                return x["symbol"]
+    return None if failed and not tried else ""
 
 
 def stock_history(symbol, rng="5y"):
