@@ -254,6 +254,11 @@ def semis_stats(h=None):
 STRAT_DEP = "jakob"     # Strategie nur für das Teildepot Jakob (Jakobs Wunsch vom 22.11.2026), nicht Hauptdepot oder Fenja
 
 
+def alias_sources(pf):
+    """Titel, die per `alias` als eine andere Aktie zählen (z. B. Hinterlegungsschein): nie eigene Kandidaten."""
+    return {asset_key(t.get("kind"), str(t.get("symbol") or "").upper()) for t in pf.get("transactions") or [] if t.get("alias")}
+
+
 def _held(pf):
     """Gehaltene Titel im Depot Jakob. Eine Buchung mit `alias` (z. B. Hinterlegungsschein) zählt als die Aktie mit diesem
     Kürzel, mit der die Strategie rechnet (Jakobs Wunsch vom 24.11.2026; gleiche Regel in web/app.js stratKey)."""
@@ -438,10 +443,13 @@ def build(store, pf, out, extra, push, sp, fg=None, semis=None, mfg=None):
     sp = sp or []
     prev = store.get("screen.json") or {}
     rows = []
+    alias = alias_sources(pf)
     for key, e in list(out.items()) + list(extra.items()):
         kind, sym = key.split(":", 1)
         if kind != "stock" or not e.get("fund") or not (e.get("valuation") or {}).get("rating"):
             continue    # ETFs, ETCs und Titel ohne Kennzahlen bleiben draußen
+        if key in alias:
+            continue    # Hinterlegungsschein im Depot: zählt als seine Aktie, kein eigener Kandidat (sonst doppelt im Ideal-Depot)
         r = parts(sym, e, sp)
         r.update(key=key, symbol=sym, name=SHORT.get(sym) or e.get("name") or "", universe=sym in THEME_OF)
         rows.append(r)

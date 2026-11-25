@@ -388,6 +388,8 @@ function drawCharts() {
   }
   const cj = $('#ch-jk');
   if (cj) drawJakob(cj);
+  const cr = $('#ch-rule');
+  if (cr && S._rsim) drawRuleChart(cr, S._rsim);
   const chs = $('#ch-smart'), smx = (S.smart || {})[(S.smart || {})[S.smk] ? S.smk : 'stocks'];
   if (chs && smx && smx.hist && smx.hist.length > 1) {
     const s2 = [{name: 'Smart Money', color: 'var(--s1)', pts: smx.hist.map(h => [isoToDay(h[0]), h[1]])}, {name: 'Dumb Money', color: 'var(--s2)', pts: smx.hist.map(h => [isoToDay(h[0]), h[2]])}];
@@ -1003,8 +1005,96 @@ function lageCard(ib) {
 }
 // Reiter der Strategie: Name und darunter, was dort steht
 function stratNav(v, open) {
-  const meta = {Heute: 'Lage und Plan', Kandidaten: `${((S.screen || {}).list || []).length} Titel im Filter`, Backtest: '10 Jahre, deine Regeln', Profil: open ? `${open} ${open === 1 ? 'Frage' : 'Fragen'} offen` : 'Antworten und Regeln'};
+  const meta = {Heute: 'Lage und Plan', Regeln: 'Kauf und Verkauf erklärt', Kandidaten: `${((S.screen || {}).list || []).length} Titel im Filter`, Backtest: '10 Jahre, deine Regeln', Profil: open ? `${open} ${open === 1 ? 'Frage' : 'Fragen'} offen` : 'Antworten und Regeln'};
   return `<nav class="sx-tabs" role="tablist">${SV.map(x => `<button role="tab" aria-selected="${x === v}" data-act="sv" data-v="${x}" class="${x === v ? 'on' : ''}"><b>${x}</b><small>${esc(meta[x])}</small></button>`).join('')}</nav>`;
+}
+/* ---------------------------------------------------------------- Reiter „Regeln“ (Jakobs Wunsch vom 25.11.2026)
+   So funktioniert deine Strategie: Ablauf (zum Monatsende je Titel, an jedem Tag sofort, die vier Prüfungen des Signals)
+   und ein Beispiel mit echten Kursen, wann deine Regeln gekauft und verkauft hätten (ruleSim in app.js, Diagramm #ch-rule). */
+function ruleFlowCard(key) {
+  const ib = idealBook() || {}, ex = ib.ex || {}, m = key ? momOf(key) || (scrRow(key) || {}).mom : null, ck = (m || {}).checks || null;
+  const out = (cls, w, t) => `<span class="rf-out ${cls}"><b>${w}</b>${t ? `<small>${t}</small>` : ''}</span>`;
+  const step = (n, q, sub, yes, live) => `<li class="rf-step"><span class="rf-n">${n}</span><div class="rf-q"><b>${q}</b>${sub ? `<small>${sub}</small>` : ''}${live ? `<em>${live}</em>` : ''}</div>
+    <div class="rf-yes"><span class="rf-lbl">ja</span><div class="rf-outs">${yes}</div></div></li>`;
+  const no = '<li class="rf-no" aria-hidden="true"><span>nein</span></li>';
+  const ladder = `<ol class="rf-ladder">
+    ${step(1, 'Gewinnschätzung um 10 % oder mehr gesenkt?', 'in 90 Tagen; gilt sofort, an jedem Tag', out('bad', 'Verkaufen', 'sofort') + out('', 'Nicht kaufen', ''))}${no}
+    ${step(2, 'Momentum-Signal an?', 'alle vier Prüfungen erfüllt', out('blue', 'Halten', 'im Depot') + out('good', 'Kaufen', 'wenn ein Platz frei ist, beste Passung zuerst'))}${no}
+    ${step(3, 'Greift eine Ausnahme?', 'extreme Angst unter 25 oder Halbleiter 20 % unter dem Hoch', out('blue', 'Halten', 'im Depot') + out('good', 'Kaufen in Teilen', 'beste Passung, Schätzungen intakt'),
+      `Heute: ${ex.on ? 'ja, ' + esc(ex.text) : 'nein'}`)}${no}
+    ${step(4, 'Mit Signal gekauft und Signal lässt nur nach?', 'Kurs unter der 50-, aber über der 200-Tage-Linie', out('blue', 'Halten', ''))}${no}
+    <li class="rf-step end"><span class="rf-n">5</span><div class="rf-q"><b>Sonst</b><small>kein Signal, keine Ausnahme</small></div><div class="rf-yes"><span class="rf-lbl"></span><div class="rf-outs">${out('bad', 'Verkaufen', 'zum Monatsende') + out('', 'Warten', 'nicht im Depot')}</div></div></li></ol>`;
+  const daily = [['Ausnahme beginnt', 'extreme Angst oder Halbleiter-Crash', out('good', 'Kaufen in Teilen', '')],
+    ['Schätzung deutlich gesenkt', 'um 10 % oder mehr in 90 Tagen', out('bad', 'Verkaufen', '')],
+    ['Rücksetzer im Aufwärtstrend', '−8 % in 5 Tagen, über der 200-Tage-Linie, Schätzungen halten', out('teal', 'Nachkaufen', '')],
+    ['Sonst', 'Kursschwankungen allein zählen nicht', out('', 'Nichts tun', 'bis ' + meTxt())]];
+  const CK = [['trend', 'Kurs über der 50-Tage-Linie, diese über der 200-Tage-Linie'], ['rising', '200-Tage-Linie steigt gegen vor einem Monat'],
+    ['high', 'höchstens 15 % unter dem Hoch der letzten 12 Monate'], ['rel', 'in 6 Monaten stärker als der S&P 500']];
+  const checks = `<ul class="rf-ck">${CK.map(([k, t]) => `<li>${ck ? stIcon(ck[k] ? 'ok' : 'bad') : stIcon('open')}<span>${t}</span></li>`).join('')}</ul>
+    ${ck ? `<p class="small muted" style="margin:6px 0 0">Haken und Kreuze: ${esc(shortName(key))} heute. Signal ${m.state === 'on' ? 'an' : m.state === 'fade' ? 'lässt nach' : m.state === 'down' ? 'aus, Kurs unter der 200-Tage-Linie' : 'aus'}.</p>` : ''}`;
+  return `<section class="card span12 rf"><div class="head"><div><h2>So entscheiden deine Regeln</h2><p class="sub">Depot Jakob · gleich gewichtet, ${(ib.n || 7)} Plätze · nach dem Backtest über 10 Jahre</p></div></div>
+    <div class="sx-cols"><div class="sx-main"><h3>Zum Monatsende, für jeden Titel</h3><p class="rf-hint">Von oben nach unten prüfen. Die erste Frage mit „ja“ entscheidet. Nächste Prüfung: ${meTxt()}</p>${ladder}</div>
+      <div class="sx-side"><h3>An jedem Tag sofort</h3><div class="rf-daily">${daily.map(([t, s, o]) => `<div class="rf-d"><div><b>${t}</b><small>${s}</small></div>${o}</div>`).join('')}</div>
+        <h3 style="margin-top:22px">Momentum-Signal: vier Prüfungen</h3>${checks}
+        <p class="rf-hint" style="margin-top:14px">Für das ganze Depot: Ein Titel wird erst ersetzt, wenn ein anderer mindestens 2 von 100 Punkten besser passt. Liegen Halbleiter unter ihrer 200-Tage-Linie und greift keine Ausnahme, ist nur die Hälfte investiert.</p></div></div></section>`;
+}
+const RS_Y = {'1J': 1, '2J': 2, '3J': 3};
+const ruleKeys = () => { const ib = idealBook() || {items: []}; return [...new Set([...Object.keys(jakobHeld()), ...ib.items.map(x => x.key)])].filter(k => (D(k).hist || {}).d); };
+function ruleExCard(key) {
+  if (!key) return '';
+  const yrs = RS_Y[S.rsy] ? S.rsy : '2J', sim = S._rsim = ruleSim(key, RS_Y[yrs]), ks = ruleKeys();
+  const pick = `<div class="seg rf-pick">${ks.map(k => `<button data-act="rsk" data-v="${esc(k)}" class="${k === key ? 'on' : ''}">${esc(shortName(k))}</button>`).join('')}</div>`;
+  if (!sim) return card('Am Beispiel', 'Wann deine Regeln gekauft und verkauft hätten', pick + '<p class="empty" style="margin-top:12px">Für diesen Titel gibt es noch zu wenig Kursverlauf.</p>', '', 'span12');
+  const cur = showCur(key), buys = sim.trades.filter(t => t.t === 'buy').length, sells = sim.trades.length - buys;
+  const sw = (cls, t) => `<span><i class="rf-sw ${cls}"></i>${t}</span>`;
+  const leg = `<div class="legend rf-leg">${sw('on', 'Momentum-Signal an')}${sw('ex', 'Ausnahme greift')}${sw('px', 'Kurs')}${sw('m50', '50-Tage-Linie')}${sw('m200', '200-Tage-Linie')}${sw('buy', 'Kauf')}${sw('sell', 'Verkauf')}${sw('hd', 'Im Depot')}</div>`;
+  const kpi = (l, v, n, cls = '') => `<div class="sx-kpi"><span>${l}</span><b class="num ${cls}">${v}</b>${n ? `<small>${n}</small>` : ''}</div>`;
+  const kpis = `<div class="sx-kpis rf-kpis">${kpi('Mit deinen Regeln', pctS(sim.rule, 0), 'nur dieser Titel', sign(sim.rule))}${kpi('Immer gehalten', pctS(sim.hold, 0), 'zum Vergleich', sign(sim.hold))}
+    ${kpi('Im Depot', nf(sim.inv, 0) + ' %', 'der Zeit')}${kpi('Käufe / Verkäufe', `${buys}<small> / ${sells}</small>`, yrs === '1J' ? 'in 1 Jahr' : 'in ' + RS_Y[yrs] + ' Jahren')}</div>`;
+  const tr = sim.trades.slice().reverse().map(t => `<div class="rf-tr"><span class="rf-mk ${t.t}" aria-hidden="true"></span><span class="num rf-trd">${dateDe(dayIso(t.day))}</span><b>${t.t === 'buy' ? 'Kauf' : 'Verkauf'}</b><span class="num rf-trp">${money(t.px, cur)}</span><small>${esc(t.why)}</small></div>`).join('');
+  const now = `${sim.now.held ? 'Nach diesen Regeln heute im Depot' : 'Nach diesen Regeln heute nicht im Depot'}: Signal ${sim.now.st === 'on' ? 'an' : sim.now.st === 'fade' ? 'lässt nach' : sim.now.st === 'down' ? 'aus, Kurs unter der 200-Tage-Linie' : 'aus'}${sim.now.ex ? ', Ausnahme greift (' + sim.now.ex + ')' : ', keine Ausnahme'}.`;
+  return `<section class="card span12 rfx"><div class="head"><div><h2>Am Beispiel: wann gekauft und verkauft wird</h2><p class="sub">${esc(shortName(key))} mit den Kursen von damals, Prüfung zum Monatsende wie oben</p></div>${seg('rsy', Object.keys(RS_Y), yrs)}</div>
+    ${pick}<div class="rf-chart" id="ch-rule"></div>${leg}<p class="rf-now">${esc(now)}</p>${kpis}
+    ${tr ? `<h3 style="margin-top:20px">Käufe und Verkäufe</h3><div class="rf-trs">${tr}</div>` : '<p class="empty" style="margin-top:12px">In diesem Zeitraum hätten deine Regeln hier weder gekauft noch verkauft.</p>'}
+    <p class="hint">Nur zur Erklärung: ein Titel für sich. Im echten Depot entscheidet bei mehreren Kandidaten die Passung, wer einen der Plätze bekommt. Gewinnschätzungen von damals gibt es nicht frei, die Regel „Schätzung gesenkt“ fehlt hier. Angst und Gier liegt nur für das letzte gute Jahr vor. Vergangene Kurse sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p></section>`;
+}
+function drawRuleChart(el, sim) {
+  const W = Math.max(300, el.clientWidth), mob = W < 560, H = mob ? 240 : 290, pl = 4, pr = mob ? 50 : 62, pt = 10, pb = 40;
+  const n = sim.d.length, X0 = sim.d[0], X1 = sim.d[n - 1], ph = H - pt - pb;
+  const vals = [...sim.px, ...sim.m50, ...sim.m200].filter(v => v != null);
+  let y0 = Math.min(...vals), y1 = Math.max(...vals); const pad = (y1 - y0) * 0.06 || 1; y0 -= pad; y1 += pad;
+  const sx = x => pl + (x - X0) / (X1 - X0 || 1) * (W - pl - pr), sy = y => pt + (1 - (y - y0) / (y1 - y0)) * ph;
+  const runs = f => { const r = []; let a = null; for (let i = 0; i < n; i++) { if (f(i)) { if (a == null) a = i; } else if (a != null) { r.push([a, i]); a = null; } } if (a != null) r.push([a, n - 1]); return r; };
+  const rect = (r, cls, y, h) => r.map(([a, b]) => `<rect class="${cls}" x="${sx(sim.d[a]).toFixed(1)}" y="${y}" width="${Math.max(1.5, sx(sim.d[b]) - sx(sim.d[a])).toFixed(1)}" height="${h}"/>`).join('');
+  const path = arr => { let s = '', pen = false; arr.forEach((v, i) => { if (v == null) { pen = false; return; } s += (pen ? 'L' : 'M') + sx(sim.d[i]).toFixed(1) + ',' + sy(v).toFixed(1); pen = true; }); return s; };
+  const cur = showCur(sim.key), fmt = v => money(v, cur).replace(/,\d+(?=\s)/, '');
+  const step = niceStep((y1 - y0) / 4); let yt = '';
+  for (let v = Math.ceil(y0 / step) * step; v <= y1; v += step) yt += `<line class="rf-grid" x1="${pl}" x2="${W - pr}" y1="${sy(v).toFixed(1)}" y2="${sy(v).toFixed(1)}"/><text class="rf-ax" x="${W - pr + 8}" y="${(sy(v) + 4).toFixed(1)}">${fmt(v)}</text>`;
+  const yn = RS_Y[S.rsy] || 2, every = yn === 1 ? 2 : yn >= 3 ? 6 : 3;
+  let xt = '', lastM = null, lastX = -1e9;
+  for (let i = 0; i < n; i++) { const dt = new Date(sim.d[i] * DAY), m = dt.getUTCMonth(), key = dt.getUTCFullYear() * 12 + m, x = sx(sim.d[i]);
+    if (lastM !== null && key !== lastM && m % every === 0 && x - lastX >= 64 && x > 24 && x < W - pr - 18) {   // Beschriftungen nie überlappen
+      xt += `<text class="rf-ax" text-anchor="middle" x="${x.toFixed(1)}" y="${H - 6}">${MON[m].slice(0, 3)} ${String(dt.getUTCFullYear()).slice(2)}</text>`; lastX = x; }
+    lastM = key; }
+  const hy = pt + ph + 8;
+  const mk = sim.trades.map(t => { const x = sx(t.day), y = sy(t.px), up = t.t === 'buy';
+    return `<g class="rf-m ${t.t}"><title>${t.t === 'buy' ? 'Kauf' : 'Verkauf'} am ${dateDe(dayIso(t.day))} zu ${money(t.px, cur)}. ${esc(t.why)}</title><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8"/>
+      <path d="${up ? `M${(x - 3.6).toFixed(1)},${(y + 2).toFixed(1)}L${x.toFixed(1)},${(y - 2.8).toFixed(1)}L${(x + 3.6).toFixed(1)},${(y + 2).toFixed(1)}Z` : `M${(x - 3.6).toFixed(1)},${(y - 2).toFixed(1)}L${x.toFixed(1)},${(y + 2.8).toFixed(1)}L${(x + 3.6).toFixed(1)},${(y - 2).toFixed(1)}Z`}"/></g>`; }).join('');
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Kurs mit Phasen des Momentum-Signals und der Ausnahme, Käufe und Verkäufe nach deinen Regeln">
+    ${rect(runs(i => !!sim.ex[i]), 'rf-bex', pt, ph)}${rect(runs(i => sim.st[i] === 'on'), 'rf-bon', pt, ph)}${yt}
+    <path class="rf-l200" d="${path(sim.m200)}"/><path class="rf-l50" d="${path(sim.m50)}"/><path class="rf-lpx" d="${path(sim.px)}"/>
+    <rect class="rf-hb" x="${pl}" y="${hy}" width="${W - pl - pr}" height="6" rx="3"/>${rect(runs(i => sim.held[i]), 'rf-hd', hy, 6)}
+    <text class="rf-ax" x="${W - pr + 8}" y="${hy + 6}">Depot</text>${xt}${mk}
+    <line class="rf-cross" x1="0" x2="0" y1="${pt}" y2="${pt + ph}" style="display:none"/><rect class="rf-hit" x="${pl}" y="${pt}" width="${W - pl - pr}" height="${ph + 16}"/></svg><div class="rf-tip" hidden></div>`;
+  const svg = el.querySelector('svg'), cross = el.querySelector('.rf-cross'), tip = el.querySelector('.rf-tip');
+  const ST = {on: 'Signal an', fade: 'Signal lässt nach', down: 'unter der 200-Tage-Linie', none: 'kein Signal'};
+  const move = ev => { const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) * W / r.width, day = X0 + (x - pl) / (W - pl - pr) * (X1 - X0);
+    let i = bisect(sim.d, day); i = Math.max(0, Math.min(n - 1, i)); if (i < n - 1 && day - sim.d[i] > sim.d[i + 1] - day) i++;
+    const cx = sx(sim.d[i]); cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.style.display = '';
+    tip.hidden = false; tip.innerHTML = `<b>${dateDe(dayIso(sim.d[i]))}</b><span>${money(sim.px[i], cur)}</span><span>${ST[sim.st[i]] || ''}</span>${sim.ex[i] ? `<span class="w">Ausnahme: ${esc(sim.ex[i])}</span>` : ''}<span>${sim.held[i] ? 'im Depot' : 'nicht im Depot'}</span>`;
+    const left = cx / W * r.width; tip.style.left = Math.min(Math.max(0, left - tip.offsetWidth / 2), r.width - tip.offsetWidth) + 'px'; };
+  svg.addEventListener('pointermove', move); svg.addEventListener('pointerdown', move);
+  svg.addEventListener('pointerleave', () => { cross.style.display = 'none'; tip.hidden = true; });
 }
 // Erklärung an einer Stelle statt unter jeder Karte
 function howCard() {
@@ -1017,7 +1107,7 @@ function howCard() {
     `Verkaufen: ${({signal: 'wenn das Momentum-Signal zum Monatsende aus ist', trend: 'wenn der Kurs unter die 200-Tage-Linie fällt', better: 'wenn es Besseres gibt', thesis: 'wenn die These bricht', stop: 'bei −20 % seit Kauf'})[ansOf('sell') || 'better']}, außer eine Ausnahme greift; sofort bei deutlich gesenkten Schätzungen.`,
     `Gleich gewichtet, ${ib.n || 7} Plätze, Aktienanteil nach deiner Grenze für Rückgänge (−${mdd} %). Betrag: Startbetrag ${eur(+ansOf('capital') || 5000, 0)} oder Depot Jakob, das Größere.`,
     'Kaufen und Verkaufen gelten zum Monatsende wie im Backtest, Nachkaufen bei Rücksetzern im Aufwärtstrend sofort.'];
-  return `<details class="card fold span12 how"><summary><div><h2>So entscheiden deine Regeln</h2><p class="sub">Grundlage: Backtest über 10 Jahre und deine Antworten</p></div><span class="chev"></span></summary>
+  return `<details class="card fold span12 how"><summary><div><h2>Alle Regeln im Wortlaut</h2><p class="sub">Grundlage: Backtest über 10 Jahre und deine Antworten</p></div><span class="chev"></span></summary>
     <ul class="dots">${pts.map(x => `<li>${esc(x)}</li>`).join('')}</ul><p class="hint">Regelbasierte Auswahl nach deinen eigenen Angaben. Keine Anlageberatung und keine Kaufempfehlung.</p></details>`;
 }
 // Detailansicht: was deine Regel für diesen Titel sagt, mit dem passenden Ergebnis aus dem Backtest
@@ -1035,7 +1125,7 @@ function ruleCard(key) {
     <p class="tiny muted" style="margin:8px 0 0">Was deine Regeln sagen (Ideal-Depot, Verkaufsregel, Ausnahmen), keine Empfehlung. Keine Anlageberatung.</p>`);
 }
 // Strategie in vier Bereichen (Jakobs Wunsch vom 22.11.2026: übersichtlicher): Heute, Kandidaten, Backtest, Profil
-const SV = ['Heute', 'Kandidaten', 'Backtest', 'Profil'];
+const SV = ['Heute', 'Regeln', 'Kandidaten', 'Backtest', 'Profil'];
 try { S.sv = localStorage.getItem('depot_sv') || 'Heute'; } catch (e) { S.sv = 'Heute'; }
 function vStrat(c) {
   const pr = prof();
@@ -1045,7 +1135,11 @@ function vStrat(c) {
   const v = SV.includes(S.sv) ? S.sv : 'Heute', open = QUESTIONS.filter(q => ansOf(q.id) == null).length;
   const nav = stratNav(v, open);
   let body;
-  if (v === 'Kandidaten') body = candCard();
+  if (v === 'Regeln') { const ks = ruleKeys();   // Vorgabe: der Titel, bei dem deine Regeln in 2 Jahren am häufigsten gehandelt hätten
+    if (!ks.includes(S.rsk)) S.rsk = ks.map(k => [k, (ruleSim(k, 2) || {trades: []}).trades.length]).sort((a, b) => b[1] - a[1]).map(x => x[0])[0];
+    const key = S.rsk;
+    body = ruleFlowCard(key) + ruleExCard(key) + howCard(); }
+  else if (v === 'Kandidaten') body = candCard();
   else if (v === 'Backtest') body = btCard();
   else if (v === 'Profil') { const sum = strategySummary();
     body = card('Deine Strategie', `Depot Jakob · ${esc(pr.source || 'Profil')}${pr.updated ? ' · geändert ' + dateDe(pr.updated) : ''}`, `<p class="body strong">${esc(sum.s[1] || '')}</p>
@@ -1054,7 +1148,7 @@ function vStrat(c) {
       ${pr.text ? `<details class="qdone"><summary>Dein Profil im Wortlaut</summary><p class="body small">${esc(pr.text)}</p></details>` : ''}`, '', 'span7')
       + questionsCard() + checkCard() + guardCard() + playCard(); }
   else { const ib = idealBook();
-    body = ib ? stratTop(ib) + planCard(ib) + lageCard(ib) + howCard() : card('Heute', 'Depot Jakob', '<p class="empty">Der Filter läuft mit dem nächsten Tageslauf.</p>', '', 'span12'); }
+    body = ib ? stratTop(ib) + planCard(ib) + lageCard(ib) + `<button class="card span12 sx-link" data-act="sv" data-v="Regeln"><div><h2>So funktioniert deine Strategie</h2><p class="sub">Ablauf und Beispiel: wann gekauft, wann verkauft wird</p></div><span class="chev"></span></button>` : card('Heute', 'Depot Jakob', '<p class="empty">Der Filter läuft mit dem nächsten Tageslauf.</p>', '', 'span12'); }
   return `<div class="strat">${nav}<div class="g12">${body}</div>${v === 'Heute' ? '' : '<p class="hint" style="margin-top:14px">Regelbasierte Auswahl nach deinen eigenen Angaben, nur für das Depot Jakob. Keine Anlageberatung.</p>'}</div>`;
 }
 function vInsight(c) {
@@ -1320,6 +1414,8 @@ document.addEventListener('click', async ev => {
   else if (act === 'hide') { S.hide = !S.hide; try { localStorage.setItem('depot_hide', S.hide ? '1' : ''); } catch (e) { /* egal */ } render(); if (S.sheetKey) vAsset(S.sheetKey); }
   else if (act === 'hv') { S.hv = v; render(); }
   else if (act === 'jkr') { S.jkr = v; render(); }
+  else if (act === 'rsk') { S.rsk = v; render(); }
+  else if (act === 'rsy') { S.rsy = v; render(); }
   else if (act === 'ans') { const q = QUESTIONS.find(x => x.id === id); if (q) { const val = q.o.find(o => String(o[0]) === v)[0]; S.pf.profile = S.pf.profile || {}; S.pf.profile.answers = Object.assign({}, S.pf.profile.answers, {[id]: val}); S.pf.profile.updated = new Date().toISOString().slice(0, 10); await savePf('Antwort gespeichert'); } }
   else if (act === 'startprof') { S.pf.profile = {answers: {}, updated: new Date().toISOString().slice(0, 10), source: 'Eigene Antworten'}; await savePf('Profil angelegt'); }
   else if (act === 'rcm') { S.rcm = v === 'Ideal-Depot' ? 'ideal' : 'depot'; render(); }

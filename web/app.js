@@ -903,7 +903,7 @@ const keepRule = (m, f, rank, N) => ({signal: m.state === 'on', trend: m.state !
 const KEEP_MARGIN = 2;
 function idealBook() {
   if (S._ideal !== undefined) return S._ideal;
-  const list0 = (S.screen || {}).list || [];
+  const list0 = ((S.screen || {}).list || []).filter(r => stratKey(r.key) === r.key);   // Hinterlegungsscheine zählen als ihre Aktie, kein eigener Kandidat
   if (!list0.length || !prof().answers) return (S._ideal = null);
   const [lo, hi] = String(ansOf('positions') || '6-8').split('-').map(Number), N = Math.round((lo + (hi || lo)) / 2);
   const minp = +ansOf('min_pos') || 500, ex = buyException(), sm = (S.screen || {}).semis || {};
@@ -1100,4 +1100,74 @@ function strategySummary() {
   if (a('crash') && a('on_loss') && a('crash') !== a('on_loss')) t.push(`Du sagst „${L('on_loss')}“, beim Test mit −45 % aber „${L('crash')}“. Im Ernstfall zählt das Zweite.`);
   if (a('on_loss') === 'buy' && a('cash') === 'no') t.push('Nachkaufen bei Schwäche geht nur mit Reserve.');
   return {s, t};
+}
+
+/* ---------------------------------------------------------------- Deine Regeln am Beispiel (Jakobs Wunsch vom 25.11.2026)
+   Wie deine Regeln bei einem Titel gehandelt hätten, mit den Daten von damals: Momentum-Signal Tag für Tag wie
+   analytics.momentum (Kurs über 50er, 50er über 200er, 200er steigt gegen vor einem Monat, höchstens 15 % unter dem
+   12-Monats-Hoch, in 6 Monaten stärker als S&P 500 bzw. Bitcoin; „lässt nach“: in den letzten 20 Tagen an, Kurs unter der
+   50er, über der 200er), Ausnahme (Angst und Gier unter 25 aus daily.json → market_fg.hist, wöchentlich; Halbleiter-ETF
+   20 % unter dem 5-Jahres-Hoch aus bench.SOXX). Kaufen: zum Monatsende mit Signal oder bei Ausnahme, dazu sofort, wenn
+   eine Ausnahme beginnt. Verkaufen: zum Monatsende ohne Signal, außer eine Ausnahme greift; mit Signal gekauft bleibt er,
+   solange das Signal nur nachlässt. Nur zur Erklärung: ein Titel für sich, ohne Auswahl nach Passung unter mehreren Titeln und
+   ohne Gewinnschätzungen von damals (die gibt es nicht frei). Keine Anlageberatung. */
+function rollMax(vals, out) {   // gleitendes Maximum; out(i, j): Wert j liegt nicht mehr im Fenster von i
+  const res = new Array(vals.length), q = [];
+  for (let i = 0; i < vals.length; i++) {
+    while (q.length && vals[q[q.length - 1]] <= vals[i]) q.pop();
+    q.push(i);
+    while (out(i, q[0])) q.shift();
+    res[i] = vals[q[0]];
+  }
+  return res;
+}
+function ruleSim(key, years = 2) {
+  const h = D(key).hist;
+  if (!h || !h.d || h.d.length < 300) return null;
+  const d = h.d, c = h.c, n = d.length, crypto = isCoin(key), Y = crypto ? 365 : 252, M = crypto ? 30 : 21, HF = Math.floor(Y / 2);
+  const ps = [0]; for (const x of c) ps.push(ps[ps.length - 1] + (x || 0));
+  const sma = (i, k) => i >= k - 1 ? (ps[i + 1] - ps[i + 1 - k]) / k : null;
+  const hiY = rollMax(c, (i, j) => j <= i - Y);
+  const B = S.daily.bench || {}, mk = crypto ? B.BTC : B.SP500, sx = B.SOXX;
+  const bAt = (b, day) => { if (!b) return null; const j = bisect(b.d, day); return j >= 0 ? b.c[j] : null; };
+  const sxHi = sx ? rollMax(sx.c, (i, j) => sx.d[j] < sx.d[i] - 1826) : null;
+  const semis = day => { if (!sx) return null; const j = bisect(sx.d, day); return j >= 0 && sxHi[j] ? (sx.c[j] / sxHi[j] - 1) * 100 : null; };
+  const fgh = ((S.daily.market_fg || {}).hist || []).map(x => [isoToDay(x[0]), x[1]]);
+  const fear = day => { let v = null; for (const [dd, x] of fgh) { if (dd > day) break; v = day - dd <= 10 ? x : null; } return v; };
+  const fOn = ansOf('fear') === 'buy', cOn = (ansOf('crash') || ansOf('on_loss')) === 'buy';
+  const exAt = day => { const f = fear(day), s = semis(day);
+    return [fOn && f != null && f < FEAR ? `extreme Angst (${f})` : '', cOn && s != null && s <= -20 ? `Halbleiter ${nf(Math.abs(s), 0)} % unter dem Hoch` : ''].filter(Boolean).join(' und '); };
+  let i0 = d.findIndex(x => x >= d[n - 1] - Math.round(years * 365.25));
+  i0 = Math.max(i0 < 0 ? 0 : i0, 200 + M + 22);
+  if (i0 >= n - 20) return null;
+  const on = [], st = [], ex = [];
+  for (let i = i0 - 21; i < n; i++) {
+    const p = c[i], s50 = sma(i, 50), s200 = sma(i, 200), s200m = sma(i - M, 200), r6 = c[i - HF] ? (p / c[i - HF] - 1) * 100 : null;
+    const b1 = bAt(mk, d[i]), b0 = bAt(mk, d[i - HF]), rel = r6 != null && b0 && b1 ? r6 - (b1 / b0 - 1) * 100 : null;
+    on[i] = !!(s50 && s200 && p > s50 && s50 > s200) && !!(s200m && s200 > s200m) && p >= hiY[i] * 0.85 && (rel != null ? rel > 0 : r6 != null && r6 > 0);
+    let recent = false; for (let k = 0; k <= 20; k++) if (on[i - k]) { recent = true; break; }
+    st[i] = on[i] ? 'on' : p < s200 ? 'down' : p < s50 && recent ? 'fade' : 'none';
+    ex[i] = exAt(d[i]);
+  }
+  const mon = day => new Date(day * DAY).getUTCMonth();
+  let held = false, via = '', eq = 1, inDays = 0;
+  const trades = [], hd = [];
+  for (let i = i0; i < n; i++) {
+    if (i > i0 && held) eq *= c[i] / c[i - 1];
+    const me = i < n - 1 && mon(d[i + 1]) !== mon(d[i]);
+    if (!held && ex[i] && !ex[i - 1]) { held = true; via = 'ausnahme'; trades.push({i, t: 'buy', why: 'Ausnahme beginnt: ' + ex[i] + '. Sofort kaufen, in Teilen.'}); }
+    else if (me && held) {
+      if (st[i] === 'on') via = 'signal';
+      if (!(st[i] === 'on' || (via === 'signal' && st[i] === 'fade') || ex[i])) { held = false;
+        trades.push({i, t: 'sell', why: `Monatsende: ${st[i] === 'down' ? 'Kurs unter der 200-Tage-Linie' : st[i] === 'fade' ? 'Signal lässt nach' : 'kein Momentum-Signal'}, keine Ausnahme.`}); }
+    } else if (me && st[i] === 'on') { held = true; via = 'signal'; trades.push({i, t: 'buy', why: 'Monatsende: Momentum-Signal an.'}); }
+    else if (me && ex[i]) { held = true; via = 'ausnahme'; trades.push({i, t: 'buy', why: 'Monatsende: Ausnahme, ' + ex[i] + '.'}); }
+    hd[i] = held; if (held) inDays++;
+  }
+  const show = (i, v) => v == null ? null : toShow(key, v, d[i]);
+  const idx = []; for (let i = i0; i < n; i++) idx.push(i);
+  return {key, d: idx.map(i => d[i]), px: idx.map(i => show(i, c[i])), m50: idx.map(i => show(i, sma(i, 50))), m200: idx.map(i => show(i, sma(i, 200))),
+    st: idx.map(i => st[i]), ex: idx.map(i => ex[i]), held: idx.map(i => hd[i]),
+    trades: trades.map(t => Object.assign(t, {k: t.i - i0, day: d[t.i], px: show(t.i, c[t.i])})),
+    rule: (eq - 1) * 100, hold: (c[n - 1] / c[i0] - 1) * 100, inv: inDays / (n - i0) * 100, now: {st: st[n - 1], ex: ex[n - 1], held}};
 }
