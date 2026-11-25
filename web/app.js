@@ -175,10 +175,12 @@ async function checkVersion() {
     const r = await fetch('index.html?t=' + Date.now(), {cache: 'no-store'});
     const v = ((await r.text()).match(/app\.js\?v=(\w+)/) || [])[1];
     if (!v || v === APP_V || v === 'dev') return;
-    let tried = ''; try { tried = sessionStorage.getItem('depot_v') || ''; } catch (e) { /* egal */ }
-    if (tried === v) return;
-    try { sessionStorage.setItem('depot_v', v); } catch (e) { /* egal */ }
-    location.replace(location.pathname + '?v=' + v + location.hash);
+    // gegen Schleifen: dieselbe Version höchstens alle 2 Minuten neu laden. Vorher nur einmal je Sitzung: Bekam das Neuladen
+    // noch die alte Seite (Zwischenspeicher von GitHub oder iOS), blieb die App bis zum Schließen alt (25.11.2026)
+    let tried = {}; try { tried = JSON.parse(sessionStorage.getItem('depot_v2') || '{}'); } catch (e) { /* egal */ }
+    if (tried.v === v && Date.now() - tried.t < 12e4) return;
+    try { sessionStorage.setItem('depot_v2', JSON.stringify({v, t: Date.now()})); } catch (e) { /* egal */ }
+    location.replace(location.pathname + '?v=' + v + '&r=' + Date.now().toString(36) + location.hash);
   } catch (e) { /* offline: alte Fassung bleibt */ }
 }
 

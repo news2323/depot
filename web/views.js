@@ -1374,7 +1374,7 @@ function vSettings() {
   const s = S.pf.settings || {}, src = S.market.sources || {};
   const th = document.documentElement.dataset.theme || '';
   openSheet(sheetTop('Einstellungen') + card('Darstellung', 'Gilt nur auf diesem Gerät', seg('theme', ['System', 'Hell', 'Dunkel'], th === 'light' ? 'Hell' : th === 'dark' ? 'Dunkel' : 'System') +
-    `<p class="hint">Das Auge oben verbirgt alle Euro-Beträge, etwa wenn jemand mitschaut; Kurse und Prozente bleiben sichtbar. Tastenkürzel am PC: / Suche, 1 bis 5 Reiter, B Beträge verbergen, Esc schließt die Detailansicht. · Version ${esc(APP_V)}</p>`)
+    `<p class="hint">Das Auge oben verbirgt alle Euro-Beträge, etwa wenn jemand mitschaut; Kurse und Prozente bleiben sichtbar. Tastenkürzel am PC: / Suche, 1 bis 5 Reiter, B Beträge verbergen, Esc schließt die Detailansicht. · Version ${esc(APP_V)}</p><div class="btnrow"><button class="btn sm ghost" data-act="reloadapp">Neueste Version laden</button></div>`)
   + card('Push aufs Handy', 'Über die kostenlose App ntfy', `<form id="f-ntfy"><div class="f"><label>Geheimer Kanalname</label><input name="topic" value="${esc(s.ntfy_topic || '')}" placeholder="noch keiner" autocomplete="off" autocapitalize="off"></div>
     <p class="hint">In der ntfy-App auf „Thema abonnieren“ tippen und genau diesen Namen eintragen. Wer den Namen kennt, kann die Alerts mitlesen: also zufällig wählen und nicht weitergeben.</p>
     <div class="btnrow"><button class="btn" type="submit">Speichern</button><button class="btn ghost" type="button" data-act="gentopic">Zufälligen Namen erzeugen</button><button class="btn ghost" type="button" data-act="testpush">Test senden</button></div></form>`)
@@ -1411,6 +1411,7 @@ document.addEventListener('click', async ev => {
   else if (act === 'mode') { S.mode = Object.keys(MODES).find(k => MODES[k] === v) || 'positionen'; render(); }
   else if (act === 'hm') { S.hm = v; render(); }
   else if (act === 'cmp') { S.cmp = v; render(); }
+  else if (act === 'reloadapp') location.replace(location.pathname + '?r=' + Date.now().toString(36));   // umgeht jeden Zwischenspeicher
   else if (act === 'hide') { S.hide = !S.hide; try { localStorage.setItem('depot_hide', S.hide ? '1' : ''); } catch (e) { /* egal */ } render(); if (S.sheetKey) vAsset(S.sheetKey); }
   else if (act === 'hv') { S.hv = v; render(); }
   else if (act === 'jkr') { S.jkr = v; render(); }
@@ -1539,6 +1540,7 @@ document.addEventListener('mouseover', ev => {
 document.addEventListener('mouseleave', ev => { if (ev.target.classList && ev.target.classList.contains('alloc')) { ev.target.querySelectorAll('path').forEach(p => p.style.opacity = ''); const dc = ev.target.querySelector('.dc'); dc.innerHTML = `<span class="n">${esc(dc.dataset.defN)}</span><b class="num">${esc(dc.dataset.defV)}</b>`; } }, true);
 document.addEventListener('click', ev => { const q = $('#qres'); if (q && !ev.target.closest('.search')) q.hidden = true; });
 let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawCharts, 150); });
+setInterval(() => { if (!document.hidden) checkVersion(); }, 5 * 6e4);   // offene Tabs am PC: alle 5 Minuten nach neuer Version sehen
 document.addEventListener('visibilitychange', async () => { if (document.hidden) return; checkVersion(); if (!S.pf) return; if (Date.now() - (S.loaded || 0) > 6e4 && $('#sheet').hidden && !S.auto) { await loadAll(); S.loaded = Date.now(); render(); } autoRefresh(); });
 (async function start() {
   if (!LOCAL && !cfg) return render();
