@@ -245,7 +245,8 @@ def refresh_strategy(store, pf, live, state, force=False):
     soxx = _with_live(base.get("soxx"), quote("SOXX"))
     prev_fg = (store.get("screen.json") or {}).get("fg") or {}
     fg = {"stocks": (mfg or {}).get("value", prev_fg.get("stocks")), "crypto": (daily.get("crypto_fg") or {}).get("value", prev_fg.get("crypto"))}
-    screen.build(store, pf, out, extra, push, (sp or {}).get("c"), fg, semis=screen.semis_stats(soxx) if soxx else None, mfg=mfg)
+    screen.build(store, pf, out, extra, push, (sp or {}).get("c"), fg, semis=screen.semis_stats(soxx) if soxx else None, mfg=mfg,
+                 sectors=base.get("sectors"))     # Stärke der Sektoren vom Tageslauf
 
 
 SPARK_EVERY = 55 * 60   # 7-Tage-Verlauf (Stundenkurse) für die Watchlist am Handy: höchstens stündlich neu
@@ -545,9 +546,22 @@ def run_daily(store):
         m = meta.get(a["symbol"]) if a["kind"] == "crypto" else None
         if m and key in out:
             out[key]["mcap"], out[key]["rank"] = m.get("mcap"), m.get("rank")
-    # Strategie: Titel der Auswahl (KI und Halbleiter), die nicht ohnehin verfolgt werden
-    extra = screen.fetch(out, yf, market_6m)
-    update_logos(store, dict(screen.universe_assets(), **assets), dict(extra, **out), meta)
+    # Strategie: Stärke der Sektoren (Sektor-ETFs), dann Titel der Auswahl (KI und Halbleiter) und der starken Sektoren,
+    # die nicht ohnehin verfolgt werden
+    sectors = []
+    try:
+        sp_c = (bench.get("SP500") or {}).get("c") or []
+        sec_h = {}
+        for name, etf, syms in screen.SECTORS:
+            h = sources.stock_history(etf, "2y")
+            if h:
+                sec_h[etf] = {"d": h["d"], "c": h["c"]}
+        sectors = screen.sector_strength(sec_h, sp_c)
+    except Exception as e:
+        log("Sektoren: Fehler " + type(e).__name__)
+    more = screen.strong_members(sectors, screen.answers(pf))
+    extra = screen.fetch(out, yf, market_6m, more)
+    update_logos(store, dict(screen.universe_assets(more), **assets), dict(extra, **out), meta)
     # Angst und Gier am Aktienmarkt: eigene Berechnung (CNN sperrt Skripte), aus Yahoo-Kursen
     fg_hist = {}
     for sym in ("^GSPC", "^VIX", "SPY", "TLT", "HYG", "IEF", "RSP"):
@@ -575,14 +589,15 @@ def run_daily(store):
         sp = bench.get("SP500") or {}
         screen.build(store, pf, out, extra, push, sp.get("c"),
                      {"stocks": (market_fg or {}).get("value"), "crypto": (crypto_fg or {}).get("value")},
-                     semis=screen.semis_stats(soxx) if soxx else None, mfg=market_fg)
+                     semis=screen.semis_stats(soxx) if soxx else None, mfg=market_fg, sectors=sectors or None)
         # Grundlage für die Zwischenläufe mit aktuellen Kursen (refresh_strategy): was nicht in daily.json steht
         store.put("screen_base.json", {
             "updated": now_iso(),
             "extra": {k: {x: e.get(x) for x in ("hist", "currency", "name", "fund", "div", "earnings_date")} for k, e in extra.items()},
             "sp": {"d": sp.get("d", [])[-400:], "c": sp.get("c", [])[-400:]},
             "soxx": {"d": soxx["d"], "c": soxx["c"]} if soxx else None,
-            "fg": {s: [d, c] for s, (d, c) in fg_hist.items()}})
+            "fg": {s: [d, c] for s, (d, c) in fg_hist.items()},
+            "sectors": sectors or None})
     except Exception as e:   # der Filter darf den Tageslauf nicht aufhalten
         log("Strategie: Fehler " + type(e).__name__)
     # Branchen der großen Indizes als Vergleich für die Sektoren des Depots (über die ETFs URTH und SPY)

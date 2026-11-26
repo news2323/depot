@@ -819,6 +819,7 @@ const QUESTIONS = [
   {id: 'profit', q: 'Was tust du bei großen Gewinnen?', o: [['run', 'Laufen lassen'], ['50', 'Ab +50 % einen Teil verkaufen'], ['100', 'Ab +100 % einen Teil verkaufen']]},
   {id: 'sell', q: 'Wann verkaufst du eine Aktie?', o: [['thesis', 'Wenn die These bricht'], ['signal', 'Wenn das Momentum-Signal ausgeht'], ['trend', 'Wenn der Trend bricht'], ['stop', 'Bei festem Verlust (−20 %)'], ['better', 'Wenn es Besseres gibt']]},
   {id: 'regime', q: 'Halbleiter liegen unter ihrer 200-Tage-Linie. Wie viel bleibt investiert?', why: 'Backtest über 10 Jahre: halb Reserve senkte den größten Rückgang und kostete kaum Rendite.', o: [['half', 'Halb, Rest als Reserve'], ['full', 'Alles bleibt investiert']]},
+  {id: 'sectors', q: 'Sollen Aktien aus anderen Sektoren dazukommen, solange ihr Sektor deutlich stärker läuft als der Markt?', why: 'Backtest über 10 Jahre: KI plus starke Sektoren brachte etwa gleich viel Rendite bei kleinerem Rückgang, vor allem 2022 mit Energie. Stark heißt: Sektor-ETF mit Momentum-Signal und in 12 Monaten mindestens 15 Punkte vor dem S&P 500.', o: [['strong', 'Ja, solange der Sektor stark ist'], ['ai', 'Nein, nur KI und Halbleiter']]},
   {id: 'rank', q: 'Wonach sollen Kandidaten sortiert werden?', why: 'Backtest über 10 Jahre: Im KI-Umfeld traf die Kursstärke besser als die Mischung mit Wachstum und Qualität.', o: [['mix', 'Deine Faktoren (Momentum, Wachstum, Qualität)'], ['price', 'Kursstärke zuerst, Wachstum und Marge als Filter']]},
   {id: 'etf', q: 'Gehören deine ETFs zur Strategie?', why: 'Sonst zählen nur die Einzelaktien.', o: [['apart', 'Nein, getrennt'], ['base', 'Ja, als Basis']]},
   {id: 'crypto', q: 'Und Krypto?', o: [['apart', 'Getrennt'], ['part', 'Gehört dazu']]},
@@ -831,6 +832,11 @@ const prof = () => S.pf.profile || {};
 const ansOf = id => (prof().answers || {})[id];
 const ansLabel = id => { const q = QUESTIONS.find(x => x.id === id), v = ansOf(id); const o = q && q.o.find(x => String(x[0]) === String(v)); return o ? o[1] : null; };
 const scrRow = key => (S.scr || {})[key];
+// Andere Sektoren (Jakobs Wunsch vom 26.11.2026, gleich in tracker/screen.py apply_sector): Titel eines starken Sektors zählen
+// wie KI-Titel (Thema 1); ist der Sektor nicht mehr stark oder die Antwort „nein“, gilt ihr Thema ohne die Regel (tw0)
+const sectorsOn = () => (ansOf('sectors') || 'strong') !== 'ai';
+const thOf = r => { const c = (r || {}).c || {}; return r && r.sector ? (r.sector_on && sectorsOn() ? 1 : (r.tw0 ?? c.theme)) : c.theme; };
+const sectorOut = r => !!(r && r.sector) && !(r.sector_on && sectorsOn());
 // Kaufstil: Zu- und Abschlag je Zustand des Momentum-Signals (gleich in tracker/screen.py STYLE_MULT)
 const STYLE_MULT = {first: {on: 1.06, down: 0.9}, only: {on: 1.08, fade: 0.9, none: 0.85, down: 0.75}};
 // Momentum-Signal (tracker/analytics.momentum, Jakobs Wunsch vom 22.11.2026): on, fade, down, none
@@ -856,7 +862,7 @@ function fitOf(r) {
   if (fl.spec && ansOf('spec') === 'nein') return null;
   let x = Object.keys(w).reduce((s, k) => s + (c[k] ?? 0.5) * w[k], 0) * 100;
   if (ansOf('rank') === 'price' && ((r.rev_g != null && r.rev_g < 0) || (r.op_margin != null && r.op_margin < 0))) x *= 0.7;
-  const th = ansOf('themes') || 'ai', t = th === 'ai' ? c.theme : th === 'tech' ? Math.max(c.theme, 0.7) : 1;
+  const th = ansOf('themes') || 'ai', t0 = thOf(r), t = th === 'ai' ? t0 : th === 'tech' ? Math.max(t0, 0.7) : 1;
   x *= 0.55 + 0.45 * t;
   if (c.quality < 0.3) x *= 0.85;
   if (fl.pricey) x *= 0.85;
@@ -918,7 +924,7 @@ function idealBook() {
   const rank = Object.fromEntries(all.slice().sort((a, b) => b.f - a.f).map((x, i) => [x.r.key, i]));
   // nur Titel aus dem Umfeld, das der Backtest geprüft hat (Schwerpunkt KI: Thema ab 0,6; Tech: ab 0,4)
   const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes') || 'ai'] ?? 0.6;
-  const ok = all.filter(x => (x.r.c || {}).theme >= tmin && !(x.r.flags || {}).cut && !(x.r.est90 != null && x.r.est90 <= -5));
+  const ok = all.filter(x => thOf(x.r) >= tmin && !(x.r.flags || {}).cut && !(x.r.est90 != null && x.r.est90 <= -5));
   // Toleranz (Jakobs Wunsch vom 23.11.2026, gleiche Regel in tracker/screen.py KEEP_MARGIN): bisherige Titel bleiben, bis ein
   // anderer mindestens 2 von 100 Punkten besser passt; mit Signal aufgenommene bleiben vorn, solange das Signal nur nachlässt
   const was = Object.fromEntries((((S.screen || {}).ideal || {}).items || []).map(x => [x.key, x.via]));
@@ -944,7 +950,7 @@ function ruleOf(key) {
   const out = (word, why, amount) => (S._rules[key] = {word, cls: RULE_CLS[word], why, eur: amount});
   const held = jakobHeld()[key], it = ib.items.find(x => x.key === key), ex = ib.ex, mm = m || {};
   const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes') || 'ai'] ?? 0.6;
-  if (!held && !it && ((sr.c || {}).theme || 0) < tmin) return (S._rules[key] = null);   // außerhalb deines Schwerpunkts: kein Wort
+  if (!held && !it && (thOf(sr) || 0) < tmin) return (S._rules[key] = null);   // außerhalb deines Schwerpunkts: kein Wort
   const cut = (sr.flags || {}).cut || (sr.est90 != null && sr.est90 <= -10);
   const dipUp = sr.chg5 != null && sr.chg5 <= -8 && mm.state && mm.state !== 'down' && !(sr.est90 != null && sr.est90 < -2);
   const sig = mm.state === 'on' ? 'Momentum-Signal an' : mm.state === 'down' ? 'kein Momentum-Signal, Kurs unter der 200-Tage-Linie' : mm.state === 'fade' ? 'Momentum lässt nach' : 'kein Momentum-Signal';
@@ -956,6 +962,7 @@ function ruleOf(key) {
       if (it.eur - v >= ib.minp) return out('Nachkaufen', [`unter dem Ziel im Ideal-Depot (${eur(it.eur, 0)}, im Depot ${eur(v, 0)})`], it.eur - v);
       return out('Halten', [it.via === 'ausnahme' ? 'deine Ausnahme greift: ' + ex.text : sig, `Ziel ${eur(it.eur, 0)}, im Depot ${eur(v, 0)}`]);
     }
+    if (sectorOut(sr)) return out('Verkaufen', [`${sr.sector} ist kein starker Sektor mehr: nach deiner Regel zum Monatsende verkaufen`], v);
     const sell = ansOf('sell') || 'better';
     const why = {signal: ['Signal aus: nach deiner Regel zum Monatsende verkaufen'], trend: ['unter der 200-Tage-Linie: nach deiner Regel verkaufen'],
       better: ['nicht mehr im Ideal-Depot: es gibt Besseres'], stop: held.pnlPct <= -20 ? [`${pctS(held.pnlPct, 0)} seit Kauf: Verlustgrenze erreicht`] : null, thesis: null}[sell];

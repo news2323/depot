@@ -1,7 +1,7 @@
 """Strategie (Jakobs Wunsch vom 22.11.2026): Filter für Aktien, die zu seinem Profil passen könnten, und Hinweise aufs Handy.
 
 Das Profil steht in portfolio.json → profile (answers). Der Filter läuft im Tageslauf über eine feste Auswahl von
-Titeln aus dem KI- und Halbleiterumfeld plus alle beobachteten Aktien. Je Titel entstehen Bausteine von 0 bis 1, daraus die
+Titeln aus dem KI- und Halbleiterumfeld, den großen Titeln starker Sektoren (SECTORS) und allen beobachteten Aktien. Je Titel entstehen Bausteine von 0 bis 1, daraus die
 „Passung für dich“ (0 bis 100). Die App rechnet die Passung mit denselben Gewichten nach (web/app.js fitOf), damit
 Antworten im Profil sofort wirken: beide Stellen ändern.
 
@@ -27,6 +27,26 @@ UNIVERSE = (
     ("KI-Software", 0.6, ("PLTR", "NOW", "CRWD", "SNOW", "DDOG")),
 )
 THEME_OF = {sym: (name, w) for name, w, syms in UNIVERSE for sym in syms}
+
+# Andere Sektoren, solange sie stark sind (Jakobs Wunsch vom 26.11.2026: auch außerhalb von KI kaufen, wenn ein Sektor so stark
+# läuft). Stark heißt: der Sektor-ETF hat das Momentum-Signal und lief in 12 Monaten (ohne den letzten Monat) mindestens
+# SECTOR_MIN Prozentpunkte besser als der S&P 500. Dann zählen seine großen Titel wie KI-Titel (Thema 1,0); fällt der Sektor
+# zurück, verkaufen deine Regeln sie zum Monatsende. Frage „sectors“ (Standard: ja). Backtest: tracker/backtest.py (opt_sec).
+SECTOR_MIN = 15
+SECTORS = (
+    ("Finanzen", "XLF", ("JPM", "BAC", "WFC", "GS", "MS", "C", "BRK-B", "V", "MA", "AXP", "SCHW", "BLK", "SPGI", "PGR", "CB", "MMC", "ICE", "CME")),
+    ("Gesundheit", "XLV", ("LLY", "UNH", "JNJ", "ABBV", "MRK", "PFE", "TMO", "ABT", "DHR", "AMGN", "ISRG", "BMY", "GILD", "VRTX", "MDT", "SYK", "CVS", "ELV", "REGN", "ZTS")),
+    ("Konsum zyklisch", "XLY", ("TSLA", "HD", "MCD", "NKE", "LOW", "SBUX", "TJX", "BKNG", "CMG", "ORLY", "MAR")),
+    ("Konsum Basis", "XLP", ("PG", "KO", "PEP", "COST", "WMT", "PM", "MO", "MDLZ", "CL", "KMB")),
+    ("Energie", "XLE", ("XOM", "CVX", "COP", "EOG", "SLB", "OXY", "PSX", "MPC")),
+    ("Industrie", "XLI", ("CAT", "DE", "HON", "UNP", "UPS", "RTX", "LMT", "BA", "GE", "MMM", "ADP", "WM", "CSX", "ITW")),
+    ("Rohstoffe", "XLB", ("LIN", "SHW", "APD", "FCX", "NEM", "ECL")),
+    ("Versorger", "XLU", ("NEE", "DUK", "SO", "D", "AEP")),
+    ("Immobilien", "XLRE", ("PLD", "AMT", "EQIX", "SPG", "O")),
+    ("Kommunikation", "XLC", ("NFLX", "DIS", "CMCSA", "T", "VZ", "TMUS")),
+    ("Technik", "XLK", ("AAPL", "CSCO", "ADBE", "CRM", "INTU", "IBM", "TXN", "ADI")),
+)
+SECTOR_OF = {sym: name for name, etf, syms in SECTORS for sym in syms if sym not in THEME_OF}
 # Thema für beobachtete Titel außerhalb der Auswahl, nach Yahoo-Branche
 INDUSTRY_THEME = (("Semiconductor Equipment", "Chip-Ausrüstung", 0.9), ("Semiconductors", "Halbleiter", 1.0),
                   ("Software", "Software", 0.5), ("Internet Content", "Internet", 0.5), ("Communication Equipment", "Netzwerk", 0.6),
@@ -71,14 +91,49 @@ def answers(pf):
     return ((pf.get("profile") or {}).get("answers") or {})
 
 
-def universe_assets():
-    return {asset_key("stock", s): {"kind": "stock", "symbol": s, "name": ""} for s in THEME_OF}
+def universe_assets(more=()):
+    """Titel der Auswahl (KI und Halbleiter) plus `more` (Titel starker Sektoren)."""
+    return {asset_key("stock", s): {"kind": "stock", "symbol": s, "name": ""} for s in list(THEME_OF) + list(more)}
 
 
-def fetch(tracked, yf, market_6m):
-    """Kurse und Kennzahlen für die Titel der Auswahl, die nicht ohnehin verfolgt werden (2 Jahre Verlauf reichen)."""
+def sectors_on(ans):
+    return (ans.get("sectors") or "strong") != "ai"
+
+
+def sector_strength(hists, sp):
+    """Stärke je Sektor aus dem Sektor-ETF. hists: ETF -> Tageskurse {d, c}; sp: Tageskurse des S&P 500 (gleicher letzter Tag).
+    Wie im Backtest: Momentum-Signal des ETF und 12 Monate ohne den letzten Monat gegen den S&P 500."""
+    out = []
+    s12, s6 = _ret(sp or [], 252, 21), _ret(sp or [], 126)
+    for name, etf, syms in SECTORS:
+        c = (hists.get(etf) or {}).get("c") or []
+        if len(c) < 273 or s12 is None:
+            continue
+        m12, m6 = _ret(c, 252, 21), _ret(c, 126)
+        if m12 is None or m6 is None:
+            continue
+        mom = analytics.momentum(c, sp) or {}
+        r12, r6 = m12 - s12, m6 - s6
+        on = mom.get("state") == "on"
+        out.append({"name": name, "etf": etf, "r12": round(r12, 1), "r6": round(r6, 1), "on": on, "state": mom.get("state"),
+                    "strong": bool(on and r12 >= SECTOR_MIN), "n": len(syms)})
+    out.sort(key=lambda x: -x["r12"])
+    return out
+
+
+def strong_members(sectors, ans):
+    """Titel der starken Sektoren (nur mit der Antwort „ja“ auf die Frage sectors)."""
+    if not sectors_on(ans):
+        return []
+    strong = {x["name"] for x in sectors or [] if x.get("strong")}
+    return [sym for sym, name in SECTOR_OF.items() if name in strong]
+
+
+def fetch(tracked, yf, market_6m, more=()):
+    """Kurse und Kennzahlen für die Titel der Auswahl, die nicht ohnehin verfolgt werden (2 Jahre Verlauf reichen).
+    more: Titel starker Sektoren."""
     out = {}
-    for key, a in universe_assets().items():
+    for key, a in universe_assets(more).items():
         if key in tracked:
             continue
         h = sources.stock_history(a["symbol"], "2y")
@@ -417,6 +472,8 @@ def rule_words(rows, pf, ans, ib):
         elif k in held:
             if k in inid:
                 w = "Nachkaufen" if dip else "Halten"
+            elif sector_out(r, ans):
+                w = "Verkaufen"        # Sektor nicht mehr stark: zum Monatsende raus (wie im Backtest)
             elif ib["ex"]:
                 w = "Halten"
             else:
@@ -435,13 +492,57 @@ def _last_weekday_of_month(d):
     return last
 
 
-def build(store, pf, out, extra, push, sp, fg=None, semis=None, mfg=None):
+def apply_sector(r, sym, strong, use):
+    """Titel aus einem anderen Sektor: Sektor merken; ist er stark (und die Antwort ja), zählt der Titel wie ein KI-Titel.
+    tw0 = Thema ohne Sektor-Regel (für die App, wenn die Antwort umgestellt wird)."""
+    name = SECTOR_OF.get(sym)
+    if not name or r["c"]["theme"] >= 0.6:
+        return                             # zählt schon nach seiner Branche zum KI-Umfeld (z. B. Chips in „Technik“)
+    r["sector"], r["sector_on"], r["tw0"] = name, name in strong, r["c"]["theme"]
+    if name in strong and use:
+        r["theme"], r["c"]["theme"] = name, 1.0
+        r["flags"]["def"] = False          # im Backtest kein Abzug als defensiver Titel (Thema 1,0)
+
+
+def sector_out(r, ans):
+    """Gehaltener Titel aus einem Sektor, der nicht mehr stark ist: zum Monatsende verkaufen, auch bei einer Ausnahme."""
+    return bool(r.get("sector")) and not (r.get("sector_on") and sectors_on(ans))
+
+
+def sector_events(prev, sectors, ans):
+    """Hinweis, wenn ein Sektor stark wird oder es nicht mehr ist (höchstens alle 7 Tage je Sektor)."""
+    if not sectors_on(ans):
+        return []
+    old = {x["name"]: x for x in ((prev or {}).get("sectors") or {}).get("list") or []}
+    if not old:
+        return []
+    today = datetime.date.today()
+    seen = {(e["type"], e["key"]): e["day"] for e in (prev or {}).get("events") or []}
+    out = []
+    for x in sectors or []:
+        was = (old.get(x["name"]) or {}).get("strong")
+        if bool(x["strong"]) == bool(was):
+            continue
+        key = "sector:" + x["name"]
+        last = seen.get(("sector", key))
+        if last and (today - datetime.date.fromisoformat(last)).days < 7:
+            continue
+        text = ("starker Sektor: Momentum-Signal und in 12 Monaten %+.0f Punkte gegen den S&P 500. Seine großen Titel zählen jetzt für dein Ideal-Depot" % x["r12"]
+                if x["strong"] else "kein starker Sektor mehr. Titel daraus verkaufen deine Regeln zum Monatsende")
+        out.append({"day": today.isoformat(), "type": "sector", "key": key, "symbol": x["name"], "text": text, "important": True})
+    return out
+
+
+def build(store, pf, out, extra, push, sp, fg=None, semis=None, mfg=None, sectors=None):
     """screen.json schreiben und neue Hinweise aufs Handy schicken. sp = Tageskurse des S&P 500,
     fg = Angst und Gier heute ({"stocks": 0..100, "crypto": 0..100}), semis = semis_stats, mfg = Angst und Gier am
-    Aktienmarkt mit Bausteinen (für die App, wenn neuer als daily.json)."""
+    Aktienmarkt mit Bausteinen (für die App, wenn neuer als daily.json), sectors = sector_strength (sonst vom letzten Lauf)."""
     ans = answers(pf)
     sp = sp or []
     prev = store.get("screen.json") or {}
+    if sectors is None:
+        sectors = ((prev.get("sectors") or {}).get("list")) or []
+    strong, use = {x["name"] for x in sectors if x.get("strong")}, sectors_on(ans)
     rows = []
     alias = alias_sources(pf)
     for key, e in list(out.items()) + list(extra.items()):
@@ -452,6 +553,7 @@ def build(store, pf, out, extra, push, sp, fg=None, semis=None, mfg=None):
             continue    # Hinterlegungsschein im Depot: zählt als seine Aktie, kein eigener Kandidat (sonst doppelt im Ideal-Depot)
         r = parts(sym, e, sp)
         r.update(key=key, symbol=sym, name=SHORT.get(sym) or e.get("name") or "", universe=sym in THEME_OF)
+        apply_sector(r, sym, strong, use)
         rows.append(r)
     done = {r["key"] for r in rows}
     others = [{"key": k, "symbol": k.split(":", 1)[1], "name": e.get("name") or "", "mom": e["mom"]}
@@ -466,10 +568,12 @@ def build(store, pf, out, extra, push, sp, fg=None, semis=None, mfg=None):
     new = events(rows, prev, pf, ans, others, fg, [x["key"] for x in ib["items"]])
     words = rule_words(rows, pf, ans, ib)
     new += rule_events(rows, prev, words, ib)
+    new += sector_events(prev, sectors, ans)
     keep = (datetime.date.today() - datetime.timedelta(days=45)).isoformat()
     evs = (new + [e for e in prev.get("events") or [] if e["day"] >= keep])[:80]
     doc = {"updated": now_iso(), "list": rows, "other": [{"key": o["key"], "mom": o["mom"]} for o in others],
-           "events": evs, "semis": semis, "ideal": ib, "rules": words, "fg": {k: v for k, v in (fg or {}).items() if v is not None}}
+           "events": evs, "semis": semis, "ideal": ib, "rules": words, "fg": {k: v for k, v in (fg or {}).items() if v is not None},
+           "sectors": {"min": SECTOR_MIN, "list": sectors}}
     if mfg:
         doc["mfg"] = {k: v for k, v in mfg.items() if k != "hist"}
     store.put("screen.json", doc)

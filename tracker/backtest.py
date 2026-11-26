@@ -8,6 +8,10 @@ Nachgerechnet wird nur, was es am jeweiligen Tag wirklich gab (keine Daten aus d
 Nicht nachrechenbar (keine frei verfügbaren alten Stände): Gewinnschätzungen und ihre Änderungen, Analystenziele,
 Erwartungswert, Bewertungspunkte. Die Passung verteilt deren Gewicht auf die übrigen Bausteine.
 
+Andere Sektoren (Jakobs Wunsch vom 26.11.2026): Die optimierten Regeln laufen ein zweites Mal mit den großen Titeln aus
+screen.SECTORS, solange ihr Sektor stark ist (Sektor-ETF mit Momentum-Signal, 12 Monate mindestens screen.SECTOR_MIN Punkte
+vor dem S&P 500); fällt der Sektor zurück, gehen seine Titel zum Monatsende (Strategie opt_sec).
+
 Grenzen: Die Auswahl der Titel ist von heute (Gewinner von heute sind dabei, Pleiten fehlen). Darum zählt vor allem
 der Vergleich mit „alle Titel der Auswahl gleich gewichtet“, nicht mit dem S&P 500.
 
@@ -453,6 +457,23 @@ def prepare():
     al = {k: _align(raw[k], days) for k in ("SOXX", "QQQ", "^VIX", "SPY", "TLT", "HYG", "IEF", "RSP", "EURUSD=X") if k in raw}
     al["^GSPC"] = bench
     return days, bench, stocks, al
+
+
+def prepare_sectors(days, skip=()):
+    """Große Titel der Sektoren (in Dollar, Thema = Sektor, Gewicht 1) und die Sektor-ETFs, auf die Handelstage gelegt."""
+    from . import screen
+    members, etfs = {}, {}
+    for name, etf, syms in screen.SECTORS:
+        x = _chart(etf)
+        if x and len(x["d"]) > 300:
+            etfs[name] = Stock(etf, _align(x, days), name, 1.0)
+        for sym in syms:
+            if sym in skip or sym not in screen.SECTOR_OF:
+                continue
+            x = _chart(sym)
+            if x and len(x["d"]) > 300 and x.get("cur") == "USD":
+                members[sym] = Stock(sym, _align(x, days), name, 1.0)
+    return members, etfs
 
 
 def month_ends(days, start_iso):
@@ -966,6 +987,101 @@ def run(ans, plan_syms):
         exposure.append({"share": int(e * 100), "cagr": st_e["cagr"], "dd": st_e["dd"]})
     opt["exposure"] = exposure
 
+    # ------------------------------------------------- andere Sektoren, solange sie stark sind (Jakobs Wunsch vom 26.11.2026)
+    from . import screen
+    members, etfs = prepare_sectors(days, set(stocks))
+    sect_out = None
+    if members and etfs:
+        allst = dict(stocks, **members)
+        sec2 = dict(sec)
+        for x in members:
+            q = sec_quarters(x)
+            if q:
+                sec2[x] = q
+        rs2 = {}
+        ctx2 = {"stocks": allst, "bench": bench, "iso": iso, "sec": sec2, "rs": rs2}
+
+        def strong_at(i):
+            return {nm for nm, s in etfs.items() if s.ok(i, 273) and mom_on(s, i, P0, bench)
+                    and (s.ret(i, 252, 21) - (bench[i - 21] / bench[i - 252] - 1)) * 100 >= screen.SECTOR_MIN}
+        strong_m = {i: strong_at(i) for i in months}
+        elig = {i: set(stocks) | {x for x, s in members.items() if s.theme in strong_m[i]} for i in months}
+        for i in months:              # Stärke im Thema: Rang unter allen Kandidaten des Monats (KI und starke Sektoren)
+            peers = [(x, allst[x].p[i] / allst[x].p[i - 126] - 1) for x in elig[i] if allst[x].tw >= 0.6 and allst[x].ok(i, 126)]
+            if len(peers) >= 5:
+                vals = sorted(v for _, v in peers)
+                for x, v in peers:
+                    rs2[(x, i)] = sum(1 for y in vals if y < v) / float(len(vals))
+        w_over, filt = next((w, f) for sid, _, w, f in SCHEMES if sid == scheme)
+
+        def st2(x, i):
+            if x in state:
+                return state[x][i]
+            return mom_state(allst[x], i, bench, [mom_on(allst[x], j, P0, bench) for j in range(max(0, i - 20), i + 1)])
+        fits2 = {}
+        for i in months:
+            for x in elig[i]:
+                f = fit_at(allst[x], i, ctx2, ans, P0, st2(x, i), w_over, filt)
+                if f:
+                    fits2[(x, i)] = f
+        g = chosen
+        Pg = {"near": g["near"], "trend": g["trend"], "rel": g["rel"]}
+        on2, rk, seen = {}, {}, {}
+
+        def on_(x, i):
+            if (x, i) not in on2:
+                on2[(x, i)] = mom_on(allst[x], i, Pg, bench)
+            return on2[(x, i)]
+
+        def avail2(i):
+            return [x for x in elig[i] if (x, i) in fits2]
+
+        def rank2(i, xs):
+            return sorted(xs, key=lambda x: -fits2[(x, i)][0])
+
+        def pick2(i, keep):
+            cands, out_p, cnt = avail2(i), [], {}
+            for x in keep:
+                cnt[allst[x].theme] = cnt.get(allst[x].theme, 0) + 1
+
+            def add(xs, limit):
+                for x in xs:
+                    if len(out_p) >= limit:
+                        break
+                    if x in keep or x in out_p or (g["cap"] and cnt.get(allst[x].theme, 0) >= g["cap"]):
+                        continue
+                    cnt[allst[x].theme] = cnt.get(allst[x].theme, 0) + 1
+                    out_p.append(x)
+            add(rank2(i, [x for x in cands if on_(x, i)]), 999 if not g["cap"] else g["n_pos"] - len(keep))
+            free = g["n_pos"] - len(keep) - len(out_p)
+            if exc(i, g["fear"], g["crash"]) and free > 0:
+                pool = [x for x in cands if x not in out_p and x not in keep and (fits2[(x, i)][2]["g"] is None or fits2[(x, i)][2]["g"] > 0)]
+                pool.sort(key=lambda x: -(rs2.get((x, i)) or 0) if g["ex_sort"] == "rs" else -fits2[(x, i)][0])
+                add(pool, len(out_p) + free)
+            return out_p
+
+        def exit2(x, i):
+            seen.setdefault(i, set()).add(x)
+            if x in members and x not in elig[i]:
+                return False                      # Sektor nicht mehr stark: zum Monatsende verkaufen
+            s = allst[x]
+            if g["exit"] == "signal":
+                return on_(x, i)
+            if g["exit"] == "trend":
+                return s.p[i] >= s.sma(i, 200)
+            if i not in rk:
+                rk[i] = rank2(i, avail2(i))
+            return x in rk[i][:2 * g["n_pos"]]
+        res2 = simulate(ctx2, months, pick2, exit2, g["n_pos"], g["empty"], daily=True, scale=regime_scale(g["regime"], g["fear"], g["crash"]))
+        add_strat("opt_sec", "Optimierte Regeln mit starken Sektoren", desc(g) + ", dazu große Titel anderer Sektoren, solange ihr Sektor stark ist", res2)
+        by = {}
+        for i in months:
+            for nm in strong_m[i]:
+                by.setdefault(nm, {}).setdefault(iso[i][:4], 0)
+                by[nm][iso[i][:4]] += 1
+        share = [100.0 * len([x for x in seen.get(i, ()) if x in members]) / g["n_pos"] for i in months[1:]]
+        sect_out = {"min": screen.SECTOR_MIN, "n": len(members), "months": by, "share": round(sum(share) / len(share)) if share else 0}
+
     # ------------------------------------------------- Plan-Titel: Punkte je Monat und Signale mit Ergebnis
     titles = []
     for sym in plan_syms:
@@ -987,7 +1103,7 @@ def run(ans, plan_syms):
             "period": {"start": iso[months[0]], "end": iso[months[-1]], "train_end": TRAIN_END},
             "universe": len(stocks), "sec": len(sec), "signals": sig, "market": market, "market_any": market_any,
             "buckets": bucket_out, "groups": groups, "strategies": strategies, "opt": opt, "titles": titles,
-            "fg_now": fg[-1]}
+            "fg_now": fg[-1], "sectors": sect_out}
     out["findings"] = findings(out)
     return out
 
@@ -1051,6 +1167,15 @@ def findings(b):
                     "Titel mit 1 bis 5 Punkten %s. Die Punkte trennten also kaum. Am treffsichersten war die reine Kursstärke: bestes gegen schwächstes Fünftel %s in 12 Monaten "
                     "(heutige Gewichte %s)." % (_p(g["8-10"].get("ex_ew"), 1), _p(g["1-5"].get("ex_ew"), 1),
                                                 _p(sc["kurs"]["spread"]["test252"]), _p(sc["heute"]["spread"]["test252"]))))
+    if "opt_sec" in S and b.get("sectors"):
+        a, k = S["opt_sec"], S["opt"]
+        top = sorted(((sum(v.values()), n) for n, v in b["sectors"]["months"].items()), reverse=True)[:3]
+        out.append(("Andere Sektoren", "Mit den großen Titeln anderer Sektoren, solange ihr Sektor stark ist: %s pro Jahr statt %s nur mit KI, "
+                    "größter Rückgang %s statt %s; bis %s %s statt %s, danach %s statt %s. Im Schnitt %d %% des Depots außerhalb von KI. "
+                    "Am häufigsten stark: %s. Die KI-Auswahl enthält die Gewinner von heute, das bevorzugt im Rückblick „nur KI“." % (
+                        _p(a["all"]["cagr"], 1), _p(k["all"]["cagr"], 1), _p(a["all"]["dd"]), _p(k["all"]["dd"]), b["period"]["train_end"][:4],
+                        _p(a["train"]["cagr"], 1), _p(k["train"]["cagr"], 1), _p(a["test"]["cagr"], 1), _p(k["test"]["cagr"], 1), b["sectors"]["share"],
+                        ", ".join("%s (%d Monate)" % (n, m) for m, n in top) or "keiner")))
     ch, cu = o["chosen"], o["current"]
     out.append(("Optimiert", "Aus %s Varianten, gewählt mit den Jahren bis Oktober %s und geprüft mit den Jahren danach: %s. Bis %s %s pro Jahr statt %s, danach %s statt %s; "
                 "größter Rückgang danach %s statt %s." % (
@@ -1078,7 +1203,7 @@ def main(repo=None):
 
 def _universe():
     from . import screen
-    return sorted(screen.THEME_OF)
+    return sorted(set(screen.THEME_OF) | set(screen.SECTOR_OF))
 
 
 if __name__ == "__main__":
