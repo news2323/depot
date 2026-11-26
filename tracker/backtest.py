@@ -23,6 +23,7 @@ import itertools
 import json
 import math
 import os
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -44,10 +45,23 @@ SEC_TAGS = {
 }
 
 
+def _contact():
+    """Absender für die SEC: Umgebungsvariable SEC_CONTACT oder der Eintrag „depot-sec-contact“ im Schlüsselbund von macOS
+    (legt Jakob selbst an). Steht nie im Code und wird nie ausgegeben."""
+    c = os.environ.get("SEC_CONTACT")
+    if c:
+        return c
+    try:
+        p = subprocess.run(["security", "find-generic-password", "-s", "depot-sec-contact", "-w"], capture_output=True, text=True, timeout=10)
+        return p.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _sec_get(url):
-    contact = os.environ.get("SEC_CONTACT")
+    contact = _contact()
     if not contact:
-        raise SystemExit("SEC_CONTACT fehlt: Absender mit E-Mail-Adresse, z. B. SEC_CONTACT=\"depot name@beispiel.de\"")
+        raise SystemExit("Absender für die SEC fehlt: SEC_CONTACT setzen oder im Schlüsselbund „depot-sec-contact“ anlegen")
     req = urllib.request.Request(url, headers={"User-Agent": contact, "Accept-Encoding": "gzip"})
     with urllib.request.urlopen(req, timeout=60) as f:
         b = f.read()
@@ -77,7 +91,7 @@ def _sec_compact(facts):
 
 def sec_fetch(symbols):
     os.makedirs(os.path.join(CACHE, "sec"), exist_ok=True)
-    if "@" not in os.environ.get("SEC_CONTACT", ""):
+    if "@" not in (_contact() or ""):
         raise SystemExit("In SEC_CONTACT fehlt eine echte E-Mail-Adresse, z. B. SEC_CONTACT=\"depot-backtest name@beispiel.de\"")
     try:
         tick = _sec_get("https://www.sec.gov/files/company_tickers.json")
