@@ -567,8 +567,9 @@ def events(prev, words, names, st, first, today):
         parts = ["%s: %s" % (w, nm(by(w))) for w in ("Verkaufen", "Kaufen", "Halten") if by(w)]
         head = "Regel angepasst: 5 Titel, gehalten bis Rang 7; TSMC und SK Hynix gehören zur Auswahl" if str((prev or {}).get("rule") or "").startswith("wm") \
             else "Wachstums-Momentum ersetzt deine bisherigen Regeln"
-        add("depot:jakob", "Depot Jakob", "neu", "%s. Zum Monatsende (%s): %s" % (head, me_txt, "; ".join(parts) if parts else "nichts zu tun"))
-        return out
+        out.append({"day": today.isoformat(), "type": "neu", "key": "depot:jakob", "symbol": "Depot Jakob", "important": True,
+                    "text": "%s. Zum Monatsende (%s): %s" % (head, me_txt, "; ".join(parts) if parts else "nichts zu tun")})
+        return out                            # Regelwechsel: immer melden, auch wenn es diese Woche schon einen gab
     for k, (w, why) in words.items():
         if w == "Verkaufen" and why == "stop":
             if old.get(k) != "Verkaufen" or why_old.get(k) != "stop":
