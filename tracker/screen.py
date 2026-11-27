@@ -1,17 +1,19 @@
 """Strategie Wachstums-Momentum (Jakobs Wunsch vom 27.11.2026; ersetzt die Strategie vom 22.11.2026 mit KI-Auswahl und Passung).
 
-Die Regel stammt aus dem Test bekannter Strategien von Hedgefonds und Wachstums-Investoren (26.11.2026, tracker/backtest.py)
-und dem Vergleich mit Jakobs Quality-Growth-Vorlage (27.11.2026): Von Quality-Growth übernommen sind 6 Titel und die
-Gleichgewichtung nur einmal im Jahr, beides in jeder Variante des Backtests besser; Filter auf Wachstum, Qualität und
-Bewertung, Punkte statt Kursstärke und Kauf erst nach Rücksetzern kosteten dort viel Rendite.
+Die Regel stammt aus dem Test bekannter Strategien von Hedgefonds und Wachstums-Investoren (26.11.2026, tracker/backtest.py),
+dem Vergleich mit Jakobs Quality-Growth-Vorlage (27.11.2026: übernommen 6 Titel; Filter auf Wachstum, Qualität und Bewertung,
+Punkte statt Kursstärke und Kauf erst nach Rücksetzern kosteten viel Rendite) und der Prüfung aller Stellschrauben ohne
+Stopp (27.11.2026 abends, Jakobs Wunsch): keine regelmäßige Gleichgewichtung, Obergrenze 30 % je Titel.
 - Auswahl: die heutigen Mitglieder von S&P 500 und Nasdaq-100, dazu 18 Länder-ETFs der Schwellenländer (Wachstumsmärkte).
 - Relative Stärke wie bei IBD (CAN SLIM): Rendite der letzten 3 Monate zu 40 %, der letzten 6, 9 und 12 Monate zu je 20 %,
   mit Dividenden.
 - Aufwärtstrend wie bei Minervini: Kurs über der 200-Tage-Linie, 50-Tage-Linie über der 200-Tage-Linie.
 - Zum Monatsende die 6 stärksten Titel im Aufwärtstrend; was nicht mehr dazugehört, wird getauscht. Neue Titel bekommen ein
-  gleiches Gewicht, die übrigen laufen weiter; zurück auf gleiches Gewicht geht es einmal im Jahr zum Ende Dezember.
-- Nachlauf-Stopp: Schließt ein Titel 25 % unter seinem Hoch seit dem Kauf, wird er verkauft; der Platz bleibt bis zum
-  Monatsende frei (Frage „stop“; ohne Stopp mehr Rendite und tieferer Rückgang).
+  gleiches Gewicht (Depot ÷ 6), die übrigen laufen weiter (keine regelmäßige Gleichgewichtung).
+- Obergrenze je Titel (Frage „maxpos“, Standard 30 %): Liegt ein Titel zum Monatsende darüber, wird der Überschuss verkauft
+  und auf die Titel darunter verteilt (enforce_cap).
+- Kein Stopp (Jakobs Wunsch vom 27.11.2026). Wahlweise Nachlauf-Stopp 25 % ab Hoch seit Kauf (Frage „stop“): Dann wird ein
+  Titel sofort verkauft und der Platz bleibt bis zum Monatsende frei.
 
 Das Ideal-Depot ist ein Modell, das Tag für Tag nach dieser Regel weiterläuft: Käufe zum Monatsende, Stopps an jedem Tag,
 Wert in `track`. Beim ersten Lauf wird es mit den Kursen der letzten Monate nachgerechnet. Die Wörter je Titel für das
@@ -28,9 +30,9 @@ import time
 from . import sources
 from .common import SourceError, asset_key, http_json, log, now_iso
 
-RULE_V = "wm2"           # Version der Regel; ändert sie sich, wird das Ideal-Depot neu nachgerechnet
+RULE_V = "wm3"           # Version der Regel; ändert sie sich, wird das Ideal-Depot neu nachgerechnet
 N_POS = 6                # im Backtest besser als 7 oder 8 (Frage positions)
-REBAL_MONTH = 12         # zurück auf gleiches Gewicht nur zum Monatsende Dezember (aus Quality-Growth)
+CAP_PCT = 30             # Obergrenze je Titel zum Monatsende (Frage maxpos); 15 % kostete im Backtest gut 5 Punkte pro Jahr
 STOP_PCT = 25            # Nachlauf-Stopp ab Hoch seit Kauf
 COST = 0.001             # Kosten je Kauf und Verkauf im Modell (wie im Backtest)
 RS_W = ((63, 0.4), (126, 0.2), (189, 0.2), (252, 0.2))   # relative Stärke wie IBD: 3, 6, 9, 12 Monate
@@ -59,8 +61,8 @@ def answers(pf):
 
 
 def n_slots(ans):
-    """Zahl der Titel: Antwort positions (6, 7 oder 8). Alte Antworten als Spanne („6-8“) nehmen die kleinste Zahl ab 6,
-    weil im Backtest weniger Titel mehr brachten (6: 28,2 %, 7: 26,6 %, 8: 24,6 % pro Jahr, jeweils mit Stopp)."""
+    """Zahl der Titel: Antwort positions (4 bis 8). Alte Antworten als Spanne („6-8“) nehmen die kleinste Zahl ab 6
+    (Jakobs Vorgabe: so viele wie bisher; im Backtest brachten weniger Titel mehr, bei größeren Einzelpositionen)."""
     v = ans.get("positions")
     try:
         return max(1, int(v))
@@ -70,7 +72,44 @@ def n_slots(ans):
 
 
 def stop_pct(ans):
-    return None if ans.get("stop") == "none" else STOP_PCT
+    """Nachlauf-Stopp nur, wenn die Frage „stop“ mit „mit Stopp“ beantwortet ist (Standard seit 27.11.2026: ohne)."""
+    return STOP_PCT if ans.get("stop") == "t25" else None
+
+
+def cap_pct(ans):
+    """Obergrenze je Titel in Prozent (Frage maxpos: 15 bis 35, „none“ = keine)."""
+    v = ans.get("maxpos")
+    if v == "none":
+        return None
+    try:
+        return float(v) if v is not None else CAP_PCT
+    except (TypeError, ValueError):
+        return CAP_PCT
+
+
+def enforce_cap(pos, cash, cap, cost=COST):
+    """Obergrenze je Titel (Anteil cap am Depot): Überschuss verkaufen und auf die Titel darunter verteilen (bis zur Grenze),
+    der Rest bleibt Kasse. pos: Titel -> Wert, wird geändert. Ergebnis: (Kasse, Zahl der Teilverkäufe). Gleich im Backtest."""
+    k = 0
+    for _ in range(5):
+        V = cash + sum(pos.values())
+        over = {x: v - cap * V for x, v in pos.items() if v > cap * V * 1.001}
+        if not over:
+            break
+        ex = 0.0
+        for x, e in over.items():
+            pos[x] -= e
+            ex += e * (1 - cost)
+            k += 1
+        room = {x: cap * V - v for x, v in pos.items() if x not in over and v < cap * V}
+        tot = sum(room.values())
+        if tot > 0:
+            give = min(ex, tot)
+            for x, r in room.items():
+                pos[x] += give * r / tot * (1 - cost)
+            ex -= give
+        cash += ex
+    return cash, k
 
 
 # ----------------------------------------------------------------- Auswahl: heutige Mitglieder der Indizes
@@ -291,7 +330,7 @@ def _fresh(n, stop):
     return {"rule": RULE_V, "asof": None, "items": [], "cash": 1.0, "stopped": [], "log": [], "stops": [], "track": [], "n": n, "stop": stop}
 
 
-def advance(state, cal, px, uni, n, stop, today=None):
+def advance(state, cal, px, uni, n, stop, today=None, cap=None):
     """Führt das Modell bis zum letzten abgeschlossenen Handelstag weiter (wie simulate in tracker/backtest.py). Ein Tag gilt
     als abgeschlossen, wenn er vor heute liegt. Den letzten Tag eines Monats entscheidet der Lauf erst, wenn klar ist, dass
     er der letzte war (nächster Kurs im neuen Monat oder heute schon ein neuer Monat). Ohne Stand wird nachgerechnet."""
@@ -338,13 +377,7 @@ def advance(state, cal, px, uni, n, stop, today=None):
             out = [it for it in st["items"] if it["sym"] not in top]
             for it in out:
                 st["cash"] += it["v"] * (1 - COST)
-            w = (st["cash"] + sum(it["v"] for it in keep)) / n
-            if _date(d).month == REBAL_MONTH:     # einmal im Jahr zurück auf gleiches Gewicht (ab 2 % Abweichung)
-                for it in keep:
-                    diff = w - it["v"]
-                    if abs(diff) > 0.02 * w:
-                        st["cash"] -= diff + abs(diff) * COST
-                        it["v"] = w
+            w = (st["cash"] + sum(it["v"] for it in keep)) / n      # keine regelmäßige Gleichgewichtung: Gewinner laufen weiter
             have = {it["sym"] for it in keep}
             new = []
             for s in top:
@@ -355,6 +388,11 @@ def advance(state, cal, px, uni, n, stop, today=None):
                 st["cash"] -= amt
                 new.append({"sym": s, "since": d, "entry": p, "hi": p, "v": amt * (1 - COST)})
             st["items"] = keep + new
+            if cap:                               # Obergrenze je Titel: Überschuss auf die Titel darunter verteilen
+                vals = {it["sym"]: it["v"] for it in st["items"]}
+                st["cash"], _ = enforce_cap(vals, st["cash"], cap / 100.0)
+                for it in st["items"]:
+                    it["v"] = vals[it["sym"]]
             st["stopped"] = []
             st["log"].append({"day": d, "in": [x["sym"] for x in new], "out": [x["sym"] for x in out], "keep": sorted(have), "top": top})
         st["track"].append([d, round(st["cash"] + sum(it["v"] for it in st["items"]), 5)])
@@ -465,8 +503,9 @@ def events(prev, words, names, st, first, today):
     by = lambda w: [k for k, x in words.items() if x[0] == w]
     if first:
         parts = ["%s: %s" % (w, nm(by(w))) for w in ("Verkaufen", "Kaufen", "Halten") if by(w)]
-        add("depot:jakob", "Depot Jakob", "neu", "Wachstums-Momentum ersetzt deine bisherigen Regeln. Zum Monatsende (%s): %s" % (
-            me_txt, "; ".join(parts) if parts else "nichts zu tun"))
+        head = "Regel angepasst: ohne Stopp, Gewinner laufen weiter bis zur Obergrenze je Titel" if str((prev or {}).get("rule") or "").startswith("wm") \
+            else "Wachstums-Momentum ersetzt deine bisherigen Regeln"
+        add("depot:jakob", "Depot Jakob", "neu", "%s. Zum Monatsende (%s): %s" % (head, me_txt, "; ".join(parts) if parts else "nichts zu tun"))
         return out
     for k, (w, why) in words.items():
         if w == "Verkaufen" and why == "stop":
@@ -582,11 +621,11 @@ def build(store, pf, base, push, fg=None, mfg=None, extra=None, live=None, today
     members, info = base.get("members") or {}, base.get("info") or {}
     cal, px = unpack(base, live)
     uni = universe(members)
-    n, stop = n_slots(ans), stop_pct(ans)
+    n, stop, cap = n_slots(ans), stop_pct(ans), cap_pct(ans)
     # Modell weiterführen (nur abgeschlossene Tage), dann die Lage heute mit aktuellen Kursen
     pst = prev.get("ideal") if prev.get("rule") == RULE_V else None
     state = dict(pst, items=[dict(x) for x in pst.get("model") or []]) if pst else None
-    st = advance(state, cal, px, uni, n, stop, today)
+    st = advance(state, cal, px, uni, n, stop, today, cap)
     F = snapshot(px, uni, len(cal) - 1)
     R = ranked(F)
     rank = {s: i + 1 for i, s in enumerate(R)}
@@ -625,7 +664,7 @@ def build(store, pf, base, push, fg=None, mfg=None, extra=None, live=None, today
     new = events(prev, words, names, st, first, day)
     keep = (day - datetime.timedelta(days=45)).isoformat()
     evs = (new + ([] if first else [e for e in prev.get("events") or [] if e["day"] >= keep]))[:80]
-    doc = {"updated": now_iso(), "rule": RULE_V, "n": n, "stop": stop, "asof": _iso(cal[-1]),
+    doc = {"updated": now_iso(), "rule": RULE_V, "n": n, "stop": stop, "cap": cap, "asof": _iso(cal[-1]),
            "list": sorted(rows.values(), key=lambda r: (r.get("rank") or 999, -(r.get("rs") or 0))),
            "ranked": [asset_key("stock", s) for s in R[:25]], "top": [asset_key("stock", s) for s in top],
            "ideal": {"items": [{"key": asset_key("stock", s), "rank": i + 1} for i, s in enumerate(top)],

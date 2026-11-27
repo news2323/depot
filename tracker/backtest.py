@@ -1,8 +1,9 @@
 """Backtest Wachstums-Momentum und bekannter Strategien von Hedgefonds und Wachstums-Investoren über 10 Jahre
 (Jakobs Wunsch vom 26. und 27.11.2026; ersetzt den Backtest der KI-Strategie vom 22.11.2026).
 
-Die Regel der App (best): die 6 stärksten Titel im Aufwärtstrend, monatlich geprüft, einmal im Jahr gleich gewichtet, Stopp
-25 % ab Hoch seit Kauf. 6 Titel und die jährliche Gleichgewichtung stammen aus Jakobs Quality-Growth-Vorlage (27.11.2026);
+Die Regel der App (best, Stand 27.11.2026 abends): die 6 stärksten Titel im Aufwärtstrend, monatlich geprüft, kein Stopp,
+keine regelmäßige Gleichgewichtung, Obergrenze 30 % je Titel zum Monatsende (Jakobs Wunsch: ohne Stopp, Stellschrauben
+einzeln und in Kombination geprüft). Die 6 Titel stammen aus Jakobs Quality-Growth-Vorlage (27.11.2026);
 deren Filter und Punkte wurden im selben Rahmen mit zusätzlichen SEC-Zahlen getestet (Experiment außerhalb des Repos,
 Ergebnis bleibt aus der letzten backtest.json stehen: Gruppe „vorlage“).
 
@@ -456,9 +457,11 @@ class Data:
 def simulate(D, strat, n_pos=N_POS, cost=COST, log=False):
     """strat: pick(D, i, keep) -> neue Titel (beste zuerst), keep(D, i, sym, info) -> bleibt, expo(D, i) -> Aktienanteil,
     stop: None oder (art, Prozent): 'fix' ab Einstieg, 'trail' ab Hoch seit Einstieg, täglich geprüft; n: Zahl der Titel;
-    rebal: 'month' (jeden Monat gleich gewichten) oder 'year' (nur zum Monatsende Dezember, wie screen.REBAL_MONTH)."""
+    rebal: 'month' (jeden Monat gleich gewichten), 'year' (nur zum Monatsende Dezember) oder 'never' (nie, wie screen.py);
+    cap: Obergrenze je Titel (Anteil 0..1) zum Monatsende, der Überschuss geht an die Titel darunter (wie screen.enforce_cap)."""
     months, mset, st = D.months, D.mset, D.stocks
     n_pos = strat.get("n") or n_pos
+    cap = strat.get("cap")
     pos, cash, nav, info, hold_log, trades = {}, 1.0, [1.0], {}, [], 0
     stop = strat.get("stop")
     for d in range(months[0], months[-1] + 1):
@@ -491,7 +494,8 @@ def simulate(D, strat, n_pos=N_POS, cost=COST, log=False):
                     trades += 1
             w = f / n_pos
             V = cash + sum(pos.values())
-            if strat.get("rebal", "month") == "month" or D.iso[d][5:7] == "%02d" % screen.REBAL_MONTH:
+            rb = strat.get("rebal", "month")
+            if rb == "month" or (rb == "year" and D.iso[d][5:7] == "12"):
                 for x in list(pos):
                     tgt = V * w
                     diff = tgt - pos[x]
@@ -506,6 +510,9 @@ def simulate(D, strat, n_pos=N_POS, cost=COST, log=False):
                     pos[x] = amt * (1 - cost)
                     info[x] = {"entry": st[x].p[d], "hi": st[x].p[d], "since": d}
                     trades += 1
+            if cap:
+                cash, k = screen.enforce_cap(pos, cash, cap, cost)
+                trades += k
             if log:
                 hold_log.append((D.iso[d], sorted(pos)))
         nav.append(cash + sum(pos.values()))
@@ -628,10 +635,12 @@ def growth_momentum(stop=None, markets=True, buffer=1, filt=trend, fkey="trend",
     return sm
 
 
-def app_rule(stop=True, **kw):
-    """Die Regel der App (screen.py): 6 Titel, einmal im Jahr gleich gewichten, Stopp 25 %."""
+def app_rule(stop=False, cap=screen.CAP_PCT, rebal="never", **kw):
+    """Die Regel der App (screen.py): 6 Titel, kein Stopp, keine regelmäßige Gleichgewichtung, Obergrenze 30 % je Titel."""
     kw.setdefault("n", screen.N_POS)
-    return growth_momentum(stop=("trail", screen.STOP_PCT) if stop else None, rebal="year", **kw)
+    sm = growth_momentum(stop=("trail", screen.STOP_PCT) if stop else None, rebal=rebal, **kw)
+    sm["cap"] = cap / 100.0 if cap else None
+    return sm
 
 
 def _tt(D, i, s, f):
@@ -687,12 +696,12 @@ def _mv_keep(D, i, s, f):
 
 # id: Name, Kurzname, Beschreibung, Bauplan. calm und win: Wachstums-Momentum (die Regel der App)
 STRATS = {
-    "best": ("Wachstums-Momentum mit Quality-Growth-Bausteinen", "Deine Regel", "Die 6 stärksten Titel im Aufwärtstrend (relative Stärke wie IBD: 3 Monate 40 %, 6/9/12 Monate je 20 %), monatlich geprüft, einmal im Jahr gleich gewichtet; Stopp 25 % ab Hoch seit Kauf",
+    "best": ("Deine Regel: Wachstums-Momentum, 6 Titel, ohne Stopp", "Deine Regel", "Die 6 stärksten Titel im Aufwärtstrend (relative Stärke wie IBD: 3 Monate 40 %, 6/9/12 Monate je 20 %), monatlich geprüft, Gewinner laufen weiter, höchstens 30 % je Titel, kein Stopp",
              lambda: app_rule()),
-    "best_free": ("Dieselbe Regel ohne Stopp", "Ohne Stopp", "6 Titel, einmal im Jahr gleich gewichtet, kein Stopp", lambda: app_rule(stop=False)),
-    "calm": ("Wachstums-Momentum (7 Titel, monatlich)", "7 Titel, monatlich", "Die Regel vom 26.11.: die 7 stärksten im Aufwärtstrend, jeden Monat gleich gewichtet, Stopp 25 %",
+    "best_stop": ("Dieselbe Regel mit Stopp 25 %", "Mit Stopp", "Wie deine Regel, dazu Verkauf bei 25 % unter dem Hoch seit Kauf", lambda: app_rule(stop=True)),
+    "prev27": ("Regel vom 27.11. mittags", "6 Titel, jährlich, Stopp", "6 Titel, einmal im Jahr gleich gewichtet, Stopp 25 %", lambda: app_rule(stop=True, cap=None, rebal="year")),
+    "calm": ("Regel vom 26.11.", "7 Titel, monatlich, Stopp", "Die 7 stärksten im Aufwärtstrend, jeden Monat gleich gewichtet, Stopp 25 %",
              lambda: growth_momentum(stop=("trail", screen.STOP_PCT))),
-    "win": ("Wachstums-Momentum (7 Titel, monatlich) ohne Stopp", "7 Titel ohne Stopp", "Dieselbe ohne Stopp", lambda: growth_momentum()),
     "mom": ("Momentum 12-1", None, "Rendite 12 Monate ohne den letzten, die 7 stärksten. Jegadeesh/Titman 1993, Grundlage der Momentum-Fonds von AQR",
             lambda: make("mom", lambda D, i, s, f: f["r12_1"])),
     "dual": ("Dual Momentum", None, "Gary Antonacci 2014: die stärksten Titel, aber nur, wenn der S&P 500 in 12 Monaten besser lief als kurze Staatsanleihen",
@@ -711,10 +720,19 @@ STRATS = {
     "gm": ("Wachstum mit Momentum", None, "Nachbau des Stils von Tiger Global und Coatue: Umsatzwachstum, Beschleunigung und Kursstärke", growth_mom),
     "pead": ("Umsatz-Überraschung", None, "Bernard/Thomas 1989: Drift nach überraschend gutem Quartal, hier mit Umsatz", pead),
 }
-PROBES = (("7 statt 6 Titel", "weniger Rendite, Rückgang etwa gleich", lambda: app_rule(n=7), COST),
-          ("8 Titel", "noch weniger Rendite", lambda: app_rule(n=8), COST),
-          ("Jeden Monat gleich gewichten", "in jeder Variante schlechter als einmal im Jahr", lambda: growth_momentum(stop=("trail", screen.STOP_PCT), n=screen.N_POS), COST),
-          ("Kosten 0,3 % statt 0,1 % je Kauf und Verkauf", "hält", lambda: app_rule(), 0.003),
+PROBES = (("4 Titel", "mehr Rendite, aber bis zu 50 % in einem Titel", lambda: app_rule(n=4), COST),
+          ("5 Titel", "", lambda: app_rule(n=5), COST),
+          ("7 Titel", "", lambda: app_rule(n=7), COST),
+          ("8 Titel", "", lambda: app_rule(n=8), COST),
+          ("Obergrenze 15 % je Titel", "zu eng: schon 6 gleiche Teile sind 16,7 %", lambda: app_rule(cap=15), COST),
+          ("Obergrenze 20 % je Titel", "", lambda: app_rule(cap=20), COST),
+          ("Obergrenze 25 % je Titel", "", lambda: app_rule(cap=25), COST),
+          ("Obergrenze 35 % je Titel", "", lambda: app_rule(cap=35), COST),
+          ("Ohne Obergrenze", "größte Position bis 55 %", lambda: app_rule(cap=None), COST),
+          ("Einmal im Jahr gleich gewichten", "", lambda: app_rule(rebal="year"), COST),
+          ("Jeden Monat gleich gewichten", "", lambda: app_rule(rebal="month"), COST),
+          ("Halten bis Rang 9 statt 6", "weniger Handel, tieferer Rückgang", lambda: app_rule(buffer=1.5), COST),
+          ("Kosten 0,3 % statt 0,1 % je Kauf und Verkauf", "", lambda: app_rule(), 0.003),
           ("Ohne Länder-ETFs der Schwellenländer", "kaum Unterschied: Sie kamen selten zum Zug", lambda: app_rule(markets=False), COST),
           ("Marktfilter: halb raus unter der 200-Tage-Linie des S&P 500", "kostet Rendite", lambda: app_rule(expo=sp200(0.5)), COST))
 
@@ -764,7 +782,7 @@ def run(prev=None):
     for key, (name, short, desc, mk) in STRATS.items():
         r = multi(D, mk)
         res[key] = r
-        out.append({"id": key, "name": name, "short": short or name, "desc": desc, "group": "neu" if key in ("best", "best_free", "calm", "win") else "bekannt",
+        out.append({"id": key, "name": name, "short": short or name, "desc": desc, "group": "neu" if key in ("best", "best_stop", "prev27", "calm") else "bekannt",
                     **{k: r[k] for k in ("cagr", "min", "max", "dd", "worst_dd", "train", "test", "trades", "years")}})
         _log("Backtest: Strategie %d von %d (%.0f s)" % (len(out), len(STRATS), time.time() - t0))
     for key, name in (("QQQ", "Nasdaq-100"), ("SPY", "S&P 500")):
@@ -799,7 +817,7 @@ def run(prev=None):
     ds = res["best"]["res0"]["ds"]
     idx = list(range(0, len(ds), 5))      # jeder 5. Handelstag
     curves = {"d": [ds[i] for i in idx]}
-    for k in ("best", "best_free", "calm", "QQQ", "SPY"):
+    for k in ("best", "best_stop", "prev27", "QQQ", "SPY"):
         nav = res[k]["res0"]["nav"]
         curves[k] = [round(nav[i] / nav[0], 4) for i in idx]
     pc = (prev or {}).get("curves") or {}
@@ -807,7 +825,7 @@ def run(prev=None):
         if pc.get(k) and pc.get("d") == curves["d"]:
             curves[k] = pc[k]
     S = {x["id"]: x for x in out}
-    c, w = S["best"], S["best_free"]
+    c, w = S["best"], S["best_stop"]
     best = max((x for x in out if x["group"] == "bekannt"), key=lambda x: x["cagr"])
     top_sec = sec.most_common(1)[0] if sec else ("–", 0)
     doc = {"v": 2, "rule": screen.RULE_V, "made": datetime.date.today().isoformat(), "years": YEARS, "offsets": len(OFFS),
@@ -818,25 +836,26 @@ def run(prev=None):
            "held": [[s, m, _nice(((D.sec.get(s) or {}).get("sic") or [None, None, MARKETS.get(s, s)])[2])] for s, m in cnt.most_common(12)],
            "n_titles": len(cnt), "market_share": round(mk_n / max(1, sum(cnt.values())) * 100, 1), "growth_share": round(gr_n / max(1, all_n) * 100, 1),
            "findings": [
-               {"t": "Am meisten: deine Regel", "x": "6 Titel, einmal im Jahr gleich gewichtet, mit Stopp: %s %% pro Jahr bei %s %% größtem Rückgang. Ohne Stopp %s %% bei %s %%." % (_de(c["cagr"]), _de(c["dd"], 0), _de(w["cagr"]), _de(w["dd"], 0))}]
-           + ([{"t": "Quality-Growth-Vorlage", "x": "Wie eingefügt %s %% pro Jahr, ohne Warten auf Rücksetzer %s %%. Übernommen wurden 6 Titel und die Gleichgewichtung einmal im Jahr: Beides war in jeder Variante besser." % (
+               {"t": "Deine Regel", "x": "6 Titel ohne Stopp, Gewinner laufen weiter, höchstens 30 %% je Titel: %s %% pro Jahr bei %s %% größtem Rückgang. Mit Stopp 25 %% wären es %s %% bei %s %%." % (_de(c["cagr"]), _de(c["dd"], 0), _de(w["cagr"]), _de(w["dd"], 0))}]
+           + ([{"t": "Quality-Growth-Vorlage", "x": "Wie eingefügt %s %% pro Jahr, ohne Warten auf Rücksetzer %s %%. Übernommen wurden 6 Titel. Gleich gewichten einmal im Jahr war besser als jeden Monat, gar nicht gleich gewichten noch etwas besser." % (
                _de(S["qg"]["cagr"]), _de(S["qg_any"]["cagr"]))}] if "qg" in S and "qg_any" in S else [])
+           + list((prev or {}).get("notes") or [])
            + [{"t": "Gegen bekannte Strategien", "x": "Beste bekannte Strategie: %s mit %s %%. Nasdaq-100 %s %%, S&P 500 %s %%%s." % (
                best["name"], _de(best["cagr"]), _de(S["QQQ"]["cagr"]), _de(S["SPY"]["cagr"]), ", deine bisherigen Regeln auf derselben Auswahl %s %%" % _de(S["jakob"]["cagr"]) if "jakob" in S else "")},
               {"t": "Breit statt ein Sektor", "x": "%d verschiedene Titel in %d Jahren; am häufigsten %s (%s %% der Monate)." % (len(cnt), YEARS, top_sec[0], _de(top_sec[1] / tot * 100, 0))}],
-           "limits": ["Je nach Stichtag im Monat liegt die Rendite mit Stopp zwischen %s und %s %% pro Jahr, der Rückgang reicht bis %s %%." % (_de(c["min"]), _de(c["max"]), _de(c["worst_dd"], 0)),
+           "limits": ["Je nach Stichtag im Monat liegt die Rendite zwischen %s und %s %% pro Jahr, der Rückgang reicht bis %s %%." % (_de(c["min"]), _de(c["max"]), _de(c["worst_dd"], 0)),
                       "Etwa %d Käufe und Verkäufe im Jahr; Gewinne fallen fast jedes Jahr an, Steuern sind nicht eingerechnet." % round(c["trades"] / YEARS),
-                      "Schwächste volle Jahre: %s." % ", ".join("%s %s %%" % (y, _de(v, 0)) for y, v in sorted(list(c["years"].items())[1:-1], key=lambda x: x[1])[:2]),
+                      "Schwächste volle Jahre: %s." % ", ".join("%s %s%s %%" % (y, "+" if v > 0 else "", _de(v, 0)) for y, v in sorted(list(c["years"].items())[1:-1], key=lambda x: x[1])[:2]),
                       "Für %d von %d Kürzeln gibt es keine Kurse mehr (meist nach Übernahmen); das kann das Ergebnis leicht schönen." % (D.missing, len(D.spans)),
                       "Ein Filter nach Umsatzwachstum senkte die Rendite: Die stärksten Aktien sind ohnehin meist schnell wachsende Firmen."],
-           "sources": (prev or {}).get("sources") or []}
+           "sources": (prev or {}).get("sources") or [], "notes": (prev or {}).get("notes") or []}
     _log("Backtest: fertig in %.0f s" % (time.time() - t0))
     return doc
 
 
 def quick():
     D = Data()
-    ev = evaluate(D, simulate(D, app_rule()))
+    ev = evaluate(D, simulate(D, app_rule()))  # Stichtag Monatsende
     _log("Regel der App, Stichtag Monatsende: %.1f %% pro Jahr, Rückgang %.1f %% (%d Titel)" % (ev["cagr"], ev["dd"], len(D.stocks)))
 
 
