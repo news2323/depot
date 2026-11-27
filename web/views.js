@@ -730,7 +730,7 @@ function playCard() {
     <p class="hint">Gelb heißt: trifft gerade zu. Keine Anlageberatung.</p>`, '', 'span12');
 }
 // Kandidaten: die stärksten Titel im Aufwärtstrend (screen.json → list), dazu Depot Jakob und Watchlist
-const idxTxt = r => r.market ? 'Schwellenland' : r.idx === 'sp,ndx' ? 'S&P 500 · Nasdaq-100' : r.idx === 'ndx' ? 'Nasdaq-100' : r.idx === 'sp' ? 'S&P 500' : 'nicht in der Auswahl';
+const idxTxt = r => r.market ? 'Schwellenland' : r.idx === 'sp,ndx' ? 'S&P 500 · Nasdaq-100' : r.idx === 'ndx' ? 'Nasdaq-100' : r.idx === 'sp' ? 'S&P 500' : r.idx === 'welt' ? (r.land || 'Ausland') + ' · MSCI ACWI' : 'nicht in der Auswahl';
 const trendTxt = r => r.trend ? 'Aufwärtstrend' : r.p200 != null && r.p200 < 0 ? 'unter der 200-Tage-Linie' : '50 unter 200';
 function candCard() {
   const sc = S.screen || {}, all = sc.rule === RULE_V ? sc.list || [] : [];
@@ -748,14 +748,14 @@ function candCard() {
     return `<tr data-act="scx" data-key="${esc(r.key)}" class="${open ? 'open' : ''}"><td>${rsBadge(r)}</td><td>${nameCell(r.key, r.market ? 'Länder-ETF' : r.sector || '', ruleTag(r.key))} ${tagOf(r.key)}</td>
       <td class="r num">${r.rank || '–'}</td><td class="r num ${sign(r.r3)}">${r.r3 == null ? '–' : pctS(r.r3, 0)}</td><td class="r num hm ${sign(r.r12)}">${r.r12 == null ? '–' : pctS(r.r12, 0)}</td>
       <td class="r num hm">${r.from_high == null ? '–' : pctS(r.from_high, 0)}</td><td class="r num hm">${r.rev_g == null ? '–' : pctS(r.rev_g, 0)}</td><td class="r">${chgA(r.chg5)}</td></tr>
-      ${open ? `<tr class="xrow"><td colspan="8"><div class="cx"><div><p class="sh" style="margin-top:0">Rendite mit Dividenden (Gewicht in der Stärke)</p><div class="fbars wide">${bar('3 Monate (40 %)', r.r3, mx)}${bar('6 Monate (20 %)', r.r6, mx)}${bar('9 Monate (20 %)', r.r9, mx)}${bar('12 Monate (20 %)', r.r12, mx)}</div>
+      ${open ? `<tr class="xrow"><td colspan="8"><div class="cx"><div><p class="sh" style="margin-top:0">Rendite mit Dividenden${r.cur ? ' in Dollar' : ''} (Gewicht in der Stärke)</p><div class="fbars wide">${bar('3 Monate (40 %)', r.r3, mx)}${bar('6 Monate (20 %)', r.r6, mx)}${bar('9 Monate (20 %)', r.r9, mx)}${bar('12 Monate (20 %)', r.r12, mx)}</div>
         <ul class="dots" style="margin-top:10px"><li>${esc(idxTxt(r))}${r.industry ? ' · ' + esc(r.industry) : ''}</li>${r.rev_g != null ? `<li>Umsatz ${pctS(r.rev_g, 0)} zum Vorjahr${r.est90 != null ? `, Gewinnschätzung ${pctS(r.est90, 0)} in 90 Tagen` : ''}</li>` : ''}${r.earnings ? `<li>Quartalszahlen ${dateDe(r.earnings)}</li>` : ''}</ul></div>
         <div><p class="sh" style="margin-top:0">Aufwärtstrend</p><div class="rules">${[[r.p200 > 0, 'Kurs über der 200-Tage-Linie', pctS(r.p200, 0)], [r.p50 < r.p200, '50-Tage-Linie über der 200-Tage-Linie', ''], [r.rank && r.rank <= ib.n, `Unter den ${ib.n} stärksten im Aufwärtstrend`, r.rank ? 'Rang ' + r.rank : '']].map(([ok, t, x]) => `<div class="rule">${stIcon(ok ? 'ok' : 'bad')}<div><b>${t}</b>${x ? `<div class="x">${x}</div>` : ''}</div></div>`).join('')}</div>
         <div class="btnrow" style="margin-top:12px">${tracked ? `<button class="btn sm" data-act="open" data-key="${esc(r.key)}">Details</button>` : ''}${watch.has(r.key) || held.has(r.key) ? '' : `<button class="btn sm ghost" data-act="scwatch" data-key="${esc(r.key)}">Auf die Watchlist</button>`}</div></div></div></td></tr>` : ''}`;
   }).join('');
   const b = sc.breadth || {}, m = sc.members || {};
   const empty = !xs.length ? `<p class="empty">${fl === 'Länder' ? 'Kein Länder-ETF unter den stärksten Titeln im Aufwärtstrend.' : fl === 'Watchlist' ? 'Keine Aktie deiner Watchlist in der Auswahl.' : 'Keine Titel in dieser Auswahl.'}</p>` : '';
-  return card('Kandidaten', `Die stärksten im Aufwärtstrend aus ${m.sp || 500} Aktien des S&P 500, ${m.ndx || 100} des Nasdaq-100 und ${m.markets || 18} Länder-ETFs · ${b.trend || '–'} von ${b.n || '–'} im Aufwärtstrend · ${stampDe(sc.updated)}`,
+  return card('Kandidaten', `Die stärksten im Aufwärtstrend aus ${m.sp || 500} Aktien des S&P 500, ${m.ndx || 100} des Nasdaq-100, ${m.welt != null ? m.welt + ' aus Europa, China und Hongkong' : 'Europa, China und Hongkong'} und ${m.markets || 18} Länder-ETFs · ${b.trend || '–'} von ${b.n || '–'} im Aufwärtstrend · ${stampDe(sc.updated)}`,
     `<div class="tblwrap"><table class="tbl cand"><thead><tr><th>Stärke</th><th>Titel</th><th class="r">Rang</th><th class="r">3 Mon.</th><th class="r hm">12 Mon.</th><th class="r hm">vom Hoch</th><th class="r hm">Umsatz</th><th class="r">5 Tage</th></tr></thead><tbody>${rows}</tbody></table></div>${empty}
     ${more ? `<div class="btnrow"><button class="btn sm ghost" data-act="scall">Alle zeigen</button></div>` : ''}
     <p class="hint">Stärke 1 bis 99: Rang der relativen Stärke unter allen Titeln der Auswahl, wie das RS-Rating von IBD. Gerechnet aus der Rendite mit Dividenden: 3 Monate zählen 40 %, 6, 9 und 12 Monate je 20 %. Rang: Platz unter den Titeln im Aufwärtstrend (Kurs über der 200-Tage-Linie, 50-Tage-Linie darüber); die ersten ${ib.n} bilden das Ideal-Depot. Umsatz: Wachstum zum Vorjahr, nur zur Info, die Regel braucht ihn nicht. Zeile antippen für Details. Eine Auswahl, keine Kaufempfehlung. Keine Anlageberatung.</p>`,
@@ -763,7 +763,7 @@ function candCard() {
 }
 /* ---------------------------------------------------------------- Backtest und Recherche (Jakobs Wunsch vom 26. und 27.11.2026)
    backtest.json (tracker/backtest.py): bekannte Strategien von Hedgefonds und Wachstums-Investoren, nachgebaut und über 10 Jahre
-   getestet, mit S&P 500 und Nasdaq-100 so, wie sie am jeweiligen Tag zusammengesetzt waren. Ansichten S.btv. Diagramm #ch-bt. */
+   getestet, mit S&P 500, Nasdaq-100 und MSCI ACWI (Europa, China, Hongkong) so, wie sie damals zusammengesetzt waren. Ansichten S.btv. Diagramm #ch-bt. */
 const pc = (v, d = 0) => v == null ? '–' : pctS(v, d);
 const btMain = b => (b.strategies || []).find(x => x.id === (stopPct() ? 'best_stop' : 'best')) || (b.strategies || [])[0];
 const GRP = {vorlage: 'Vorlage', bisher: 'bisher', index: 'Index'};
@@ -821,7 +821,7 @@ function modelCard() {
   return `<section class="card span12"><div class="head"><div><h2>Ideal-Depot nachgerechnet</h2><p class="sub">Die Regel Tag für Tag seit ${dateDe(dayIso(tr[0][0]))}, mit der heutigen Auswahl</p></div></div>
     <div class="sx-kpis">${kpi('Ideal-Depot', pctS(r, 0), 'seit ' + dateDe(dayIso(tr[0][0])), sign(r))}${sp ? kpi('S&P 500', pctS((sp[1] - 1) * 100, 0), 'ohne Dividenden', sign(sp[1] - 1)) : ''}${nd ? kpi('Nasdaq-100', pctS((nd[1] - 1) * 100, 0), 'ohne Dividenden', sign(nd[1] - 1)) : ''}${kpi('Größter Rückgang', pctS(dd, 0), 'im Zeitraum')}${kpi('Stopps', String((m.stops || []).length), 'ausgelöst')}</div>
     <div class="chart" id="ch-model"></div><div id="lg-model"></div>
-    <p class="hint">Mit den heutigen Mitgliedern von S&P 500 und Nasdaq-100 zurückgerechnet: Wer heute dazugehört, lief oft vorher gut. Das schönt diese Zahl; ehrlicher ist der Backtest darunter mit der damaligen Zusammensetzung. Ab heute läuft das Modell jeden Tag weiter. Keine Anlageberatung.</p></section>`;
+    <p class="hint">Mit der heutigen Auswahl zurückgerechnet: Wer heute dazugehört, lief oft vorher gut. Das schönt diese Zahl; ehrlicher ist der Backtest darunter mit der damaligen Zusammensetzung. Ab heute läuft das Modell jeden Tag weiter. Keine Anlageberatung.</p></section>`;
 }
 function drawModel(el) {
   const tr = ((S.screen || {}).ideal || {}).track || [];
@@ -839,7 +839,7 @@ function btCard() {
   if (b === undefined) { setTimeout(loadBacktest, 0); return card('Backtest: 10 Jahre', 'Wird geladen …', '<p class="empty">Lädt …</p>', '', 'span12'); }
   if (!b || b.rule !== RULE_V) return card('Backtest: 10 Jahre', 'Welche Strategie hätte am meisten gebracht?', '<p class="empty">Noch kein Backtest für Wachstums-Momentum gerechnet.</p>', '', 'span12');
   const v = BTV.includes(S.btv) ? S.btv : 'Ergebnis', fn = {Ergebnis: btResult, Strategien: btStrats, Gegenproben: btProbes, Jahre: btYears, Streuung: btMix, Quellen: btSources}[v];
-  return card('Backtest: 10 Jahre', `${dateDe(b.period.start)} bis ${dateDe(b.period.end)} · S&P 500 und Nasdaq-100 so, wie sie am jeweiligen Tag zusammengesetzt waren, dazu ${b.universe.markets} Länder-ETFs · nur Daten von damals`,
+  return card('Backtest: 10 Jahre', `${dateDe(b.period.start)} bis ${dateDe(b.period.end)} · S&P 500, Nasdaq-100 und die Aktien aus Europa, China und Hongkong im MSCI ACWI so, wie sie damals zusammengesetzt waren, dazu ${b.universe.markets} Länder-ETFs · nur Daten von damals`,
     fn(b) + `<p class="hint">Ohne Steuern. Vergangene Renditen sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p>`, seg('btv', BTV, v), 'span12');
 }
 /* ---------------------------------------------------------------- Strategie, Ansicht „Heute“ (Aufbau vom 24.11.2026, Jakobs Wunsch)
@@ -848,7 +848,7 @@ function btCard() {
 function stratState(ib) {
   const b = ib.breadth || {};
   return ib.items.length < ib.n ? ['warn', 'Teilweise Reserve', `Nur ${ib.items.length} Titel sind im Aufwärtstrend vorn. Freie Plätze bleiben Reserve, bis neue Titel in den Trend kommen.`]
-    : ['good', 'Wachstums-Momentum', `${b.trend ?? '–'} von ${b.n ?? '–'} Titeln aus S&P 500, Nasdaq-100 und den Schwellenländern sind im Aufwärtstrend. Gehalten werden die ${ib.n} stärksten; getauscht wird zum Monatsende, Gewinner laufen weiter${capPct() ? ` bis ${capPct()} % je Titel` : ''}${stopPct() ? `, sofort verkauft bei −${stopPct()} % vom Hoch seit Kauf` : ''}.`];
+    : ['good', 'Wachstums-Momentum', `${b.trend ?? '–'} von ${b.n ?? '–'} Titeln aus S&P 500, Nasdaq-100, Europa, China, Hongkong und den Länder-ETFs sind im Aufwärtstrend. Gehalten werden die ${ib.n} stärksten; getauscht wird zum Monatsende, Gewinner laufen weiter${capPct() ? ` bis ${capPct()} % je Titel` : ''}${stopPct() ? `, sofort verkauft bei −${stopPct()} % vom Hoch seit Kauf` : ''}.`];
 }
 // Prüfungen „Hat sich Grundlegendes geändert?“: Stopp, Aufwärtstrend, Rang, neue Titel, Quartalszahlen
 function stratChecks(ib) {
@@ -861,7 +861,7 @@ function stratChecks(ib) {
     : near.length ? ['warn', 'Nahe am Stopp', `${near.map(k => `${nm(k)} ${pctS(so[k].dd, 0)}`).join(', ')} vom Hoch seit Kauf. Verkauft wird ab −${stopPct()} %.`]
     : ['ok', 'Kein Stopp in Sicht', worst ? `Am weitesten unter dem Hoch seit Kauf: ${nm(worst)} ${pctS(so[worst].dd, 0)}. Verkauft wird ab −${stopPct()} %.` : 'Noch keine Kurse seit dem Kauf.']);
   const outside = keys.filter(k => scrRow(k) && !sr(k).member && !hit.includes(k)), broke = keys.filter(k => sr(k).member && sr(k).trend === false && !hit.includes(k));
-  if (outside.length) chk.push(['bad', 'Nicht in der Auswahl', `${list(outside)}: weder im S&P 500 noch im Nasdaq-100. Nach deiner Regel zum Monatsende (${meTxt()}) verkaufen.`]);
+  if (outside.length) chk.push(['bad', 'Nicht in der Auswahl', `${list(outside)}: nicht in der Auswahl (S&P 500, Nasdaq-100, Europa, China, Hongkong). Nach deiner Regel zum Monatsende (${meTxt()}) verkaufen.`]);
   chk.push(broke.length ? ['bad', 'Aufwärtstrend gebrochen', `${list(broke)}: Kurs unter der 200-Tage-Linie oder 50-Tage-Linie unter der 200-Tage-Linie. Nach deiner Regel zum Monatsende (${meTxt()}) verkaufen.`]
     : ['ok', 'Aufwärtstrend hält', `Alle Titel aus der Auswahl liegen über ihrer 200-Tage-Linie, die 50-Tage-Linie darüber.`]);
   const inIb = new Set(ib.items.map(x => x.key)), outR = keys.filter(k => sr(k).trend && sr(k).member && !inIb.has(k) && !hit.includes(k));
@@ -1033,7 +1033,7 @@ function ruleFlowCard(key) {
       <div class="sx-side"><h3>An jedem Tag sofort</h3><div class="rf-daily">${daily.map(([t, s, o]) => `<div class="rf-d"><div><b>${t}</b><small>${s}</small></div>${o}</div>`).join('')}</div>
         <h3 style="margin-top:22px">Prüfungen${r ? ': ' + esc(shortName(key)) : ''}</h3>${checks}
         <h3 style="margin-top:22px">Stärke: so wird gerechnet</h3><p class="rf-hint" style="margin:0">Rendite mit Dividenden, gewichtet wie bei IBD. Daraus der Rang unter allen ${b.n || 'rund 530'} Titeln: 99 heißt stärker als 99 % der Auswahl.</p>${formula}
-        <p class="rf-hint" style="margin-top:14px">Auswahl: alle Aktien aus S&P 500 und Nasdaq-100, dazu 18 Länder-ETFs der Schwellenländer. Aus deiner Quality-Growth-Vorlage übernommen: ${ib.n} Titel. ${stopPct() ? '' : 'Kein Stopp (deine Wahl). '}Gewinner laufen weiter, keine regelmäßige Gleichgewichtung. Nicht übernommen, weil es im Backtest viel Rendite kostete: ihre Filter auf Wachstum, Qualität und Bewertung, Punkte statt Kursstärke und das Warten auf Rücksetzer. Keine Ausnahmen bei Angst oder Crash, kein Marktfilter.</p></div></div></section>`;
+        <p class="rf-hint" style="margin-top:14px">Auswahl: alle Aktien aus S&P 500 und Nasdaq-100, dazu die großen Aktien aus Europa, China und Hongkong (MSCI ACWI) und 18 Länder-ETFs der Schwellenländer; Rangfolge in Dollar. Weltweit (auch Japan, Kanada, Australien, Schwellenländer) war im Backtest schlechter. Aus deiner Quality-Growth-Vorlage übernommen: ${ib.n} Titel. ${stopPct() ? '' : 'Kein Stopp (deine Wahl). '}Gewinner laufen weiter, keine regelmäßige Gleichgewichtung. Nicht übernommen, weil es im Backtest viel Rendite kostete: ihre Filter auf Wachstum, Qualität und Bewertung, Punkte statt Kursstärke und das Warten auf Rücksetzer. Keine Ausnahmen bei Angst oder Crash, kein Marktfilter.</p></div></div></section>`;
 }
 const ruleKeys = () => { const ib = idealBook() || {items: [], model: {}}; return [...new Set([...Object.keys(jakobHeld()), ...ib.items.map(x => x.key), ...((ib.model || {}).model || []).map(x => x.key)])].filter(k => (D(k).hist || {}).d); };
 function ruleExCard(key) {
@@ -1096,12 +1096,12 @@ function drawRuleChart(el, sim) {
 function howCard() {
   const ib = idealBook() || {}, mdd = +ansOf('max_dd') || 35, stop = stopPct();
   const pts = ['Nur das Depot Jakob. Hauptdepot und Fenja zählen nicht.',
-    'Auswahl: alle Aktien aus S&P 500 und Nasdaq-100 (bei zwei Aktiengattungen nur eine), dazu 18 Länder-ETFs der Schwellenländer als Wachstumsmärkte.',
+    'Auswahl: alle Aktien aus S&P 500 und Nasdaq-100 (bei zwei Aktiengattungen nur eine), dazu die großen Aktien aus Europa, China und Hongkong im MSCI ACWI (über deutsche Broker handelbar) und 18 Länder-ETFs der Schwellenländer. Kurse in Dollar umgerechnet, damit ein Plus nur aus der Heimatwährung nicht als Stärke zählt.',
     'Stärke wie bei IBD: Rendite mit Dividenden der letzten 3 Monate zu 40 %, der letzten 6, 9 und 12 Monate zu je 20 %.',
     'Aufwärtstrend wie bei Minervini: Kurs über der 200-Tage-Linie, die 50-Tage-Linie über der 200-Tage-Linie.',
     `Zum Monatsende: die ${ib.n || 6} stärksten Titel im Aufwärtstrend kaufen bzw. halten. Was nicht mehr dazugehört, wird verkauft. Neue Titel bekommen den gleichen Betrag, die übrigen laufen weiter (keine regelmäßige Gleichgewichtung; im Backtest besser als jährlich oder monatlich). Weniger Titel im Trend: der Rest bleibt Reserve.`,
     capPct() ? `Obergrenze ${capPct()} % je Titel: Liegt ein Titel zum Monatsende darüber, wird der Teil darüber verkauft und auf die übrigen verteilt. 15 % wäre zu eng (schon 6 gleiche Teile sind 16,7 %) und kostete im Backtest gut 6 Punkte pro Jahr.` : 'Keine Obergrenze je Titel (deine Antwort): Im Backtest wuchs ein Titel so bis 55 % des Depots.',
-    stop ? `Stopp: Schließt ein Titel ${stop} % unter seinem Hoch seit dem Kauf, wird er sofort verkauft. Der Platz bleibt bis zum Monatsende frei; danach darf der Titel wieder rein, wenn er vorn liegt.` : 'Kein Stopp (deine Wahl): verkauft wird nur zum Monatsende. Im Backtest 33,0 % pro Jahr bei −48 % größtem Rückgang, mit Stopp 29,5 % bei −41 %.',
+    stop ? `Stopp: Schließt ein Titel ${stop} % unter seinem Hoch seit dem Kauf, wird er sofort verkauft. Der Platz bleibt bis zum Monatsende frei; danach darf der Titel wieder rein, wenn er vorn liegt.` : 'Kein Stopp (deine Wahl): verkauft wird nur zum Monatsende. Im Backtest 34,8 % pro Jahr bei −52 % größtem Rückgang, mit Stopp 31,8 % bei −49 %.',
     `Aktienanteil nach deiner Grenze für Rückgänge (−${mdd} %): ${nf((ib.share || 1) * 100, 0)} %. Betrag: Startbetrag ${eur(+ansOf('capital') || 5000, 0)} oder Depot Jakob, das Größere.`,
     'Aus der Quality-Growth-Vorlage nicht übernommen: Filter auf Wachstum, Qualität und Bewertung, Punkte als Rangfolge, Kauf erst nach Rücksetzern, kein Stopp. Im Backtest brachte die Vorlage so 1,6 % pro Jahr.',
     'Keine Ausnahmen bei Angst oder Crash, kein Marktfilter, keine Grenze je Branche: Das alles kostete im Backtest Rendite.'];
@@ -1251,7 +1251,7 @@ function momCard(key) {
       <div class="rules" style="margin-top:10px">${row(r.p200 > 0, 'Kurs über der 200-Tage-Linie', pctS(r.p200, 0) + ' zur Linie')}${row(r.p50 < r.p200, '50-Tage-Linie über der 200-Tage-Linie', '')}
       ${row(!!(r.rank && r.rank <= ib.n), `Unter den ${ib.n} stärksten im Aufwärtstrend`, r.rank ? `Rang ${r.rank}` : 'ohne Aufwärtstrend kein Rang')}
       ${so && so.stop ? row(!so.hit, `Stopp bei −${so.stop} % nicht erreicht`, `${pctS(so.dd, 0)} zum Hoch seit Kauf`) : ''}</div>
-      <p class="tiny muted" style="margin:10px 0 0">Rendite mit Dividenden. Stärke: Rang unter allen Titeln aus S&P 500, Nasdaq-100 und den Länder-ETFs, wie das RS-Rating von IBD. Keine Anlageberatung.</p>`);
+      <p class="tiny muted" style="margin:10px 0 0">Rendite mit Dividenden. Stärke: Rang unter allen Titeln der Auswahl (S&P 500, Nasdaq-100, Europa, China, Hongkong, Länder-ETFs) in Dollar, wie das RS-Rating von IBD. Keine Anlageberatung.</p>`);
   }
   const m = momOf(key);
   if (!m || !m.checks) return '';
@@ -1263,7 +1263,7 @@ function momCard(key) {
     ${row(ck.rising, '200-Tage-Linie steigt', 'gegenüber vor einem Monat')}
     ${row(ck.high, 'Nahe am Jahreshoch', `${m.from_high ? pctS(m.from_high, 0) + ' zum Hoch der letzten 12 Monate' : 'am Hoch der letzten 12 Monate'}, erlaubt bis −15 %`)}
     ${row(ck.rel, m.bench ? 'Stärker als ' + bn : 'Kurs im Plus', m.rel6 != null ? `${pctS(m.rel6, 0)} gegenüber ${bn} in 6 Monaten` : `${pctS(m.r6, 0)} in 6 Monaten`)}</div>
-    <p class="tiny muted" style="margin:10px 0 0">Signal an, wenn alle vier zutreffen. Gängige Trendfolge-Regel, kein Blick in die Zukunft. Gehört nicht zu deiner Strategie (die gilt für Aktien aus S&P 500 und Nasdaq-100). Keine Anlageberatung.</p>`);
+    <p class="tiny muted" style="margin:10px 0 0">Signal an, wenn alle vier zutreffen. Gängige Trendfolge-Regel, kein Blick in die Zukunft. Gehört nicht zu deiner Strategie (die gilt für Aktien aus S&P 500, Nasdaq-100, Europa, China und Hongkong). Keine Anlageberatung.</p>`);
 }
 function vAsset(key) {
   S.sheetKey = key;

@@ -4,7 +4,9 @@ Die Regel stammt aus dem Test bekannter Strategien von Hedgefonds und Wachstums-
 dem Vergleich mit Jakobs Quality-Growth-Vorlage (27.11.2026: übernommen 6 Titel; Filter auf Wachstum, Qualität und Bewertung,
 Punkte statt Kursstärke und Kauf erst nach Rücksetzern kosteten viel Rendite) und der Prüfung aller Stellschrauben ohne
 Stopp (27.11.2026 abends, Jakobs Wunsch): keine regelmäßige Gleichgewichtung, Obergrenze 30 % je Titel.
-- Auswahl: die heutigen Mitglieder von S&P 500 und Nasdaq-100, dazu 18 Länder-ETFs der Schwellenländer (Wachstumsmärkte).
+- Auswahl (Jakobs Wunsch vom 28.11.2026: weltweit; nach dem Backtest gewählt): die heutigen Mitglieder von S&P 500 und
+  Nasdaq-100, dazu die Aktien aus Europa, China und Hongkong im MSCI ACWI (world.py, INCLUDE), und 18 Länder-ETFs der
+  Schwellenländer. Rangfolge in Dollar umgerechnet.
 - Relative Stärke wie bei IBD (CAN SLIM): Rendite der letzten 3 Monate zu 40 %, der letzten 6, 9 und 12 Monate zu je 20 %,
   mit Dividenden.
 - Aufwärtstrend wie bei Minervini: Kurs über der 200-Tage-Linie, 50-Tage-Linie über der 200-Tage-Linie.
@@ -27,10 +29,10 @@ import datetime
 import re
 import time
 
-from . import sources
+from . import sources, world
 from .common import SourceError, asset_key, http_json, log, now_iso
 
-RULE_V = "wm3"           # Version der Regel; ändert sie sich, wird das Ideal-Depot neu nachgerechnet
+RULE_V = "wm4"           # Version der Regel; ändert sie sich, wird das Ideal-Depot neu nachgerechnet
 N_POS = 6                # im Backtest besser als 7 oder 8 (Frage positions)
 CAP_PCT = 30             # Obergrenze je Titel zum Monatsende (Frage maxpos); 15 % kostete im Backtest gut 5 Punkte pro Jahr
 STOP_PCT = 25            # Nachlauf-Stopp ab Hoch seit Kauf
@@ -154,23 +156,33 @@ def _ndx():
 
 
 def index_members(prev=None):
-    """Kürzel (Yahoo) -> [Index ("sp", "ndx" oder "sp,ndx"), Sektor, Name]. Fällt eine Quelle aus, bleibt ihr letzter Stand."""
+    """Kürzel (Yahoo) -> [Index ("sp", "ndx", "welt", mit Komma verbunden), Sektor, Name, Land]. Fällt eine Quelle aus,
+    bleibt ihr letzter Stand."""
     prev = prev or {}
-    sp, ndx = _sp500(), _ndx()
+    sp, ndx, acwi = _sp500(), _ndx(), world.acwi()
     if not sp:
         log("Auswahl: S&P 500 nicht geladen, letzter Stand bleibt")
         sp = {s: [v[2], v[1]] for s, v in prev.items() if "sp" in v[0]}
     if not ndx:
         log("Auswahl: Nasdaq-100 nicht geladen, letzter Stand bleibt")
         ndx = {s: [v[2], v[1]] for s, v in prev.items() if "ndx" in v[0]}
+    if not acwi:
+        log("Auswahl: MSCI ACWI nicht geladen, letzter Stand bleibt")
+        acwi = {s: [v[3] if len(v) > 3 else "", "", v[2], 0] for s, v in prev.items() if "welt" in v[0]}
     out = {}
-    for sym in set(sp) | set(ndx):
+    for sym in set(sp) | set(ndx) | set(acwi):
         if sym in SKIP:
             continue
-        idx = ",".join(x for x, d in (("sp", sp), ("ndx", ndx)) if sym in d)
-        name, sector = sp.get(sym) or ndx.get(sym)
-        out[sym] = [idx, sector or (prev.get(sym) or ["", ""])[1], name]
-    log("Auswahl: %d Aktien aus S&P 500 und Nasdaq-100, %d Länder-ETFs" % (len(out), len(MARKETS)))
+        w = acwi.get(sym)
+        idx = ",".join(x for x, d in (("sp", sp), ("ndx", ndx)) if sym in d) or "welt"
+        if sym in sp or sym in ndx:
+            name, sector = sp.get(sym) or ndx.get(sym)
+        else:
+            name, sector = (prev.get(sym) or ["", "", ""])[2] or w[2].title(), GICS_DE.get(w[1], w[1])
+        old = prev.get(sym) or ["", "", "", ""]
+        out[sym] = [idx, sector or old[1] or (GICS_DE.get(w[1], "") if w else ""), name, (w[0] if w else "") or (old[3] if len(old) > 3 else "")]
+    log("Auswahl: %d Aktien (S&P 500, Nasdaq-100, Europa, China, Hongkong), davon %d außerhalb der US-Indizes, %d Länder-ETFs"
+        % (len(out), sum(1 for v in out.values() if v[0] == "welt"), len(MARKETS)))
     return out
 
 
@@ -198,7 +210,19 @@ def history(sym, rng="2y"):
         else:
             d.append(day)
             c.append(x)
-    return {"d": d, "c": c, "name": m.get("longName") or m.get("shortName") or ""}
+    return {"d": d, "c": c, "name": m.get("longName") or m.get("shortName") or "", "cur": m.get("currency") or "USD"}
+
+
+UNIT = {"GBp": ("GBP", 0.01), "GBX": ("GBP", 0.01), "ILA": ("ILS", 0.01), "ZAc": ("ZAR", 0.01)}   # Kurse in Pence, Agorot, Cent
+
+
+def fx_usd(cur, rng="2y"):
+    """Dollar je Einheit der Währung, Tageskurse von Yahoo ({d, c})."""
+    res = sources.yahoo_chart("%sUSD=X" % cur, rng=rng)
+    if not res:
+        return None
+    d, c = sources._series(res)
+    return {"d": d, "c": c} if c else None
 
 
 def fetch_universe(syms, workers=6):
@@ -218,6 +242,13 @@ def fetch_universe(syms, workers=6):
             if h and len(h["c"]) >= 30:
                 out[s] = h
     log("Strategie: Kurse für %d von %d Titeln" % (len(out), len(syms)))
+    curs = {UNIT.get(h["cur"], (h["cur"], 1))[0] for h in out.values()} - {"USD"}
+    fx = {}
+    for c in sorted(curs):
+        x = fx_usd(c)
+        if x:
+            fx[c] = x
+    out["_fx"] = fx
     return out
 
 
@@ -229,8 +260,16 @@ def pack(H):
     """Kompakt für screen_base.json: ein gemeinsamer Kalender (Handelstage von SPY) und je Titel die Kurse ab seinem ersten
     Tag, Lücken mit dem letzten Kurs gefüllt. Titel, deren Kurse vor mehr als 5 Handelstagen enden, fallen weg."""
     cal = H[CAL]["d"][-KEEP_DAYS:]
-    px = {}
+    px, cur = {}, {}
+    fx = H.get("_fx") or {}
     for s, h in H.items():
+        if s == "_fx":
+            continue
+        c0 = UNIT.get(h.get("cur") or "USD", (h.get("cur") or "USD", 1))[0]
+        if c0 != "USD":
+            if c0 not in fx:
+                continue       # ohne Wechselkurs keine faire Rangfolge
+            cur[s] = h["cur"]
         d, c = h["d"], h["c"]
         if not d or d[-1] < cal[max(0, len(cal) - 6)]:
             continue
@@ -246,7 +285,16 @@ def pack(H):
             arr.append(_r(last))
         if arr:
             px[s] = [k0, arr]
-    return {"days": cal, "px": px}
+    fxp = {}
+    for c, h in fx.items():
+        d, v, j, last, arr = h["d"], h["c"], 0, h["c"][0], []
+        for day in cal:
+            while j < len(d) and d[j] <= day:
+                last = v[j]
+                j += 1
+            arr.append(round(last, 6))
+        fxp[c] = arr
+    return {"days": cal, "px": px, "cur": cur, "fx": fxp}
 
 
 def unpack(base, live=None):
@@ -263,6 +311,16 @@ def unpack(base, live=None):
     for s, (day, p) in live.items():
         if day == cal[-1]:
             px[s][1][-1] = p
+    # Kurse in Heimatwährung -> Dollar (für die Rangfolge; ein Plus nur aus schwacher Heimatwährung zählt nicht)
+    fx = base.get("fx") or {}
+    for s, c in (base.get("cur") or {}).items():
+        c0, f = UNIT.get(c, (c, 1))
+        v = fx.get(c0)
+        if s not in px or not v:
+            px.pop(s, None)
+            continue
+        k0, a = px[s]
+        px[s] = [k0, [x * f * v[min(len(v) - 1, k0 + i)] for i, x in enumerate(a)]]
     return cal, px
 
 
@@ -479,7 +537,7 @@ def rule_words(rows, held, top, stopped):
 
 
 # ----------------------------------------------------------------- Hinweise aufs Handy
-WHY = {"stop": "Kurs %d %% unter dem Hoch seit Kauf" % STOP_PCT, "auswahl": "nicht in S&P 500 oder Nasdaq-100",
+WHY = {"stop": "Kurs %d %% unter dem Hoch seit Kauf" % STOP_PCT, "auswahl": "nicht in der Auswahl (S&P 500, Nasdaq-100, Europa, China)",
        "trend": "Aufwärtstrend gebrochen", "rang": "nicht mehr unter den stärksten im Aufwärtstrend",
        "top": "neu unter den stärksten im Aufwärtstrend", "wieder": "im Ideal-Depot gestoppt, zum Monatsende wieder unter den stärksten"}
 WT = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
@@ -503,7 +561,7 @@ def events(prev, words, names, st, first, today):
     by = lambda w: [k for k, x in words.items() if x[0] == w]
     if first:
         parts = ["%s: %s" % (w, nm(by(w))) for w in ("Verkaufen", "Kaufen", "Halten") if by(w)]
-        head = "Regel angepasst: ohne Stopp, Gewinner laufen weiter bis zur Obergrenze je Titel" if str((prev or {}).get("rule") or "").startswith("wm") \
+        head = "Regel angepasst: Auswahl um große Aktien aus Europa, China und Hongkong erweitert" if str((prev or {}).get("rule") or "").startswith("wm") \
             else "Wachstums-Momentum ersetzt deine bisherigen Regeln"
         add("depot:jakob", "Depot Jakob", "neu", "%s. Zum Monatsende (%s): %s" % (head, me_txt, "; ".join(parts) if parts else "nichts zu tun"))
         return out
@@ -598,13 +656,16 @@ def _pct(x, d=1):
     return round(x * 100, d) if x is not None else None
 
 
-def _row(key, sym, f, members, info, rank, extra_name=""):
+def _row(key, sym, f, members, info, rank, extra_name="", cur_of=None):
+    cur_of = cur_of or {}
     m = members.get(sym)
     inf = info.get(sym) or {}
     return {k: v for k, v in {
         "key": key, "symbol": sym, "name": (m[2] if m else MARKETS.get(sym)) or extra_name or "",
         "sector": (m[1] if m else "Land" if sym in MARKETS else "") or inf.get("sector") or "", "industry": inf.get("industry"),
         "idx": m[0] if m else "markt" if sym in MARKETS else "", "member": bool(m) or sym in MARKETS, "market": sym in MARKETS,
+        "land": world.COUNTRY_DE.get(m[3], m[3]) if m and len(m) > 3 and m[3] and m[3] != "United States" else None,
+        "cur": cur_of.get(sym),
         "rs": f.get("rs"), "score": round(f["rs_raw"] * 100, 1), "rank": rank, "trend": bool(f["trend"]),
         "p50": _pct(f["p"] / f["s50"] - 1), "p200": _pct(f["p"] / f["s200"] - 1), "r3": _pct(f["r3"]), "r6": _pct(f["r6"]),
         "r9": _pct(f["r9"]), "r12": _pct(f["r12"]), "from_high": _pct(f["hi"]), "chg5": _pct(f["chg5"], 2),
@@ -641,7 +702,7 @@ def build(store, pf, base, push, fg=None, mfg=None, extra=None, live=None, today
         if kind != "stock" or key in rows or key in alias:
             continue
         if sym in F:
-            r = _row(key, sym, F[sym], members, info, rank.get(sym))
+            r = _row(key, sym, F[sym], members, info, rank.get(sym), cur_of=base.get("cur"))
             d, c = cal[px[sym][0]:], px[sym][1]
         else:
             h = (extra or {}).get(sym)
@@ -674,7 +735,9 @@ def build(store, pf, base, push, fg=None, mfg=None, extra=None, live=None, today
            "rules": {k: w[0] for k, w in words.items()}, "why": {k: w[1] for k, w in words.items()}, "events": evs,
            "breadth": {"n": len(F), "trend": len(R), "stocks": sum(1 for s in F if s not in MARKETS)},
            "members": {"n": len(members), "sp": sum(1 for v in members.values() if "sp" in v[0]),
-                       "ndx": sum(1 for v in members.values() if "ndx" in v[0]), "markets": len(MARKETS), "at": base.get("members_at")},
+                       "ndx": sum(1 for v in members.values() if "ndx" in v[0]), "welt": sum(1 for v in members.values() if v[0] == "welt"),
+                       "abroad": sum(1 for v in members.values() if len(v) > 3 and v[3] and v[3] != "United States"),
+                       "markets": len(MARKETS), "at": base.get("members_at")},
            "fg": {k: v for k, v in (fg or {}).items() if v is not None}}
     if mfg:
         doc["mfg"] = {k: v for k, v in mfg.items() if k != "hist"}

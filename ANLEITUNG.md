@@ -108,7 +108,7 @@ die Aufgabe beim nächsten Start nach. Den Zugangsschlüssel holt das Skript `tr
   Jeder Coin verlinkt zu Velo.
 - **Krypto-Einnahmen:** DeFi Llama liefert je Protokoll Gebühren (Umsatz), Einnahmen (was das Protokoll behält) und den Anteil für Token-Halter.
   Daraus rechnet der Tracker Marktwert zu Gebühren (wie KUV) und Marktwert zu Einnahmen (wie KGV), hochgerechnet aus den letzten 30 Tagen. Von GitHubs Servern (USA) aus sind Binance Futures und Bybit meist gesperrt, dann zählen OKX und Hyperliquid.
-- **Strategie (Depot Jakob):** die Mitglieder von S&P 500 (Liste der Wikipedia) und Nasdaq-100 (Nasdaq), dazu 18 Länder-ETFs, Kurse mit Dividenden von Yahoo.
+- **Strategie (Depot Jakob):** die Mitglieder von S&P 500 (Liste der Wikipedia) und Nasdaq-100 (Nasdaq), dazu die großen Aktien aus Europa, China und Hongkong im MSCI ACWI (Bestandsliste von iShares), 18 Länder-ETFs, Kurse mit Dividenden von Yahoo. Auslandsaktien werden für die Rangfolge in Dollar umgerechnet. Weltweit (auch Japan, Kanada, Australien, Schwellenländer) war im Backtest schlechter.
   Der Tageslauf rechnet Rangfolge und Ideal-Depot neu, der Kurslauf alle 15 Minuten mit aktuellen Kursen. Den Backtest rechnest du auf dem Mac:
   `python3 -m tracker.backtest sec` (einmal, SEC-Zahlen) und `python3 -m tracker.backtest run news2323/depot-daten`.
 - **Bewertung:** eine Faustregel aus Kennzahlen und Kurslage. Keine Anlageberatung.

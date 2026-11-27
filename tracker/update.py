@@ -535,13 +535,16 @@ def run_daily(store):
         m = meta.get(a["symbol"]) if a["kind"] == "crypto" else None
         if m and key in out:
             out[key]["mcap"], out[key]["rank"] = m.get("mcap"), m.get("rank")
-    # Strategie Wachstums-Momentum (Jakobs Wunsch vom 27.11.2026): heutige Mitglieder von S&P 500 und Nasdaq-100 und
-    # Länder-ETFs der Schwellenländer, Kurse mit Dividenden über 2 Jahre
+    # Strategie Wachstums-Momentum (Jakobs Wunsch vom 27.11.2026): heutige Mitglieder von S&P 500 und Nasdaq-100, dazu
+    # Europa, China und Hongkong aus dem MSCI ACWI (28.11.2026) und Länder-ETFs, Kurse mit Dividenden über 2 Jahre
     base0 = store.get("screen_base.json") or {}
     members, uni_h = {}, {}
     try:
         members = screen.index_members(base0.get("members"))
         uni_h = screen.fetch_universe(screen.universe(members))
+        for sym, v in members.items():      # Auslandsaktien: Name wie bei Yahoo statt in Großbuchstaben aus der iShares-Liste
+            if v[0] == "welt" and (uni_h.get(sym) or {}).get("name"):
+                v[2] = uni_h[sym]["name"]
     except Exception as e:
         log("Strategie Kurse: Fehler " + type(e).__name__)
     # Angst und Gier am Aktienmarkt: eigene Berechnung (CNN sperrt Skripte), aus Yahoo-Kursen

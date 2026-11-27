@@ -40,7 +40,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import screen
+from . import screen, world
 
 CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache")
 START = datetime.date(2013, 6, 1)          # Vorlauf für 200-Tage-Linie und 12 Monate Rendite
@@ -115,6 +115,74 @@ def membership():
         out.setdefault(RENAME.get(t, t).replace(".", "-"), []).append([a, b, "ndx"])
     json.dump(out, open(path, "w"))
     return out
+
+
+# ----------------------------------------------------------------- weltweite Auswahl (Jakobs Wunsch vom 28.11.2026)
+WORLD_FUNDS = (("acwi", "239600/ishares-msci-acwi-etf"), ("world", "239696/ishares-msci-world-etf"), ("eafe", "239623/ishares-msci-eafe-etf"))
+REGION_SRC = {"na": ("acwi", "world"), "dev": ("acwi", "world", "eafe"), "em": ("acwi",)}
+
+
+def world_snaps():
+    """Bestandslisten der iShares-Fonds auf MSCI ACWI, World und EAFE von 2015 bis heute: archivierte Fassungen aus dem
+    Internet Archive (etwa zwei im Jahr) und die heutige von iShares. -> [(Datum, Fonds, {Kürzel: [Land, ...]})]."""
+    folder = os.path.join(CACHE, "world")
+    os.makedirs(folder, exist_ok=True)
+    today = os.path.join(folder, "acwi_%s.csv" % datetime.date.today().strftime("%Y%m%d"))
+    if not any(f.startswith("acwi_%s" % datetime.date.today().strftime("%Y%m")) for f in os.listdir(folder)):
+        try:
+            open(today, "w").write(_get(world.URL))
+        except Exception as e:
+            _log("Weltweit: heutige Liste fehlt (%s)" % type(e).__name__)
+    if not os.path.exists(os.path.join(folder, ".archiv")):
+        for fund, path in WORLD_FUNDS:
+            u = ("https://web.archive.org/cdx/search/cdx?url=ishares.com/us/products/%s/*&output=json&fl=timestamp,original"
+                 "&filter=statuscode:200&filter=mimetype:text/csv&limit=5000" % path)
+            for ts, orig in json.loads(_get(u))[1:]:
+                fn = os.path.join(folder, "%s_%s.csv" % (fund, ts[:8]))
+                if "holding" in orig.lower() and not os.path.exists(fn):
+                    try:
+                        open(fn, "w").write(_get("https://web.archive.org/web/%sid_/%s" % (ts, orig)))
+                    except Exception as e:
+                        _log("Weltweit: Archiv-Fassung fehlt (%s)" % type(e).__name__)
+                    time.sleep(1.5)
+        open(os.path.join(folder, ".archiv"), "w").write("ok")
+    out = []
+    for fn in sorted(os.listdir(folder)):
+        if not fn.endswith(".csv"):
+            continue
+        fund, ymd = fn[:-4].split("_")
+        m = world.parse(open(os.path.join(folder, fn), encoding="utf-8", errors="replace").read())
+        if len(m) >= 300:
+            out.append(("%s-%s-%s" % (ymd[:4], ymd[4:6], ymd[6:]), fund, m))
+    return out
+
+
+def _region(country):
+    return "na" if country in ("United States", "Canada") else "dev" if country in world.HOME else "em"
+
+
+def world_membership():
+    """Je Yahoo-Kürzel Zeiträume [[von, bis oder None, "welt"]] und [Land, Sektor, Name, Gewicht] aus der jüngsten Liste. Je Region gilt die jüngste Liste eines Fonds,
+    der sie abdeckt (EAFE ohne Nordamerika, Schwellenländer nur im ACWI); vor der ersten Liste gilt die erste."""
+    snaps = world_snaps()
+    dates = sorted({d for d, _, _ in snaps})
+    country, spans, prev = {}, {}, set()
+    for d in dates:
+        cur = set()
+        for reg, src in REGION_SRC.items():
+            cand = [x for x in snaps if x[1] in src and x[0] <= d] or [min((x for x in snaps if x[1] in src), key=lambda x: x[0])]
+            dd, _, m = max(cand, key=lambda x: x[0])
+            for sym, v in m.items():
+                if _region(v[0]) == reg:
+                    cur.add(sym)
+                    country[sym] = v
+        start = "2000-01-01" if d == dates[0] else d
+        for t in cur - prev:
+            spans.setdefault(t, []).append([start, None, "welt"])
+        for t in prev - cur:
+            spans[t][-1][1] = d
+        prev = cur
+    return spans, country
 
 
 def member(spans, iso):
@@ -352,21 +420,40 @@ def fund_at(fq, iso):
 
 # ----------------------------------------------------------------- Daten und Kennzahlen je Stichtag
 class Data:
-    def __init__(self, markets=True):
+    def __init__(self, markets=True, world_=False):
         master = _chart("^GSPC")
         t0 = (START - datetime.date(1970, 1, 1)).days
         self.days = [d for d in master["d"] if d >= t0]
         self.iso = [_iso(d) for d in self.days]
         self.n = len(self.days)
         self.bench = _align(master, self.days)
-        self.spans = membership()
-        self.stocks, self.sec, self.kind, self.missing = {}, {}, {}, 0
+        self.spans = {k: list(v) for k, v in membership().items()}
+        self.country, self.winfo = {}, {}
+        if world_:            # True: wie die App (world.INCLUDE), "all": ganzer ACWI, soweit handelbar
+            ws, country = world_membership()
+            for k, v in ws.items():
+                if k not in screen.SKIP and (world_ == "all" or country[k][0] in world.INCLUDE):
+                    self.spans.setdefault(k, []).extend(v)
+                    self.country[k] = country[k][0]
+                    self.winfo[k] = country[k]
+        self.stocks, self.sec, self.kind, self.missing, fx = {}, {}, {}, 0, {}
         for sym in sorted(self.spans):
             x = _chart(sym)
-            if not x or len(x["d"]) < 260 or x.get("cur") != "USD":
+            cur = (x or {}).get("cur") or "USD"
+            c0, f = screen.UNIT.get(cur, (cur, 1))
+            if c0 != "USD" and c0 not in fx:
+                fx[c0] = _chart("%sUSD=X" % c0)
+            if not x or len(x["d"]) < 260 or (c0 != "USD" and not fx.get(c0)):
                 self.missing += 1
                 continue
-            s = Stock(sym, _align(x, self.days))
+            px = _align(x, self.days)
+            if c0 != "USD":
+                r = _align(fx[c0], self.days)
+                px = [p * f * q if p is not None and q else None for p, q in zip(px, r)]
+                if any(a and b and (b / a > 3 or b / a < 0.25) for a, b in zip(px, px[1:])):
+                    self.missing += 1          # Kurssprung über das Dreifache an einem Tag: Datenfehler bei Yahoo
+                    continue
+            s = Stock(sym, px)
             s.end = next((i for i, d in enumerate(self.days) if d > x["d"][-1]), self.n)   # danach nicht mehr handelbar
             self.stocks[sym], self.kind[sym], self.sec[sym] = s, "stock", sec_load(sym)
         if markets:
@@ -776,7 +863,7 @@ def _nice(name):
 def run(prev=None):
     """Alles rechnen; Ergebnis im Format von backtest.json (Fassung 2, wie web/views.js btCard es liest)."""
     t0 = time.time()
-    D = Data()
+    D = Data(world_=True)
     _log("Backtest: %d Titel mit Kursen, %d ohne, %d Monate" % (len(D.stocks), D.missing, len(D.months)))
     out, res = [], {}
     for key, (name, short, desc, mk) in STRATS.items():
@@ -812,7 +899,8 @@ def run(prev=None):
                 gr_n += bool(q and q.get("gttm") is not None and q["gttm"] >= 15)
     sec = collections.Counter()
     for x, k in cnt.items():
-        sec["Länder-ETF" if D.kind[x] == "market" else _sector((D.sec.get(x) or {}).get("sic"))] += k
+        w = D.winfo.get(x) if x not in D.sec or not (D.sec.get(x) or {}).get("sic") else None
+        sec["Länder-ETF" if D.kind[x] == "market" else screen.GICS_DE.get(w[1], "Sonstige") if w else _sector((D.sec.get(x) or {}).get("sic"))] += k
     tot = float(sum(sec.values())) or 1.0
     ds = res["best"]["res0"]["ds"]
     idx = list(range(0, len(ds), 5))      # jeder 5. Handelstag
@@ -833,7 +921,7 @@ def run(prev=None):
            "universe": {"tickers": len(D.spans), "missing": D.missing, "markets": len(MARKETS)},
            "strategies": out, "probes": probes, "curves": curves,
            "sectors": [[k, round(v / tot * 100, 1)] for k, v in sec.most_common()],
-           "held": [[s, m, _nice(((D.sec.get(s) or {}).get("sic") or [None, None, MARKETS.get(s, s)])[2])] for s, m in cnt.most_common(12)],
+           "held": [[s, m, _nice(((D.sec.get(s) or {}).get("sic") or [None, None, MARKETS.get(s) or (D.winfo.get(s) or [0, 0, s])[2]])[2])] for s, m in cnt.most_common(12)],
            "n_titles": len(cnt), "market_share": round(mk_n / max(1, sum(cnt.values())) * 100, 1), "growth_share": round(gr_n / max(1, all_n) * 100, 1),
            "findings": [
                {"t": "Deine Regel", "x": "6 Titel ohne Stopp, Gewinner laufen weiter, höchstens 30 %% je Titel: %s %% pro Jahr bei %s %% größtem Rückgang. Mit Stopp 25 %% wären es %s %% bei %s %%." % (_de(c["cagr"]), _de(c["dd"], 0), _de(w["cagr"]), _de(w["dd"], 0))}]
@@ -854,7 +942,7 @@ def run(prev=None):
 
 
 def quick():
-    D = Data()
+    D = Data(world_=True)
     ev = evaluate(D, simulate(D, app_rule()))  # Stichtag Monatsende
     _log("Regel der App, Stichtag Monatsende: %.1f %% pro Jahr, Rückgang %.1f %% (%d Titel)" % (ev["cagr"], ev["dd"], len(D.stocks)))
 
