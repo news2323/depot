@@ -33,7 +33,7 @@ const CMP = {Gesamt: 'Dein Depot', Aktien: 'Deine Aktien und ETFs', Krypto: 'Dei
 
 function render() {
   if (!LOCAL && !cfg) return renderSetup();
-  S._jb = null; S._ideal = undefined; S._rules = null; S._alias = null;   // Depot Jakob, Ideal-Depot, Wort je Titel neu rechnen
+  S._jb = null; S._ideal = undefined; S._rules = null; S._alias = null; S._since = null;   // Depot Jakob, Ideal-Depot, Wort je Titel neu rechnen
   const c = calc(), now = new Date(), upd = S.market.updated;
   const stale = upd && Date.now() - Date.parse(upd) > 45 * 6e4;
   if (!TABS.some(t => t[0] === S.tab)) S.tab = 'home';
@@ -97,8 +97,13 @@ const tick = key => { const s = key.split(':')[1]; return /^\d/.test(s) ? s : s.
 const subLine = (key, extra) => [shortName(key) === tick(key) ? '' : tick(key), extra != null ? extra : (mcapTxt(key) || ((isFund(key) || isCommodity(key)) && issuerOf(key)) || '')].filter(Boolean).join(' · ');
 const withPre = (pre, txt) => `${pre || ''}${pre && txt ? '<i class="sep"> · </i>' : ''}${esc(txt)}`;
 const nameCell = (key, extra, pre = '') => `<div class="nm">${logo(key)}<div class="nmt"><b>${esc(shortName(key))}</b><small>${withPre(pre, subLine(key, extra))}</small></div></div>`;
-// Momentum-Signal als kurzer Hinweis vor der Unterzeile (Jakobs Wunsch vom 22.11.2026). near: auch „fast“ (3 von 4 erfüllt)
-const momTag = (key, near) => { const m = momOf(key); if (!m) return '';
+// Kurzer Hinweis vor der Unterzeile: bei Titeln der Strategie „Top 7“ bzw. die Stärke (Wachstums-Momentum, Jakobs Wunsch vom
+// 27.11.2026), sonst das Momentum-Signal (Coins, ETFs). near: auch „fast“ (3 von 4 erfüllt)
+const momTag = (key, near) => { const r = scrRow(stratKey(key));
+  if (r && r.rs != null) { const n = (idealBook() || {}).n || 7;
+    return r.rank && r.rank <= n ? `<span class="mom on" title="Unter den ${n} stärksten im Aufwärtstrend: Rang ${r.rank}, Stärke ${r.rs} von 99">Top ${n}</span>`
+      : r.trend && r.rs >= 90 ? `<span class="mom near" title="Im Aufwärtstrend, Rang ${r.rank || '–'}, Stärke ${r.rs} von 99">Stärke ${r.rs}</span>` : ''; }
+  const m = momOf(key); if (!m) return '';
   if (m.state === 'on') return `<span class="mom on" title="Momentum-Signal an${m.since < 60 ? ' seit ' + m.since + ' Handelstagen' : ''}: Aufwärtstrend, nahe am Jahreshoch, stärker als der Markt">${m.since <= 10 ? 'Momentum neu' : 'Momentum'}</span>`;
   if (m.state === 'fade') return '<span class="mom fade" title="Momentum lässt nach: Kurs unter die 50-Tage-Linie gefallen">Momentum ↘</span>';
   return near && m.state === 'none' && m.met >= 3 ? '<span class="mom near" title="3 von 4 Prüfungen erfüllt">fast Momentum</span>' : ''; };
@@ -397,13 +402,14 @@ function drawCharts() {
     $('#lg-smart').innerHTML = legend(s2);
   }
   const cbt = $('#ch-bt');
-  if (cbt && S.bt) {
-    const col = {opt: 'var(--accent)', now: 'var(--s2)', ew: 'var(--s3)', soxx: 'var(--s4)', sp: 'var(--s7)'};
-    const sb = Object.keys(col).map(id => S.bt.strategies.find(x => x.id === id)).filter(Boolean).map(x => ({name: x.name, color: col[x.id], pts: x.curve}));
-    if (sb.length) sb.push({name: 'Eingezahlt', color: 'var(--ink3)', dash: true, thin: true, pts: sb[0].pts.map((p, i) => [p[0], 1000 * (i + 1)])});
-    lineChart(cbt, sb, {fmt: v => v >= 1e6 ? nf(v / 1e6, 1) + ' Mio.' : nf(Math.max(0, v) / 1000, 0) + ' Tsd.', height: 260, label: 'Sparplan mit 1.000 € im Monat nach verschiedenen Regeln, in Euro'});
+  if (cbt && S.bt && S.bt.curves) {
+    const cv = S.bt.curves, col = {best: 'var(--accent)', qg: 'var(--s2)', jakob: 'var(--s3)', QQQ: 'var(--s4)', SPY: 'var(--ink3)'};
+    const sb = Object.keys(col).filter(id => cv[id]).map(id => ({name: (S.bt.strategies.find(x => x.id === id) || {}).short || id, color: col[id], dash: id === 'SPY', pts: cv.d.map((d, i) => [d, cv[id][i] * 10000])}));
+    lineChart(cbt, sb, {fmt: v => v >= 1e6 ? nf(v / 1e6, 1) + ' Mio.' : nf(Math.max(0, v) / 1000, 0) + ' Tsd.', height: 260, label: 'Aus 10.000 Dollar nach verschiedenen Regeln, mit Dividenden'});
     $('#lg-bt').innerHTML = legend(sb);
   }
+  const cmo = $('#ch-model');
+  if (cmo) drawModel(cmo);
   const chh = $('#ch-hold'), hd = holderData();
   if (chh && hd && hd.hist && hd.hist.length > 1) {
     const H = hd.hist, pc = S.hv === 'Plus/Minus';
@@ -524,7 +530,7 @@ function listView(id, cols, rows, def, o) {
       <span class="wl-nm"><b>${esc(shortName(key))}</b><small>${withPre((o.pre ? o.pre(row) : ruleTag(key)) || momTag(key), o.sub ? o.sub(row) : subLine(key))}</small></span>
       <span class="wl-px num">${o.mid(row)}</span>
       <span class="wl-ch">${spark7(key)}${chgA(A(key).change_pct).replace('chga', 'chga sm')}</span></button>`; }).join('')}</div>
-    <p class="wl-hint">${o.hint || ''}Links die Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet. Rechts der Verlauf über 7 Tage (gestrichelt: Stand vor 7 Tagen) und die Änderung heute. „Momentum“: Aufwärtstrend, nahe am Jahreshoch, stärker als der Markt (↘ lässt nach). Antippen für die Gründe. · Version ${esc(APP_V)}</p>`;
+    <p class="wl-hint">${o.hint || ''}Links die Punkte: 10 deutlich unterbewertet, 1 deutlich überbewertet. Rechts der Verlauf über 7 Tage (gestrichelt: Stand vor 7 Tagen) und die Änderung heute. „Top 7“: unter den stärksten im Aufwärtstrend nach deiner Strategie; „Momentum“ bei Coins und ETFs: Aufwärtstrend, nahe am Jahreshoch, stärker als der Markt (↘ lässt nach). Antippen für die Gründe. · Version ${esc(APP_V)}</p>`;
 }
 const watchList = (id, rows, def) => listView(id, LCOL, rows, def, {mid: r => px(r.key, A(r.key).price)});
 const PCOL = [COL.score, {id: 'day', label: 'Heute', num: true, sort: COL.day.sort}, {id: 'value', label: 'Wert', num: true, sort: r => r.p.value},
@@ -692,234 +698,212 @@ function moodCard(keys, sw) {
     <p class="hint">Reddit: wie oft ein Titel in 24 Stunden in den großen Börsen-Foren genannt wurde (ApeWisdom, täglich, nur US-Kürzel und Coins).${none > 0 ? ` ${none} Titel ohne Daten.` : ''} Viel Gerede heißt nicht, dass ein Kurs steigt. Stimmung ist kein Kaufgrund. Keine Anlageberatung.</p>`, sw, 'span12');
 }
 const insightKeys = c => [...new Set(fltOn('ein', 'Depot') === 'Depot' ? c.held.filter(p => p.value > 0).map(p => p.key) : (S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol)))];
-/* ---------------------------------------------------------------- Strategie (Jakobs Wunsch vom 22.11.2026)
-   Profil mit Fragen, geplante Käufe, Regel-Check, Leitplanken, Kandidaten aus dem Filter (screen.json), Wenn-dann-Regeln, Hinweise. */
-const fitBadge = (f, cls = '') => f == null ? '<span class="score none">–</span>' : `<span class="score t${tierOf(fitPts(f))} ${cls}" title="Passung für dich: ${fitPts(f)} von 10">${fitPts(f)}</span>`;
+/* ---------------------------------------------------------------- Strategie Wachstums-Momentum (Jakobs Wunsch vom 27.11.2026)
+   Reiter Heute, Regeln, Kandidaten, Backtest, Profil. Rechnungen in app.js (idealBook, ruleOf, stopOf), Rangfolge und
+   Ideal-Depot als Modell in tracker/screen.py (screen.json), Backtest und Recherche in backtest.json (tracker/backtest.py). */
+const rsBadge = (r, cls = '') => !r || r.rs == null ? '<span class="score none">–</span>' : `<span class="score t${tierOf(Math.max(1, Math.ceil(r.rs / 10)))} ${cls}" title="Stärke ${r.rs} von 99: relative Stärke wie bei IBD">${r.rs}</span>`;
 const stIcon = st => `<span class="st ${st}">${{ok: '✓', warn: '!', bad: '✕', info: 'i', open: '?'}[st] || ''}</span>`;
 function questionsCard() {
   const open = QUESTIONS.filter(q => ansOf(q.id) == null), done = QUESTIONS.filter(q => ansOf(q.id) != null);
   const qhtml = q => `<div class="qq"><div class="qt">${esc(q.q)}${q.lesson ? ' <span class="chip warn">Lehre aus FTX</span>' : ''}</div>${q.why ? `<div class="qw">${esc(q.why)}</div>` : ''}
     <div class="qo">${q.o.map(([v, l]) => `<button class="pillbtn ${String(ansOf(q.id)) === String(v) ? 'on' : ''}" data-act="ans" data-id="${q.id}" data-v="${esc(String(v))}">${esc(l)}</button>`).join('')}</div></div>`;
-  return card('Fragen an dich', open.length ? `${open.length} offen · jede Antwort schärft Filter und Regeln sofort` : 'Alle beantwortet · du kannst jede Antwort ändern',
+  return card('Fragen an dich', open.length ? `${open.length} offen · jede Antwort wirkt sofort auf Ideal-Depot und Regeln` : 'Alle beantwortet · du kannst jede Antwort ändern',
     `${open.slice(0, 4).map(qhtml).join('')}${open.length > 4 ? `<p class="hint">Noch ${open.length - 4} weitere Fragen, sobald diese beantwortet sind.</p>` : ''}
     <details class="qdone"><summary>Deine Antworten (${done.length})</summary>${done.map(qhtml).join('')}</details>`, '', 'span5');
 }
 const rcMode = () => S.rcm || (Object.keys(jakobHeld()).length ? 'depot' : 'ideal');
+const ruleRows = rows => `<div class="rules">${rows.map(r => `<div class="rule">${stIcon(r.state)}<div><b>${esc(r.title)}</b><div class="x">${esc(r.text)}</div></div></div>`).join('')}</div>`;
 function checkCard() {
   const mode = rcMode(), rc = ruleCheck(mode);
-  const body = rc.rows.length ? `<div class="rules">${rc.rows.map(r => `<div class="rule">${stIcon(r.state)}<div><b>${esc(r.title)}</b><div class="x">${esc(r.text)}</div></div></div>`).join('')}</div>` : '<p class="empty">Keine Positionen für diese Auswahl.</p>';
-  return card('Regel-Check', 'Ideal-Depot oder Depot Jakob gegen dein Profil', body + `<p class="hint">Gezählt werden Einzelaktien${ansOf('etf') === 'base' ? ' und ETFs' : ''}${ansOf('crypto') === 'part' ? ' und Krypto' : ''}. Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`,
+  const body = rc.rows.length ? ruleRows(rc.rows) : '<p class="empty">Keine Positionen für diese Auswahl.</p>';
+  return card('Regel-Check', 'Ideal-Depot oder Depot Jakob gegen dein Profil', body + `<p class="hint">Gezählt werden Aktien und Länder-ETFs der Regel${ansOf('etf') === 'base' ? ', dazu deine ETFs' : ''}${ansOf('crypto') === 'part' ? ' und Krypto' : ''}. Hauptdepot und Fenja zählen nicht mit. Keine Anlageberatung.</p>`,
     seg('rcm', ['Ideal-Depot', 'Depot Jakob'], mode === 'ideal' ? 'Ideal-Depot' : 'Depot Jakob'), 'span7');
 }
 function guardCard() {
-  const mode = rcMode(), g = guardRails(ruleCheck(mode));
-  return card('Leitplanken', 'Erwartungswert ja, Totalverlust nein', `<div class="rules">${g.map(r => `<div class="rule">${stIcon(r.state)}<div><b>${esc(r.title)}</b><div class="x">${esc(r.text)}</div></div></div>`).join('')}</div>
-    <p class="hint">Sam Bankman-Fried (FTX, Alameda) entschied nach dem Erwartungswert: Er setzte auf alles, was im Schnitt mehr bringt, auch wenn ein Totalverlust möglich war, und wollte mehr setzen, als das Kelly-Maß erlaubt. Dazu kamen Hebel, Geld der Kunden und wenig Prüfung vor Beteiligungen. 2023 wurde er wegen Betrugs verurteilt. Übernommen wird nur das Denken in Erwartungswerten: Chance zu Risiko fließt in die Passung ein. Seine Fehler stehen hier als Regeln.</p>`, '', 'span5');
-}
-function candCard() {
-  const list = ((S.screen || {}).list || []).map(r => ({r, f: fitOf(r)})).filter(x => x.f != null);
-  if (!list.length) return card('Kandidaten', 'Aktien, die zu dir passen könnten', '<p class="empty">Der Filter läuft mit dem nächsten Tageslauf.</p>', '', 'span12');
-  const held = new Set(Object.keys(jakobHeld())), plan = new Set(((idealBook() || {}).items || []).map(x => x.key));
-  const fl = S.scf || 'Neu für dich';
-  let xs = list.filter(x => fl === 'Alle' ? true : fl === 'Neu für dich' ? !held.has(x.r.key) && !plan.has(x.r.key)
-    : fl === 'Momentum' ? (x.r.mom || {}).state === 'on' || (x.r.mom || {}).state === 'none' && (x.r.mom || {}).met >= 3
-    : fl === 'Rücksetzer' ? x.r.chg5 != null && x.r.chg5 <= -8 && !x.r.flags.cut : x.r.c.theme >= 0.9);
-  xs.sort((a, b) => fl === 'Momentum' ? ((b.r.mom || {}).state === 'on') - ((a.r.mom || {}).state === 'on') || b.f - a.f : b.f - a.f);
-  const more = xs.length > 15 && !S.scAll; if (more) xs = xs.slice(0, 15);
-  const tagOf = k => held.has(k) ? '<span class="chip">im Depot Jakob</span>' : plan.has(k) ? '<span class="chip blue">im Ideal-Depot</span>' : '';
-  const aiOn = list.some(x => (x.r.mom || {}).state === 'on' && thOf(x.r) >= 0.6);
-  const note = fl === 'Momentum' && xs.length && !aiOn ? '<div class="note" style="margin:0 0 10px">Im KI- und Halbleiterumfeld hat gerade kein Titel das Signal. Momentum haben vor allem Titel außerhalb deines Schwerpunkts, darum die niedrige Passung. Typisch nach einem starken Rückgang bei Tech.</div>' : '';
-  const empty = !xs.length && fl === 'Momentum' ? '<p class="empty">Gerade hat kein Titel der Auswahl das Momentum-Signal und keiner ist nah dran. Typisch nach einem starken Rückgang: Das Signal kommt erst, wenn die Kurse wieder über ihre 200-Tage-Linie steigen.</p>' : '';
-  const rows = xs.map(({r, f}) => {
-    const open = S.scx === r.key, w = fitW();
-    const bars = Object.keys(w).map(k => `<div class="fb"><span>${FACTOR_DE[k]}</span><i><b style="width:${Math.round((r.c[k] ?? 0.5) * 100)}%"></b></i><em>${nf(w[k] * 100, 0)} %</em></div>`).join('');
-    const tracked = !!(D(r.key).hist || A(r.key).price);
-    return `<tr data-act="scx" data-key="${esc(r.key)}" class="${open ? 'open' : ''}"><td>${fitBadge(f)}</td><td>${nameCell(r.key, r.theme + (r.sector && r.sector_on && sectorsOn() ? ' · starker Sektor' : ''), ruleTag(r.key) || momTag(r.key, fl === 'Momentum'))} ${tagOf(r.key)}</td>
-      <td class="r num ${sign(r.r6)}">${r.r6 == null ? '–' : pctS(r.r6, 0)}</td><td class="r num hm ${sign(r.est90)}">${r.est90 == null ? '–' : pctS(r.est90, 0)}</td>
-      <td class="r num hm">${r.rev_g == null ? '–' : pctS(r.rev_g, 0)}${r.accel === 'schneller' ? ' ↗' : r.accel === 'langsamer' ? ' ↘' : ''}</td>
-      <td class="r num hm ${sign(r.ev)}">${r.ev == null ? '–' : pctS(r.ev, 0)}</td><td class="r hm">${r.rating ? `<span class="score t${tierOf(r.rating)}">${r.rating}</span>` : '–'}</td>
-      <td class="r">${chgA(r.chg5)}</td></tr>
-      ${open ? `<tr class="xrow"><td colspan="8"><div class="cx"><div><p class="sh" style="margin-top:0">Dafür</p><ul class="dots">${(r.pros || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>–</li>'}</ul>
-        <p class="sh">Dagegen</p><ul class="dots">${(r.cons || []).map(x => `<li>${esc(x)}</li>`).join('') || '<li>nichts Auffälliges</li>'}</ul></div>
-        <div><p class="sh" style="margin-top:0">Faktoren (Gewicht)</p><div class="fbars">${bars}</div>
-        <div class="btnrow" style="margin-top:12px">${tracked ? `<button class="btn sm" data-act="open" data-key="${esc(r.key)}">Details</button>` : ''}${(S.pf.watchlist || []).some(x => keyOf(x.kind, x.symbol) === r.key) || held.has(r.key) ? '' : `<button class="btn sm ghost" data-act="scwatch" data-key="${esc(r.key)}">Auf die Watchlist</button>`}</div></div></div></td></tr>` : ''}`;
-  }).join('');
-  return card('Kandidaten', `Aktien aus KI und Halbleitern${sectorsOn() ? ' und starken Sektoren' : ''}, die zu deinem Profil passen könnten · ${dateDe((S.screen || {}).updated)}`, `${note}<div class="tblwrap"><table class="tbl cand"><thead><tr><th>Für dich</th><th>Titel</th><th class="r">6 Mon. ggü. S&amp;P</th><th class="r hm">Schätzung 90 T.</th><th class="r hm">Umsatz</th><th class="r hm">Erwartungswert</th><th class="r hm">Punkte</th><th class="r">5 Tage</th></tr></thead><tbody>${rows}</tbody></table></div>${empty}
-    ${more ? `<div class="btnrow"><button class="btn sm ghost" data-act="scall">Alle ${list.length} zeigen</button></div>` : ''}
-    <p class="hint">„Für dich“ (1 bis 10): Momentum, Schätzungsänderungen und Überraschungen, Wachstum (↗ beschleunigt, ↘ lässt nach), Qualität, Stärke im KI-Umfeld, dazu Bewertung als Sicherheitsnetz und Erwartungswert aus der Spanne der Analystenziele; gewichtet nach deinem Vorrang, mit Abzügen für Spekulatives, Defensives und gesenkte Schätzungen${momStyle() ? ', dazu nach deiner Momentum-Regel ein Zuschlag mit Signal und ein Abschlag unter der 200-Tage-Linie' : ''}. „Momentum“: über der 50- und 200-Tage-Linie, nahe am Jahreshoch, stärker als der S&amp;P 500. „Punkte“: günstig oder teuer, mit eingepreistem gegen erwartetes Wachstum. Zeile antippen für Gründe. Eine Auswahl, keine Kaufempfehlung. Keine Anlageberatung.</p>`,
-    seg('scf', ['Neu für dich', 'Momentum', 'Alle', 'KI-Kern', 'Rücksetzer'], fl), 'span12');
+  const g = guardRails(ruleCheck(rcMode()));
+  return card('Leitplanken', 'Erwartungswert ja, Totalverlust nein', ruleRows(g) + `
+    <p class="hint">Sam Bankman-Fried (FTX, Alameda) entschied nach dem Erwartungswert: Er setzte auf alles, was im Schnitt mehr bringt, auch wenn ein Totalverlust möglich war, und wollte mehr setzen, als das Kelly-Maß erlaubt. Dazu kamen Hebel, Geld der Kunden und wenig Prüfung vor Beteiligungen. 2023 wurde er wegen Betrugs verurteilt. Seine Fehler stehen hier als Regeln.</p>`, '', 'span5');
 }
 function playCard() {
-  const mode = rcMode(), pb = playbook(ruleCheck(mode));
+  const pb = playbook(ruleCheck(rcMode()));
   return card('Wenn … dann', 'Deine Regeln und was davon heute zutrifft', `<div class="rules">${pb.map(r => `<div class="rule ${r.on ? 'on' : ''}">${stIcon(r.on ? 'warn' : 'ok')}<div><b>Wenn ${esc(r.when)}</b><div class="x">Dann: ${esc(r.then)}</div>${r.now ? `<div class="m">Heute: ${esc(r.now)}</div>` : ''}</div></div>`).join('')}</div>
-    <p class="hint">Regeln aus deinem Profil. Gelb heißt: trifft gerade zu. Keine Anlageberatung.</p>`, '', 'span12');
+    <p class="hint">Gelb heißt: trifft gerade zu. Keine Anlageberatung.</p>`, '', 'span12');
 }
-/* ---------------------------------------------------------------- Backtest (Jakobs Wunsch vom 22.11.2026)
-   tracker/backtest.py → backtest.json: 10 Jahre, nur Daten, die es am jeweiligen Tag gab. Ansichten Ergebnis, Signale,
-   Punkte, Deine Titel, Regeln (S.btv). Das Diagramm zeichnet drawCharts (#ch-bt). */
-const BT_ORDER = ['opt_sec', 'opt', 'now', 'now_half', 'fit', 'mom', 'dip', 'ew', 'soxx', 'sp'];
-const BT_P = {near: ['Nähe zum Jahreshoch', v => v >= 100 ? 'egal' : `höchstens ${v} % darunter`], trend: ['Trend', v => v === '50_200' ? 'Kurs über 50er, 50er über 200er' : 'Kurs über der 200-Tage-Linie'],
-  rel: ['Stärker als der S&P 500', v => v ? 'ja, 6 Monate' : 'egal'], n_pos: ['Anzahl Titel', v => v + ' Titel'],
-  fear: ['Ausnahme Angst', v => v === 'c25' ? 'unter 25 und Halbleiter −20 %' : v ? 'unter ' + v : 'keine'], crash: ['Ausnahme Halbleiter-Crash', v => v ? `${-v} % unter dem Hoch` : 'keine'],
-  exit: ['Verkauf', v => ({signal: 'wenn das Signal ausgeht', trend: 'unter der 200-Tage-Linie', better: 'wenn es Besseres gibt'})[v]],
-  empty: ['Freie Plätze', v => v === 'cash' ? 'Reserve' : 'S&P 500'], ex_sort: ['Reihenfolge bei Ausnahmen', v => v === 'fit' ? 'beste Passung' : 'Stärke im Thema'], cap: ['Titel je Thema', v => v ? 'höchstens ' + v : 'keine Grenze'], regime: ['Marktfilter', v => v === 'half' ? 'halb Reserve unter der 200-Tage-Linie der Halbleiter' : 'keiner']};
-const bigE = v => v >= 1e6 ? nf(v / 1e6, 2) + ' Mio. €' : eur(v, 0);
+// Kandidaten: die stärksten Titel im Aufwärtstrend (screen.json → list), dazu Depot Jakob und Watchlist
+const idxTxt = r => r.market ? 'Schwellenland' : r.idx === 'sp,ndx' ? 'S&P 500 · Nasdaq-100' : r.idx === 'ndx' ? 'Nasdaq-100' : r.idx === 'sp' ? 'S&P 500' : 'nicht in der Auswahl';
+const trendTxt = r => r.trend ? 'Aufwärtstrend' : r.p200 != null && r.p200 < 0 ? 'unter der 200-Tage-Linie' : '50 unter 200';
+function candCard() {
+  const sc = S.screen || {}, all = sc.rule === RULE_V ? sc.list || [] : [];
+  if (!all.length) return card('Kandidaten', 'Die stärksten Aktien im Aufwärtstrend', '<p class="empty">Der Filter läuft mit dem nächsten Tageslauf.</p>', '', 'span12');
+  const ib = idealBook() || {n: 7, items: []}, held = new Set(Object.keys(jakobHeld())), plan = new Set(ib.items.map(x => x.key));
+  const watch = new Set((S.pf.watchlist || []).map(w => keyOf(w.kind, w.symbol)));
+  const fl = ['Stärkste', 'Neu für dich', 'Watchlist', 'Länder'].includes(S.scf) ? S.scf : 'Stärkste';
+  let xs = all.filter(r => fl === 'Watchlist' ? watch.has(r.key) : fl === 'Länder' ? r.market : fl === 'Neu für dich' ? r.rank && !held.has(r.key) && !plan.has(r.key) : !!r.rank);
+  xs.sort((a, b) => (a.rank || 999) - (b.rank || 999) || (b.rs || 0) - (a.rs || 0));
+  const more = xs.length > 15 && !S.scAll; if (more) xs = xs.slice(0, 15);
+  const tagOf = k => held.has(k) ? '<span class="chip">im Depot Jakob</span>' : plan.has(k) ? '<span class="chip blue">im Ideal-Depot</span>' : '';
+  const bar = (l, v, mx) => `<div class="fb"><span>${l}</span><i><b style="width:${Math.max(0, Math.min(100, (v || 0) / mx * 100))}%${v < 0 ? ';background:var(--down)' : ''}"></b></i><em class="num">${v == null ? '–' : pctS(v, 0)}</em></div>`;
+  const rows = xs.map(r => {
+    const open = S.scx === r.key, tracked = !!(D(r.key).hist || A(r.key).price), mx = Math.max(10, ...[r.r3, r.r6, r.r9, r.r12].map(v => Math.abs(v || 0)));
+    return `<tr data-act="scx" data-key="${esc(r.key)}" class="${open ? 'open' : ''}"><td>${rsBadge(r)}</td><td>${nameCell(r.key, r.market ? 'Länder-ETF' : r.sector || '', ruleTag(r.key))} ${tagOf(r.key)}</td>
+      <td class="r num">${r.rank || '–'}</td><td class="r num ${sign(r.r3)}">${r.r3 == null ? '–' : pctS(r.r3, 0)}</td><td class="r num hm ${sign(r.r12)}">${r.r12 == null ? '–' : pctS(r.r12, 0)}</td>
+      <td class="r num hm">${r.from_high == null ? '–' : pctS(r.from_high, 0)}</td><td class="r num hm">${r.rev_g == null ? '–' : pctS(r.rev_g, 0)}</td><td class="r">${chgA(r.chg5)}</td></tr>
+      ${open ? `<tr class="xrow"><td colspan="8"><div class="cx"><div><p class="sh" style="margin-top:0">Rendite mit Dividenden (Gewicht in der Stärke)</p><div class="fbars wide">${bar('3 Monate (40 %)', r.r3, mx)}${bar('6 Monate (20 %)', r.r6, mx)}${bar('9 Monate (20 %)', r.r9, mx)}${bar('12 Monate (20 %)', r.r12, mx)}</div>
+        <ul class="dots" style="margin-top:10px"><li>${esc(idxTxt(r))}${r.industry ? ' · ' + esc(r.industry) : ''}</li>${r.rev_g != null ? `<li>Umsatz ${pctS(r.rev_g, 0)} zum Vorjahr${r.est90 != null ? `, Gewinnschätzung ${pctS(r.est90, 0)} in 90 Tagen` : ''}</li>` : ''}${r.earnings ? `<li>Quartalszahlen ${dateDe(r.earnings)}</li>` : ''}</ul></div>
+        <div><p class="sh" style="margin-top:0">Aufwärtstrend</p><div class="rules">${[[r.p200 > 0, 'Kurs über der 200-Tage-Linie', pctS(r.p200, 0)], [r.p50 < r.p200, '50-Tage-Linie über der 200-Tage-Linie', ''], [r.rank && r.rank <= ib.n, `Unter den ${ib.n} stärksten im Aufwärtstrend`, r.rank ? 'Rang ' + r.rank : '']].map(([ok, t, x]) => `<div class="rule">${stIcon(ok ? 'ok' : 'bad')}<div><b>${t}</b>${x ? `<div class="x">${x}</div>` : ''}</div></div>`).join('')}</div>
+        <div class="btnrow" style="margin-top:12px">${tracked ? `<button class="btn sm" data-act="open" data-key="${esc(r.key)}">Details</button>` : ''}${watch.has(r.key) || held.has(r.key) ? '' : `<button class="btn sm ghost" data-act="scwatch" data-key="${esc(r.key)}">Auf die Watchlist</button>`}</div></div></div></td></tr>` : ''}`;
+  }).join('');
+  const b = sc.breadth || {}, m = sc.members || {};
+  const empty = !xs.length ? `<p class="empty">${fl === 'Länder' ? 'Kein Länder-ETF unter den stärksten Titeln im Aufwärtstrend.' : fl === 'Watchlist' ? 'Keine Aktie deiner Watchlist in der Auswahl.' : 'Keine Titel in dieser Auswahl.'}</p>` : '';
+  return card('Kandidaten', `Die stärksten im Aufwärtstrend aus ${m.sp || 500} Aktien des S&P 500, ${m.ndx || 100} des Nasdaq-100 und ${m.markets || 18} Länder-ETFs · ${b.trend || '–'} von ${b.n || '–'} im Aufwärtstrend · ${stampDe(sc.updated)}`,
+    `<div class="tblwrap"><table class="tbl cand"><thead><tr><th>Stärke</th><th>Titel</th><th class="r">Rang</th><th class="r">3 Mon.</th><th class="r hm">12 Mon.</th><th class="r hm">vom Hoch</th><th class="r hm">Umsatz</th><th class="r">5 Tage</th></tr></thead><tbody>${rows}</tbody></table></div>${empty}
+    ${more ? `<div class="btnrow"><button class="btn sm ghost" data-act="scall">Alle zeigen</button></div>` : ''}
+    <p class="hint">Stärke 1 bis 99: Rang der relativen Stärke unter allen Titeln der Auswahl, wie das RS-Rating von IBD. Gerechnet aus der Rendite mit Dividenden: 3 Monate zählen 40 %, 6, 9 und 12 Monate je 20 %. Rang: Platz unter den Titeln im Aufwärtstrend (Kurs über der 200-Tage-Linie, 50-Tage-Linie darüber); die ersten ${ib.n} bilden das Ideal-Depot. Umsatz: Wachstum zum Vorjahr, nur zur Info, die Regel braucht ihn nicht. Zeile antippen für Details. Eine Auswahl, keine Kaufempfehlung. Keine Anlageberatung.</p>`,
+    seg('scf', ['Stärkste', 'Neu für dich', 'Watchlist', 'Länder'], fl), 'span12');
+}
+/* ---------------------------------------------------------------- Backtest und Recherche (Jakobs Wunsch vom 26. und 27.11.2026)
+   backtest.json (tracker/backtest.py): bekannte Strategien von Hedgefonds und Wachstums-Investoren, nachgebaut und über 10 Jahre
+   getestet, mit S&P 500 und Nasdaq-100 so, wie sie am jeweiligen Tag zusammengesetzt waren. Ansichten S.btv. Diagramm #ch-bt. */
 const pc = (v, d = 0) => v == null ? '–' : pctS(v, d);
+const btMain = b => (b.strategies || []).find(x => x.id === (stopPct() ? 'best' : 'best_free')) || (b.strategies || [])[0];
+const GRP = {vorlage: 'Vorlage', bisher: 'bisher', index: 'Index'};
+const grpChip = x => x.id === (stopPct() ? 'best' : 'best_free') ? ' <span class="chip good">deine Regel</span>' : GRP[x.group] ? ` <span class="chip">${GRP[x.group]}</span>` : '';
 function btResult(b) {
-  const S2 = Object.fromEntries(b.strategies.map(x => [x.id, x])), te = b.period.train_end.slice(0, 4);
-  const main = sectorsOn() && S2.opt_sec ? 'opt_sec' : 'opt';
-  const rows = BT_ORDER.map(id => S2[id]).filter(Boolean).map(x => `<tr class="${x.id === main || x.id === 'now' ? 'strong' : ''}"><td><b>${esc(x.name)}</b><div class="ts hm">${esc(x.desc)}</div></td>
-    <td class="r num ${sign(x.all.cagr)}">${pc(x.all.cagr)}</td><td class="r num ${x.all.dd < -(b.limit || 35) ? 'neg' : ''}">${pc(x.all.dd)}</td>
-    <td class="r num hm">${x.train ? pc(x.train.cagr) : '–'}</td><td class="r num hm">${x.test ? pc(x.test.cagr) : '–'}</td><td class="r num">${bigE(x.save[0])}</td></tr>`).join('');
+  const te = b.period.train_end.slice(0, 4), ids = ['best', 'best_free', 'calm', 'qg', 'qg_any', 'jakob', 'QQQ', 'SPY'], S2 = Object.fromEntries(b.strategies.map(x => [x.id, x]));
+  const rows = ids.map(id => S2[id]).filter(Boolean).map(x => `<tr class="${x.id === btMain(b).id ? 'strong' : ''}"><td><b>${esc(x.name)}</b>${grpChip(x)}<div class="ts hm">${esc(x.desc || '')}</div></td>
+    <td class="r num">${pc(x.cagr, 1)}</td><td class="r num hm">${x.min === x.max ? '–' : `${nf(x.min, 1)} bis ${nf(x.max, 1)}`}</td><td class="r num">${pc(x.dd)}</td><td class="r num hm">${pc(x.train, 1)}</td><td class="r num hm">${pc(x.test, 1)}</td></tr>`).join('');
   return `<div class="btf">${(b.findings || []).map(f => `<div><b>${esc(f.t)}</b><p>${esc(f.x)}</p></div>`).join('')}</div>
-    <p class="sh">1.000 € im Monat seit ${dateDe(b.period.start)}</p><div class="chart" id="ch-bt"></div><div id="lg-bt"></div>
-    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Regeln</th><th class="r">pro Jahr</th><th class="r">Rückgang</th><th class="r hm">bis ${te}</th><th class="r hm">ab ${te}</th><th class="r">Sparplan</th></tr></thead><tbody>${rows}</tbody></table></div>
-    ${b.sectors ? `<p class="hint">Starke Sektoren außer KI (Monate): ${esc(Object.entries(b.sectors.months || {}).sort((a, c) => Object.values(c[1]).reduce((s, v) => s + v, 0) - Object.values(a[1]).reduce((s, v) => s + v, 0)).map(([n, y]) => `${n} ${Object.entries(y).map(([yy, m]) => `${yy}: ${m}`).join(', ')}`).join(' · ') || 'keiner')}. Im Schnitt ${b.sectors.share} % des Depots in anderen Sektoren, ${b.sectors.n} Titel aus 11 Sektoren.</p>` : ''}`;
+    <p class="sh">Aus 10.000 $ seit ${dateDe(b.period.start)}</p><div class="chart" id="ch-bt"></div><div id="lg-bt"></div>
+    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Regeln</th><th class="r">pro Jahr</th><th class="r hm">je nach Stichtag</th><th class="r">größter Rückgang</th><th class="r hm">bis ${te}</th><th class="r hm">ab ${te}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="hint">Pro Jahr und Rückgang: Schnitt aus ${b.offsets || 6} Stichtagen rund ums Monatsende (15 Handelstage davor bis 10 danach), weil der Tag im Monat mehrere Prozentpunkte ausmacht. „Bis ${te}“ und „ab ${te}“: die beiden Hälften des Zeitraums; übernommen wurde nur, was in beiden besser war.</p>`;
 }
-function btSignals(b) {
-  const h = (x, k) => (x.h || {})[k] || {};
-  const r1 = b.signals.map(x => `<tr><td>${esc(x.name)}</td><td class="r num hm">${nf(h(x, '126').n || 0, 0)}</td><td class="r num hm">${pc(h(x, '63').avg, 1)}</td><td class="r num">${pc(h(x, '126').avg, 1)}</td><td class="r num hm">${pc(h(x, '252').avg, 1)}</td>
-    <td class="r num ${sign(h(x, '126').ex_ew)}">${pc(h(x, '126').ex_ew, 1)}</td><td class="r num ${sign(h(x, '252').ex_ew)}">${pc(h(x, '252').ex_ew, 1)}</td><td class="r num hm">${h(x, '126').hit_ew == null ? '–' : h(x, '126').hit_ew + ' %'}</td></tr>`).join('');
-  const any = b.market_any.avg, mrow = (name, n, a, cls = '') => `<tr class="${cls}"><td>${esc(name)}</td><td class="r num">${n}</td><td class="r num hm">${pc(a.sp['126'])}</td><td class="r num">${pc(a.sp['252'])}</td><td class="r num hm">${pc(a.soxx['126'])}</td><td class="r num">${pc(a.soxx['252'])}</td><td class="r num">${pc(a.ew['252'])}</td></tr>`;
-  const r2 = b.market.map(m => mrow(m.name, m.events.length, m.avg)).join('') + mrow('Zum Vergleich: beliebiger Tag', '–', any, 'strong');
-  const evl = id => { const m = b.market.find(x => x.id === id); return m ? `<details class="qdone"><summary>${esc(m.name)}: alle ${m.events.length} Fälle</summary><div class="rows tight">${m.events.map(e => `<div class="row"><div class="l"><div class="t num">${dateDe(e.day)} <span class="muted">· ${e.v}</span></div></div><div class="r small num">S&amp;P 12 Mon. ${pc(e.r.sp['252'])} · Halbleiter ${pc(e.r.soxx['252'])}</div></div>`).join('')}</div></details>` : ''; };
-  return `<p class="sh" style="margin-top:0">Signale je Titel: Rendite danach im Schnitt</p>
-    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Signal</th><th class="r hm">Fälle</th><th class="r hm">3 Mon.</th><th class="r">6 Mon.</th><th class="r hm">12 Mon.</th><th class="r">ggü. Auswahl 6 M.</th><th class="r">12 M.</th><th class="r hm">besser als Auswahl</th></tr></thead><tbody>${r1}</tbody></table></div>
-    <p class="hint">„ggü. Auswahl“: Vorsprung vor allen ${b.universe} Titeln gleich gewichtet im selben Zeitraum. Ein Titel zählt höchstens einmal je Woche als Signal.</p>
-    <p class="sh">Marktsignale: Rendite danach im Schnitt</p>
-    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Signal</th><th class="r">Fälle</th><th class="r hm">S&amp;P 6 M.</th><th class="r">S&amp;P 12 M.</th><th class="r hm">Halbleiter 6 M.</th><th class="r">Halbleiter 12 M.</th><th class="r">Auswahl 12 M.</th></tr></thead><tbody>${r2}</tbody></table></div>
-    ${evl('fear25')}${evl('semis30')}
-    <p class="hint">Angst und Gier hier aus derselben eigenen Rechnung wie in der Übersicht, Tag für Tag nachgerechnet. Fälle aus den letzten 12 Monaten haben noch kein Ergebnis für 12 Monate.</p>`;
+function btStrats(b) {
+  const te = b.period.train_end.slice(0, 4), xs = b.strategies.slice().sort((a, c) => c.cagr - a.cagr);
+  const rows = xs.map(x => `<tr class="${x.id === btMain(b).id ? 'strong' : ''}"><td><b>${esc(x.name)}</b>${grpChip(x)}<div class="ts">${esc(x.desc || '')}</div></td>
+    <td class="r num">${pc(x.cagr, 1)}</td><td class="r num">${pc(x.dd)}</td><td class="r num hm">${pc(x.train, 1)}</td><td class="r num hm">${pc(x.test, 1)}</td><td class="r num hm">${x.trades ? nf(x.trades / (b.years || 10), 0) : '–'}</td></tr>`).join('');
+  return `<p class="body small" style="margin-top:0">Alle Strategien mit denselben Bedingungen: 7 Titel, gleich gewichtet, Prüfung zum Monatsende, 0,1 % Kosten je Kauf und Verkauf, in Dollar mit Dividenden. Nachgebaut nach den Veröffentlichungen ihrer Erfinder, vereinfacht auf frei verfügbare Daten (Kurse von Yahoo, Umsatz und Gewinn aus den Berichten an die SEC ab dem Tag der Veröffentlichung).</p>
+    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Strategie</th><th class="r">pro Jahr</th><th class="r">Rückgang</th><th class="r hm">bis ${te}</th><th class="r hm">ab ${te}</th><th class="r hm">Handel pro Jahr</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="hint">Deine Regel verbindet zwei davon, die relative Stärke von William O'Neil (IBD, CAN SLIM) als Rangfolge und den Aufwärtstrend von Mark Minervini als Filter, mit zwei Bausteinen deiner Quality-Growth-Vorlage: 6 Titel und Gleichgewichtung nur einmal im Jahr. Gewählt Schritt für Schritt: Ein Baustein kam nur dazu, wenn er bis ${te} und danach besser war. Die Filter der Vorlage (Wachstum, Qualität, Bewertung), ihre Punkte als Rangfolge und das Warten auf Rücksetzer kosteten viel Rendite: Sie ließen meist nur wenige Aktien übrig.</p>`;
 }
-function btPoints(b) {
-  const bk = b.buckets, mx = Math.max(10, ...bk.map(x => Math.abs(((x.h || {})['252'] || {}).ex_ew || 0)));
-  const bars = bk.slice().reverse().map(x => { const v = ((x.h || {})['252'] || {}).ex_ew, n = ((x.h || {})['252'] || {}).n || 0, w = v == null ? 0 : Math.abs(v) / mx * 50;
-    return `<div class="pbar"><span class="score t${tierOf(x.pts)}">${x.pts}</span><span class="pb"><i class="${v >= 0 ? 'pos' : 'neg'}" style="${v >= 0 ? 'left:50%' : 'right:50%'};width:${w}%"></i></span><b class="num ${sign(v)}">${pc(v, 1)}</b><small class="num">${n}</small></div>`; }).join('');
-  const sc = ((b.opt || {}).schemes || []).map(x => `<tr class="${x.id === b.opt.scheme ? 'strong' : ''}"><td>${esc(x.name)}</td><td class="r num">${x.train ? pc(x.train.cagr) + ' / ' + pc(x.train.dd) : '–'}</td><td class="r num">${x.test ? pc(x.test.cagr) + ' / ' + pc(x.test.dd) : '–'}</td><td class="r num ${sign(x.spread.test252)}">${pc(x.spread.test252, 1)}</td><td class="r num hm ${sign(x.spread.train252)}">${pc(x.spread.train252, 1)}</td></tr>`).join('');
-  const te = b.period.train_end.slice(0, 4);
-  return `<p class="sh" style="margin-top:0">„Für dich“ je Monat nachgerechnet: Vorsprung 12 Monate später gegenüber der Auswahl</p><div class="pbars">${bars}</div>
-    <p class="hint">Rechts die Zahl der Monatswerte. Nachgerechnet aus Kursstärke, Stärke im Thema, Umsatzwachstum und Betriebsmarge (Berichte an die SEC, ab dem Tag der Veröffentlichung). Gewinnschätzungen, Bewertung und Analystenziele gibt es für frühere Jahre nicht frei, sie fehlen. Die Bewertungspunkte (günstig oder teuer) lassen sich darum nicht nachrechnen.</p>
-    <p class="sh">Welche Gewichtung traf besser?</p>
-    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Gewichtung (jeden Monat die besten 7)</th><th class="r">bis ${te}: pro Jahr / Rückgang</th><th class="r">ab ${te}</th><th class="r">Trennschärfe ab ${te}</th><th class="r hm">bis ${te}</th></tr></thead><tbody>${sc}</tbody></table></div>
-    <p class="hint">Trennschärfe: wie weit das beste Fünftel 12 Monate später vor dem schwächsten lag. Bis ${te} trennte keine Gewichtung gut, danach vor allem die Kursstärke.</p>`;
+function btProbes(b) {
+  const rows = (b.probes || []).map(x => `<tr><td><b>${esc(x.name)}</b><div class="ts">${esc(x.note || '')}</div></td><td class="r num">${pc(x.cagr, 1)}</td><td class="r num">${pc(x.dd)}</td><td class="r num hm">${pc(x.train, 1)}</td><td class="r num hm">${pc(x.test, 1)}</td></tr>`).join('');
+  const te = b.period.train_end.slice(0, 4), m = btMain(b);
+  return `<p class="body small" style="margin-top:0">Gegenproben zu deiner Regel (${pc(m.cagr, 1)} pro Jahr): Was passiert, wenn man einen Baustein ändert? Wo ein anderer Bezug gilt, steht er dabei.</p>
+    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Änderung</th><th class="r">pro Jahr</th><th class="r">Rückgang</th><th class="r hm">bis ${te}</th><th class="r hm">ab ${te}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="note" style="margin-top:12px"><b>Grenzen:</b> ${esc((b.limits || []).join(' '))}</div>`;
 }
-function btTitles(b) {
-  if (!(b.titles || []).length) return '<p class="empty">Kein Plan mit Titeln, die im Backtest vorkommen.</p>';
-  const T = b.titles, first = T[0].strip;
-  const years = first.map((s, i) => [i, dayToDate(s[0])]).filter(([i, d]) => d.getUTCMonth() === 0).map(([i, d]) => `<span style="left:${i / first.length * 100}%">${String(d.getUTCFullYear()).slice(2)}</span>`).join('');
-  return T.map(t => { const key = keyBySym(t.sym), ev = t.events.filter(e => e.type === 'mom'), dn = t.events.filter(e => e.type === 'down');
-    const ex6 = ev.filter(e => e.ex6 != null), avg = ex6.length ? ex6.reduce((s, e) => s + e.ex6, 0) / ex6.length : null, hi = t.strip.filter(s => s[1] >= 8).length;
-    return `<div class="btt"><div class="bth">${tag(key)}<span class="small muted">${hi} von ${t.strip.length} Monaten mit 8 bis 10 Punkten · ${ev.length} Momentum-Signale, danach 6 Monate im Schnitt ${pc(avg, 0)} ggü. Auswahl · ${dn.length} Trendbrüche</span></div>
-      <div class="ptstrip">${t.strip.map(s => { const d = dayToDate(s[0]); return `<i class="t${s[1] == null ? 'x' : tierOf(s[1])}${s[2] === 'on' ? ' on' : ''}" title="${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}: ${s[1] == null ? 'keine Punkte' : s[1] + ' Punkte'}${s[2] === 'on' ? ', Momentum-Signal an' : ''}"></i>`; }).join('')}</div><div class="ptyears">${years}</div>
-      <details class="qdone"><summary>Signale mit Ergebnis (${t.events.length})</summary><div class="rows tight">${t.events.slice().reverse().map(e => `<div class="row"><div class="l"><div class="t"><span class="num">${dateDe(e.day)}</span> <span class="chip ${e.type === 'mom' ? 'good' : 'bad'}">${e.type === 'mom' ? 'Momentum an' : 'Trendbruch'}</span></div></div><div class="r small num">6 Mon. ${pc(e.r6)} · 12 Mon. ${pc(e.r12)}</div></div>`).join('')}</div></details></div>`; }).join('')
-    + `<p class="hint">Jedes Kästchen ist ein Monat, die Farbe zeigt „Für dich“ (grün 7 bis 10, rot 1 bis 4), der Strich darunter das Momentum-Signal. Nachgerechnet mit den Regeln von heute und nur den Daten von damals.</p>`;
+function btYears(b) {
+  const S2 = Object.fromEntries(b.strategies.map(x => [x.id, x])), ids = ['best', 'best_free', 'qg', 'jakob', 'QQQ', 'SPY'].filter(id => S2[id]);
+  const ys = Object.keys(S2.best.years || {}).sort();
+  return `<div class="tblwrap"><table class="tbl bt"><thead><tr><th>Jahr</th>${ids.map(id => `<th class="r">${esc(S2[id].short || S2[id].name)}</th>`).join('')}</tr></thead>
+    <tbody>${ys.map(y => `<tr><td class="num">${y}</td>${ids.map(id => { const v = (S2[id].years || {})[y]; return `<td class="r num ${sign(v)}">${pc(v, 0)}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>
+    <p class="hint">Rendite je Kalenderjahr mit dem Stichtag Monatsende. ${esc(ys[0])} und ${esc(ys[ys.length - 1])} sind nur Teiljahre.</p>`;
 }
-function btRules(b) {
-  const o = b.opt, cu = o.current, ch = o.chosen, te = b.period.train_end.slice(0, 4), same = JSON.stringify(cu.p) === JSON.stringify(ch.p);
-  const col = (t, d, x) => `<div><b>${t}</b><p class="small" style="margin:4px 0 8px">${esc(d)}</p><div class="tiles two" style="margin:0">${tile('bis ' + te, pc(x.train.cagr) + ' pro Jahr', 'Rückgang ' + pc(x.train.dd))}${tile('ab ' + te, pc(x.test.cagr) + ' pro Jahr', 'Rückgang ' + pc(x.test.dd), '')}</div></div>`;
-  const eff = Object.entries(o.effect).map(([k, vs]) => vs.map((x, i) => `<tr><td>${i === 0 ? `<b>${BT_P[k][0]}</b>` : ''}</td><td>${esc(BT_P[k][1](x.v))} ${x.v === cu.p[k] ? '<span class="chip">heute</span>' : ''}${x.v === ch.p[k] && x.v !== cu.p[k] ? '<span class="chip good">neu</span>' : ''}</td>
-    <td class="r num">${nf(x.train, 1)}</td><td class="r num">${nf(x.test, 1)}</td></tr>`).join('')).join('');
-  const lim = b.limit || 35, ex = (o.exposure || []).map(x => `<tr class="${(o.exposure.find(y => y.dd >= -lim) || {}).share === x.share ? 'strong' : ''}"><td>${x.share} % investiert, ${100 - x.share} % Reserve</td><td class="r num">${pc(x.cagr)}</td><td class="r num ${x.dd < -lim ? 'neg' : ''}">${pc(x.dd)}</td></tr>`).join('');
-  const adopt = !same && (ansOf('sell') !== {signal: 'signal', trend: 'trend', better: 'better'}[ch.p.exit] || ansOf('regime') !== (ch.p.regime === 'half' ? 'half' : 'full'));
-  return `<div class="btcmp">${col('Deine Regeln heute', o.desc_current, cu)}${col(same ? 'Keine bessere Variante' : 'Optimiert', o.desc_chosen, ch)}</div>
-    ${adopt ? `<div class="btnrow" style="margin-top:12px"><button class="btn" data-act="btadopt">Optimierte Regeln übernehmen</button><span class="small muted">setzt in deinem Profil Verkauf und Marktfilter wie links beschrieben</span></div>` : ''}
-    ${o.free ? `<div class="note" style="margin-top:12px"><b>Außerhalb deines Profils:</b> ${esc(o.free.desc)}: bis ${te} ${pc(o.free.train.cagr)} pro Jahr (Rückgang ${pc(o.free.train.dd)}), ab ${te} ${pc(o.free.test.cagr)} (Rückgang ${pc(o.free.test.dd)}). Nicht gewählt, weil die Zahl der Titel außerhalb deiner Antwort liegt.</div>` : ''}
-    ${(o.path || []).length ? `<p class="sh">So kam die Auswahl zustande</p><ol class="small" style="margin:4px 0 0;padding-left:20px">${o.path.map(p => `<li>${BT_P[p.k][0]}: ${esc(BT_P[p.k][1](p.v))}${p.tie ? ' (nicht in beiden Hälften schlechter, darum nach deinen Faktoren)' : ''} <span class="muted num">· danach ${nf(p.train, 1)} bis ${te}, ${nf(p.test, 1)} ab ${te}</span></li>`).join('')}</ol>` : ''}
-    <p class="sh">So wirkt jede Regel im Schnitt aller ${nf(o.n, 0)} Varianten</p>
-    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Regel</th><th>Einstellung</th><th class="r">bis ${te}</th><th class="r">ab ${te}</th></tr></thead><tbody>${eff}</tbody></table></div>
-    <p class="hint">Zahl = Rendite pro Jahr in Prozent; jeder Prozentpunkt Rückgang über deiner Grenze (−${b.limit || 35} %) kostet 2 Punkte. Höher ist besser. Gewählt wurde Schritt für Schritt von deinen Regeln aus und nur, was mit genau dieser Kombination in beiden Hälften besser war, damit die Regeln nicht bloß die Vergangenheit nachzeichnen.</p>
-    <p class="sh">Deine Grenze von −${b.limit || 35} %: Rückgang je nach Aktienanteil</p>
-    <div class="tblwrap"><table class="tbl bt"><thead><tr><th>Optimierte Regeln mit</th><th class="r">pro Jahr</th><th class="r">größter Rückgang</th></tr></thead><tbody>${ex}</tbody></table></div>`;
+function btMix(b) {
+  const mx = Math.max(...(b.sectors || []).map(x => x[1]), 1);
+  const sec = (b.sectors || []).map(([n, v]) => `<div class="fb"><span>${esc(n)}</span><i><b style="width:${v / mx * 100}%"></b></i><em class="num">${nf(v, 0)} %</em></div>`).join('');
+  const held = (b.held || []).map(([sym, months, name]) => `<div class="row"><div class="l"><div class="t">${esc(name || sym)} <span class="muted small">${esc(sym)}</span></div></div><div class="r small num">${months} Monate</div></div>`).join('');
+  return `<div class="cx"><div><p class="sh" style="margin-top:0">Branchen im Depot, Anteil der Monate</p><div class="fbars sec">${sec}</div>
+    <p class="hint">${nf(b.n_titles || 0, 0)} verschiedene Titel in 10 Jahren. Länder-ETFs durften immer rein und kamen in ${nf(b.market_share || 0, 1)} % der Fälle zum Zug. In ${nf(b.growth_share || 0, 0)} % der Monate wuchs der Umsatz eines gehaltenen Titels um mindestens 15 %: Die stärksten Aktien sind meist schnell wachsende Firmen.</p></div>
+    <div><p class="sh" style="margin-top:0">Am längsten gehalten</p><div class="rows tight">${held}</div></div></div>`;
 }
+function btSources(b) {
+  return `<p class="body small" style="margin-top:0">Recherche vom ${dateDe(b.made)}: bekannte Strategien von Hedgefonds und Wachstums-Investoren, ihre Regeln und belegten Ergebnisse. Daten für den Test:</p>
+    <ul class="dots">${(b.sources || []).map(s => `<li>${s.url ? `<a href="${esc(safeUrl(s.url) || '#')}" target="_blank" rel="noopener">${esc(s.t)}</a>` : esc(s.t)}${s.x ? ` <span class="muted">· ${esc(s.x)}</span>` : ''}</li>`).join('')}</ul>`;
+}
+// Ideal-Depot nachgerechnet: das Modell aus screen.json (heutige Auswahl, seit Beginn der Kurse) gegen S&P 500 und Nasdaq-100
+function modelCard() {
+  const m = (S.screen || {}).ideal || {}, tr = m.track || [];
+  if (tr.length < 20) return '';
+  const r = (tr[tr.length - 1][1] / tr[0][1] - 1) * 100, sp = benchIndex('SP500', [tr[0][0], tr[tr.length - 1][0]]), nd = benchIndex('NDX', [tr[0][0], tr[tr.length - 1][0]]);
+  let peak = 0, dd = 0; for (const [, v] of tr) { peak = Math.max(peak, v); dd = Math.min(dd, (v / peak - 1) * 100); }
+  const kpi = (l, v, n, cls = '') => `<div class="sx-kpi"><span>${l}</span><b class="num ${cls}">${v}</b>${n ? `<small>${n}</small>` : ''}</div>`;
+  return `<section class="card span12"><div class="head"><div><h2>Ideal-Depot nachgerechnet</h2><p class="sub">Die Regel Tag für Tag seit ${dateDe(dayIso(tr[0][0]))}, mit der heutigen Auswahl</p></div></div>
+    <div class="sx-kpis">${kpi('Ideal-Depot', pctS(r, 0), 'seit ' + dateDe(dayIso(tr[0][0])), sign(r))}${sp ? kpi('S&P 500', pctS((sp[1] - 1) * 100, 0), 'ohne Dividenden', sign(sp[1] - 1)) : ''}${nd ? kpi('Nasdaq-100', pctS((nd[1] - 1) * 100, 0), 'ohne Dividenden', sign(nd[1] - 1)) : ''}${kpi('Größter Rückgang', pctS(dd, 0), 'im Zeitraum')}${kpi('Stopps', String((m.stops || []).length), 'ausgelöst')}</div>
+    <div class="chart" id="ch-model"></div><div id="lg-model"></div>
+    <p class="hint">Mit den heutigen Mitgliedern von S&P 500 und Nasdaq-100 zurückgerechnet: Wer heute dazugehört, lief oft vorher gut. Das schönt diese Zahl; ehrlicher ist der Backtest darunter mit der damaligen Zusammensetzung. Ab heute läuft das Modell jeden Tag weiter. Keine Anlageberatung.</p></section>`;
+}
+function drawModel(el) {
+  const tr = ((S.screen || {}).ideal || {}).track || [];
+  if (tr.length < 2) return;
+  const d = tr.map(x => x[0]), s = [{name: 'Ideal-Depot', color: 'var(--accent)', area: true, pts: tr.map(x => [x[0], (x[1] / tr[0][1] - 1) * 100])}];
+  const sp = benchIndex('SP500', d), nd = benchIndex('NDX', d);
+  if (nd) s.push({name: 'Nasdaq-100', color: 'var(--s2)', pts: d.map((x, i) => [x, (nd[i] - 1) * 100])});
+  if (sp) s.push({name: 'S&P 500', color: 'var(--ink3)', pts: d.map((x, i) => [x, (sp[i] - 1) * 100])});
+  lineChart(el, s, {fmt: v => pctS(v, 0), height: 220, label: 'Ideal-Depot nach der Regel gegen die Indizes, in Prozent', hlines: [{y: 0, label: '', color: 'var(--line2)'}]});
+  $('#lg-model').innerHTML = legend(s);
+}
+const BTV = ['Ergebnis', 'Strategien', 'Gegenproben', 'Jahre', 'Streuung', 'Quellen'];
 function btCard() {
   const b = S.bt;
   if (b === undefined) { setTimeout(loadBacktest, 0); return card('Backtest: 10 Jahre', 'Wird geladen …', '<p class="empty">Lädt …</p>', '', 'span12'); }
-  if (!b) return card('Backtest: 10 Jahre', 'Hätten deine Regeln funktioniert?', '<p class="empty">Noch kein Backtest gerechnet.</p>', '', 'span12');
-  const v = S.btv || 'Ergebnis', fn = {Ergebnis: btResult, Signale: btSignals, Punkte: btPoints, 'Deine Titel': btTitles, Regeln: btRules}[v] || btResult;
-  return card('Backtest: 10 Jahre', `Hätten deine Regeln funktioniert? ${dateDe(b.period.start)} bis ${dateDe(b.period.end)}, ${b.universe} Titel aus KI und Halbleitern${b.sectors ? ` und ${b.sectors.n} aus anderen Sektoren` : ''}, nur mit Daten von damals`,
-    fn(b) + `<p class="hint">Grenzen: Die Auswahl der Titel ist von heute, die Gewinner von heute sind also dabei und Pleiten fehlen. Darum zählt vor allem der Vergleich mit „Alle Titel der Auswahl“. Monatlich umgeschichtet, ohne Steuern. Vergangene Renditen sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p>`,
-    seg('btv', ['Ergebnis', 'Signale', 'Punkte', 'Deine Titel', 'Regeln'], v), 'span12');
+  if (!b || b.rule !== RULE_V) return card('Backtest: 10 Jahre', 'Welche Strategie hätte am meisten gebracht?', '<p class="empty">Noch kein Backtest für Wachstums-Momentum gerechnet.</p>', '', 'span12');
+  const v = BTV.includes(S.btv) ? S.btv : 'Ergebnis', fn = {Ergebnis: btResult, Strategien: btStrats, Gegenproben: btProbes, Jahre: btYears, Streuung: btMix, Quellen: btSources}[v];
+  return card('Backtest: 10 Jahre', `${dateDe(b.period.start)} bis ${dateDe(b.period.end)} · S&P 500 und Nasdaq-100 so, wie sie am jeweiligen Tag zusammengesetzt waren, dazu ${b.universe.markets} Länder-ETFs · nur Daten von damals`,
+    fn(b) + `<p class="hint">Ohne Steuern. Vergangene Renditen sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p>`, seg('btv', BTV, v), 'span12');
 }
-const kiList = () => { const tmin = {ai: 0.6, tech: 0.4, none: 0}[ansOf('themes') || 'ai'] ?? 0.6; return ((S.screen || {}).list || []).filter(r => thOf(r) >= tmin); };
-/* ---------------------------------------------------------------- Strategie, Ansicht „Heute“ (Redesign vom 24.11.2026, Jakobs Wunsch)
-   Drei Karten statt fünf: Depot Jakob (Wert, Lage, Kennzahlen, Diagramm gegen S&P 500 und Halbleiter), Plan (Kaufen in Teilen,
-   Ideal-Depot als Ziel je Titel mit Bestand und Wort deiner Regel, daneben die nächsten Schritte), Lage (Prüfungen und Hinweise),
-   dazu die Erklärung zum Aufklappen. Bausteine mit Präfix sx- (app.css). Rechnungen unverändert in app.js. */
-const meTxt = () => { const me = monthEnd(); return `${WT[me.getDay()]} ${me.getDate()}.${me.getMonth() + 1}.`; };
-// Betriebsart deiner Regeln heute: Ausnahme, Marktfilter, Momentum oder Abwarten
+/* ---------------------------------------------------------------- Strategie, Ansicht „Heute“ (Aufbau vom 24.11.2026, Jakobs Wunsch)
+   Depot Jakob (Wert, Lage, Kennzahlen, Diagramm gegen S&P 500 und Nasdaq-100), Plan (Ideal-Depot als Ziel je Titel mit Bestand
+   und Wort deiner Regel, daneben die nächsten Schritte), Lage (Prüfungen und Hinweise). Bausteine mit Präfix sx- (app.css). */
 function stratState(ib) {
-  const sm = (S.screen || {}).semis || {}, on = kiList().filter(r => (momOf(r.key) || r.mom || {}).state === 'on').length;
-  return ib.ex.on ? ['warn', 'Kaufen in Teilen', `Deine Ausnahme greift: ${ib.ex.text}. Gekauft wird auch ohne Momentum-Signal, nur Titel mit intakten Gewinnschätzungen.`]
-    : ib.filt ? ['', 'Halb investiert', `Halbleiter liegen ${pctS(sm.ma200, 0)} zu ihrer 200-Tage-Linie. Der Marktfilter hält die Hälfte als Reserve.`]
-    : ib.items.length ? ['good', 'Momentum zuerst', `${on} KI-${on === 1 ? 'Titel hat' : 'Titel haben'} ein Momentum-Signal. Gekauft wird, was ein Signal hat; verkauft, was es verliert.`]
-    : ['', 'Abwarten', 'Kein KI-Titel hat ein Signal und keine Ausnahme greift. Neues Geld bleibt Reserve, bis ein Signal kommt.'];
+  const b = ib.breadth || {};
+  return ib.items.length < ib.n ? ['warn', 'Teilweise Reserve', `Nur ${ib.items.length} Titel sind im Aufwärtstrend vorn. Freie Plätze bleiben Reserve, bis neue Titel in den Trend kommen.`]
+    : ['good', 'Wachstums-Momentum', `${b.trend ?? '–'} von ${b.n ?? '–'} Titeln aus S&P 500, Nasdaq-100 und den Schwellenländern sind im Aufwärtstrend. Gehalten werden die ${ib.n} stärksten; getauscht wird zum Monatsende, gleich gewichtet Ende Dezember${stopPct() ? `, sofort verkauft bei −${stopPct()} % vom Hoch seit Kauf` : ''}.`];
 }
-// Prüfungen „Hat sich Grundlegendes geändert?“ (Jakobs Wunsch vom 24.11.2026): Schätzungen, Ausnahme, Ideal-Depot, Momentum, Termine
+// Prüfungen „Hat sich Grundlegendes geändert?“: Stopp, Aufwärtstrend, Rang, neue Titel, Quartalszahlen
 function stratChecks(ib) {
-  const jb = jakobBook(), jh = jakobHeld(), keys = Object.keys(jh), nm = k => shortName(k), list = ks => ks.map(nm).join(', ');
-  const sr = k => scrRow(k) || {}, est = k => sr(k).est90, st = k => (momOf(k) || sr(k).mom || {}).state, word = k => (ruleOf(k) || {}).word;
-  const chk = [];
-  // Gewinnschätzungen: ab −10 % in 90 Tagen sofort verkaufen (deine Regel), darunter beobachten
-  const cut = keys.filter(k => (sr(k).flags || {}).cut || (est(k) != null && est(k) <= -10));
-  const soft = keys.filter(k => !cut.includes(k) && est(k) != null && est(k) <= -2), nod = keys.filter(k => est(k) == null);
-  chk.push(cut.length ? ['bad', 'Gewinnschätzung deutlich gesenkt', `${cut.map(k => `${nm(k)} (${pctS(est(k), 0)})`).join(', ')}. Nach deiner Regel sofort verkaufen.`]
-    : soft.length ? ['warn', 'Gewinnschätzung leicht gesenkt', `${soft.map(k => `${nm(k)} (${pctS(est(k), 0)} in 90 Tagen)`).join(', ')}. Noch kein Verkaufsgrund, das wäre ab −10 %.`]
-    : ['ok', 'Gewinnschätzungen halten', `Bei ${nod.length ? keys.length - nod.length + ' von ' + keys.length : 'allen ' + keys.length} Titeln gleich oder angehoben in 90 Tagen${nod.length ? '; ohne Daten: ' + list(nod) : ''}.`]);
-  // Ausnahme: solange sie greift, bleiben Titel auch ohne Signal; danach zählt zum Monatsende wieder das Signal
-  const sOut = keys.filter(k => sectorOut(sr(k)) && !cut.includes(k)), sell = keys.filter(k => word(k) === 'Verkaufen' && !cut.includes(k) && !sOut.includes(k));
-  chk.push(ib.ex.on ? ['ok', 'Ausnahme greift weiter', `${ib.ex.text[0].toUpperCase() + ib.ex.text.slice(1)}. Deine Titel bleiben auch ohne Momentum-Signal.`]
-    : sell.length ? ['bad', 'Ausnahme greift nicht mehr', `Zum Monatsende (${meTxt()}) verkaufen nach deiner Regel: ${list(sell)}.`]
-    : ['ok', 'Verkaufsregel hält', 'Keine Ausnahme nötig: Deine Titel halten die Verkaufsregel.']);
-  // Ideal-Depot: rausgefallene Titel werden zum Monatsende getauscht, offene mit dem Rest des Startbetrags gekauft
-  const inIb = new Set(ib.items.map(x => x.key)), out = keys.filter(k => !inIb.has(k) && !sell.includes(k) && !cut.includes(k) && !sOut.includes(k));
-  const open = ib.items.filter(x => !jh[x.key]), rest = Math.max(0, (+ansOf('capital') || 0) - jb.cost);
-  chk.push(out.length ? ['warn', 'Aus dem Ideal-Depot gefallen', `${list(out)}: Ein anderer Titel passt mindestens 2 Punkte besser. Nach deiner Regel Tausch zum Monatsende (${meTxt()}).`]
-    : ['ok', 'Alle Titel noch im Ideal-Depot', open.length ? `Noch nicht gekauft: ${open.map(x => `${nm(x.key)} (Ziel ${eur(x.eur, 0)})`).join(', ')}${rest >= 1 ? `. Vom Startbetrag offen: ${eur(rest, 0)}` : ''}.` : 'Kein Tausch nötig.']);
-  // Momentum: kommt das Signal, ist der Titel nicht mehr nur über die Ausnahme drin
-  const on = keys.filter(k => st(k) === 'on'), fade = keys.filter(k => st(k) === 'fade');
-  chk.push(on.length ? ['ok', `Momentum-Signal bei ${on.length} von ${keys.length}`, list(on) + (fade.length ? `; lässt nach: ${list(fade)}` : '') + '.']
-    : ['info', 'Noch kein Momentum-Signal', `Keiner deiner Titel liegt über seiner 50- und 200-Tage-Linie nahe am Jahreshoch${fade.length ? '; lässt nach: ' + list(fade) : ''}.`]);
-  // Andere Sektoren (Jakobs Wunsch vom 26.11.2026): zählen mit, solange ihr Sektor stark ist; danach zum Monatsende verkaufen
-  const sx = (S.screen || {}).sectors;
-  if (sx && sectorsOn()) {
-    const L = sx.list || [], strong = L.filter(x => x.strong), near = L.find(x => !x.strong), pts = v => (v > 0 ? '+' : v < 0 ? '−' : '') + nf(Math.abs(v), 0) + ' Punkte';
-    const stW = x => ({on: 'an', fade: 'lässt nach'})[x.state] || 'aus';
-    chk.push(sOut.length ? ['bad', 'Sektor nicht mehr stark', `${list(sOut)}: Zum Monatsende (${meTxt()}) verkaufen nach deiner Regel.`]
-      : strong.length ? ['info', (strong.length === 1 ? 'Starker Sektor: ' : 'Starke Sektoren: ') + strong.map(x => x.name).join(', '), `${strong.map(x => `${x.name} ${pts(x.r12)}`).join(', ')} gegen den S&P 500 in 12 Monaten, Momentum-Signal an. Ihre großen Titel zählen für dein Ideal-Depot, solange das so bleibt.`]
-      : ['info', 'Kein anderer Sektor stark', near ? `Am weitesten vorn: ${near.name} mit ${pts(near.r12)} gegen den S&P 500 in 12 Monaten, Signal ${stW(near)}. Ab ${sx.min} Punkten und mit Signal zählen seine großen Titel mit.` : 'Noch keine Daten zu den Sektoren.']);
-  }
-  // Quartalszahlen in den nächsten 3 Wochen: danach ändern sich oft die Schätzungen
+  const jh = jakobHeld(), keys = Object.keys(jh), nm = k => shortName(k), list = ks => ks.map(nm).join(', '), sr = k => scrRow(k) || {};
+  const chk = [], so = Object.fromEntries(keys.map(k => [k, stopOf(k)]));
+  const hit = keys.filter(k => so[k] && so[k].hit), near = keys.filter(k => so[k] && so[k].near && !so[k].hit);
+  const worst = keys.filter(k => so[k] && so[k].dd != null).sort((a, b) => so[a].dd - so[b].dd)[0];
+  chk.push(!stopPct() ? ['info', 'Ohne Stopp', 'Nach deiner Antwort verkauft die Regel nur zum Monatsende.']
+    : hit.length ? ['bad', 'Stopp erreicht', `${hit.map(k => `${nm(k)} (${pctS(so[k].dd, 0)})`).join(', ')} unter dem Hoch seit Kauf: nach deiner Regel sofort verkaufen. Der Platz bleibt bis zum Monatsende frei.`]
+    : near.length ? ['warn', 'Nahe am Stopp', `${near.map(k => `${nm(k)} ${pctS(so[k].dd, 0)}`).join(', ')} vom Hoch seit Kauf. Verkauft wird ab −${stopPct()} %.`]
+    : ['ok', 'Kein Stopp in Sicht', worst ? `Am weitesten unter dem Hoch seit Kauf: ${nm(worst)} ${pctS(so[worst].dd, 0)}. Verkauft wird ab −${stopPct()} %.` : 'Noch keine Kurse seit dem Kauf.']);
+  const outside = keys.filter(k => scrRow(k) && !sr(k).member && !hit.includes(k)), broke = keys.filter(k => sr(k).member && sr(k).trend === false && !hit.includes(k));
+  if (outside.length) chk.push(['bad', 'Nicht in der Auswahl', `${list(outside)}: weder im S&P 500 noch im Nasdaq-100. Nach deiner Regel zum Monatsende (${meTxt()}) verkaufen.`]);
+  chk.push(broke.length ? ['bad', 'Aufwärtstrend gebrochen', `${list(broke)}: Kurs unter der 200-Tage-Linie oder 50-Tage-Linie unter der 200-Tage-Linie. Nach deiner Regel zum Monatsende (${meTxt()}) verkaufen.`]
+    : ['ok', 'Aufwärtstrend hält', `Alle Titel aus der Auswahl liegen über ihrer 200-Tage-Linie, die 50-Tage-Linie darüber.`]);
+  const inIb = new Set(ib.items.map(x => x.key)), outR = keys.filter(k => sr(k).trend && sr(k).member && !inIb.has(k) && !hit.includes(k));
+  chk.push(outR.length ? ['warn', `Nicht mehr unter den ${ib.n} stärksten`, `${outR.map(k => `${nm(k)} (Rang ${sr(k).rank || '–'})`).join(', ')}. Nach deiner Regel Tausch zum Monatsende (${meTxt()}), wenn das so bleibt.`]
+    : ['ok', `Alle unter den ${ib.n} stärksten`, 'Kein Tausch nötig, solange das bis zum Monatsende hält.']);
+  const fresh = ib.items.filter(x => !jh[x.key]);
+  if (fresh.length) chk.push(['info', 'Neu im Ideal-Depot', `${fresh.map(x => `${nm(x.key)} (Rang ${x.rank})`).join(', ')}: Kaufen zum Monatsende (${meTxt()}), wenn sie dann noch vorn liegen.`]);
   const d0 = new Date().toISOString().slice(0, 10), d21 = new Date(Date.now() + 21 * 864e5).toISOString().slice(0, 10);
-  const soon = keys.filter(k => sr(k).earnings && sr(k).earnings >= d0 && sr(k).earnings <= d21).sort((a, b) => sr(a).earnings.localeCompare(sr(b).earnings));
-  if (soon.length) chk.push(['info', 'Quartalszahlen bald', soon.map(k => `${nm(k)} am ${dateDe(sr(k).earnings)}`).join(', ') + '. Danach ändern sich oft die Schätzungen.']);
+  const ed = k => sr(k).earnings || D(k).earnings_date || '';
+  const soon = keys.filter(k => ed(k) >= d0 && ed(k) <= d21).sort((a, b) => ed(a).localeCompare(ed(b)));
+  if (soon.length) chk.push(['info', 'Quartalszahlen bald', soon.map(k => `${nm(k)} am ${dateDe(ed(k))}`).join(', ') + '. Die Regel reagiert erst über Stopp, Trend oder Rang.']);
   const nb = chk.filter(x => x[0] === 'bad').length, nw = chk.filter(x => x[0] === 'warn').length;
   return {chk, head: nb ? ['bad', 'Handeln nach deinen Regeln'] : nw ? ['warn', nw === 1 ? '1 Punkt beobachten' : nw + ' Punkte beobachten'] : ['good', 'Nichts Grundlegendes geändert']};
 }
-// Nächste Schritte im Depot Jakob: Startkäufe oder Rest vom Startbetrag, Kaufen/Verkaufen/Nachkaufen, Monatsrate, Monatsende, Halten
+// Nächste Schritte im Depot Jakob: Stopp sofort, Startkäufe oder Rest vom Startbetrag, Tausch zum Monatsende, Monatsrate, Halten
 function stratSteps(ib) {
   const jh = jakobHeld(), empty = !Object.keys(jh).length, keys = [...new Set([...ib.items.map(x => x.key), ...Object.keys(jh)])];
   const rs = keys.map(k => ({key: k, r: ruleOf(k)})).filter(x => x.r), grp = w => rs.filter(x => x.r.word === w);
-  const lines = xs => `<div class="srows">${xs.map(x => `<button class="srow" data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<b class="num">${x.r.eur ? eur(x.r.eur, 0) : ''}</b></button>`).join('')}</div>`;
-  const steps = [];
-  // Rest vom Startbetrag (Jakobs Wunsch vom 24.11.2026: Startbetrag in Teilen angelegt): fehlende Titel und Auffüllen auf
-  // gleiches Gewicht in einem Schritt; die Monatsrate beginnt erst, wenn der Startbetrag angelegt ist
-  const rest = empty ? 0 : Math.max(0, (+ansOf('capital') || 0) - jakobBook().cost);
-  const gaps = rest >= ib.minp ? ib.items.map(it => ({key: it.key, gap: Math.max(0, it.eur - ((jh[it.key] || {}).value || 0))})).filter(x => x.gap > 0) : [];
+  const lines = xs => `<div class="srows">${xs.map(x => `<button class="srow" data-act="open" data-key="${esc((jh[x.key] && jh[x.key].via ? jh[x.key].via[0] : x.key))}">${tag(x.key)}<b class="num">${x.r.eur ? eur(x.r.eur, 0) : ''}</b></button>`).join('')}</div>`;
+  const steps = [], now = grp('Verkaufen').filter(x => x.r.when === 'sofort'), later = grp('Verkaufen').filter(x => x.r.when !== 'sofort');
+  if (now.length) steps.push(['Verkaufen', 'sofort, Stopp', lines(now)]);
+  // Rest vom Startbetrag (Jakobs Wunsch vom 24.11.2026): Stehen zum Monatsende Käufe an, bezahlen Verkäufe und Rest sie; sonst
+  // werden fehlende Titel und Lücken auf gleiches Gewicht in einem Schritt aufgefüllt
+  const rest = empty ? 0 : Math.max(0, (+ansOf('capital') || 0) - jakobBook().cost), buys = grp('Kaufen');
+  const gaps = !buys.length && !later.length && rest >= ib.minp ? ib.items.map(it => ({key: it.key, gap: Math.max(0, it.eur - ((jh[it.key] || {}).value || 0))})).filter(x => x.gap > 0) : [];
   const gsum = gaps.reduce((a, x) => a + x.gap, 0);
-  if (empty && grp('Kaufen').length) steps.push(['Startkäufe', `${grp('Kaufen').length} Aktien, je ${eur(ib.items[0].eur, 0)}`, `<div class="tgs">${grp('Kaufen').map(x => tag(x.key)).join('')}</div><p class="small muted" style="margin:6px 0 0">Im Depot „Jakob“ eintragen.</p>`]);
-  if (!empty && grp('Verkaufen').length) steps.push(['Verkaufen', 'zum Monatsende, ' + meTxt(), lines(grp('Verkaufen'))]);
-  if (gaps.length) steps.push(['Startbetrag auffüllen', `${eur(rest, 0)} offen`, `<div class="srows">${gaps.sort((a, b) => b.gap - a.gap).map(x => `<button class="srow" data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<b class="num">${eur(Math.round(x.gap * Math.min(1, rest / gsum) / 10) * 10, 0)}</b></button>`).join('')}</div><p class="small muted" style="margin:4px 0 0">Auf gleiches Gewicht, fehlende Titel zuerst.</p>`]);
-  else if (!empty && grp('Kaufen').length) steps.push(['Kaufen', '', lines(grp('Kaufen'))]);
-  if (grp('Nachkaufen').length && !gaps.length) steps.push(['Nachkaufen', 'Rücksetzer im Aufwärtstrend', lines(grp('Nachkaufen'))]);
-  const r = gaps.length ? null : monthlyRate();
+  if (empty && buys.length) steps.push(['Startkäufe', `${buys.length} Titel, je ${eur(ib.items[0].eur, 0)}`, `<div class="tgs">${buys.map(x => tag(x.key)).join('')}</div><p class="small muted" style="margin:6px 0 0">Zum Monatsende (${meTxt()}) kaufen, wie im Backtest. Im Depot „Jakob“ eintragen.</p>`]);
+  if (later.length) steps.push(['Verkaufen', 'zum Monatsende, ' + meTxt(), lines(later)]);
+  if (!empty && buys.length) steps.push(['Kaufen', 'zum Monatsende, ' + meTxt(), lines(buys) + `<p class="small muted" style="margin:4px 0 0">Je ${eur(ib.items[0].eur, 0)}, gleich gewichtet${later.length || rest >= 1 ? `; bezahlt aus ${later.length ? 'den Verkäufen' : ''}${later.length && rest >= 1 ? ' und ' : ''}${rest >= 1 ? `dem Rest vom Startbetrag (${eur(rest, 0)})` : ''}` : ''}.</p>`]);
+  if (gaps.length) steps.push(['Startbetrag auffüllen', `${eur(rest, 0)} offen`, `<div class="srows">${gaps.sort((a, b) => b.gap - a.gap).map(x => `<button class="srow" data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<b class="num">${eur(Math.round(x.gap * Math.min(1, rest / gsum) / 10) * 10, 0)}</b></button>`).join('')}</div><p class="small muted" style="margin:4px 0 0">Auf gleiches Gewicht.</p>`]);
+  if (grp('Nachkaufen').length && !gaps.length) steps.push(['Nachkaufen', rebalNow() ? 'Ende Dezember auf gleiches Gewicht' : 'Startbetrag anlegen', lines(grp('Nachkaufen'))]);
+  const over = rebalNow() ? ib.items.filter(it => jh[it.key] && jh[it.key].value - it.eur >= ib.minp) : [];
+  if (over.length) steps.push(['Teilverkauf', 'Ende Dezember auf gleiches Gewicht', `<div class="srows">${over.map(it => `<button class="srow" data-act="open" data-key="${esc(jh[it.key].via ? jh[it.key].via[0] : it.key)}">${tag(it.key)}<b class="num">−${eur(jh[it.key].value - it.eur, 0)}</b></button>`).join('')}</div>`]);
+  const r = gaps.length || rest >= ib.minp ? null : monthlyRate();   // Monatsrate erst, wenn der Startbetrag angelegt ist
   if (r) steps.push([`Monatsrate ${new Date().toLocaleDateString('de-DE', {month: 'long'})}`, eur(r.m, 0) + (r.reserve ? ` · ${eur(r.reserve, 0)} Reserve` : ''),
     r.pick.length ? `<div class="srows">${r.pick.map(x => `<button class="srow" data-act="open" data-key="${esc(x.key)}">${tag(x.key)}<b class="num">${eur(x.eur, 0)}</b></button>`).join('')}</div>` : `<p class="small muted" style="margin:0">${esc(r.why)}</p>`]);
-  if (!grp('Verkaufen').length) steps.push(['Monatsende prüfen', meTxt(), `<p class="small muted" style="margin:0">Signale neu prüfen: Was kein Signal mehr hat, wird verkauft; freie Plätze bekommen neue Titel.</p>`]);
+  if (!grp('Verkaufen').length) steps.push(['Monatsende prüfen', meTxt(), `<p class="small muted" style="margin:0">Rangfolge neu: Was nicht mehr unter den ${ib.n} stärksten im Aufwärtstrend ist, wird getauscht.${rebalNow() ? '' : ' Gleich gewichtet wird erst Ende Dezember.'}</p>`]);
   if (grp('Halten').length) steps.push(['Halten', '', `<div class="tgs">${grp('Halten').map(x => tag(x.key)).join('')}</div>`]);
   return steps;
 }
 // Diagramm Depot Jakob: seit Kauf (Gewinn in % gegen gleiche Käufe im S&P 500) oder die heutigen Positionen zurückgerechnet
-// gegen S&P 500 und Halbleiter (SOXX), in Prozent ab Beginn des Zeitraums
+// gegen S&P 500 und Nasdaq-100, in Prozent ab Beginn des Zeitraums
 const JK_DAYS = {'1M': 30, '3M': 91, '1J': 365};
 const jkRanges = () => ((jakobBook().series || {d: []}).d.length > 1 ? ['Seit Kauf'] : []).concat(Object.keys(JK_DAYS));
 const jkRange = () => { const rs = jkRanges(); return rs.includes(S.jkr) ? S.jkr : rs[0] === 'Seit Kauf' && jakobBook().series.d.length >= 5 ? 'Seit Kauf' : '3M'; };
@@ -938,8 +922,8 @@ function drawJakob(el) {
     let i0 = bc.d.findIndex(d => d >= from); if (i0 < 0) i0 = 0;
     const d = bc.d.slice(i0), v = bc.v.slice(i0), pct = x => d.map((dd, i) => [dd, (x[i] - 1) * 100]);
     s = [{name: 'Depot Jakob, heutige Positionen', color: 'var(--accent)', area: true, pts: d.map((dd, i) => [dd, v[0] ? (v[i] / v[0] - 1) * 100 : 0])}];
-    const sp = benchIndex('SP500', d), sx = benchIndex('SOXX', d);
-    if (sx) s.push({name: 'Halbleiter (SOXX)', color: 'var(--s2)', pts: pct(sx)});
+    const sp = benchIndex('SP500', d), nd = benchIndex('NDX', d);
+    if (nd) s.push({name: 'Nasdaq-100', color: 'var(--s2)', pts: pct(nd)});
     if (sp) s.push({name: 'S&P 500', color: 'var(--ink3)', pts: pct(sp)});
     label = 'Heutige Positionen mit den Kursen der Vergangenheit zurückgerechnet, in Prozent';
   }
@@ -949,8 +933,8 @@ function drawJakob(el) {
 // Karte 1: Depot Jakob auf einen Blick
 function stratTop(ib) {
   const jb = jakobBook(), has = jb.held.some(p => p.value > 0), st = stratState(ib), ck = has ? stratChecks(ib).head : null;
-  const sm = (S.screen || {}).semis || {}, fg = (marketFg() || {}).value, list = kiList();
-  const on = list.filter(r => (momOf(r.key) || r.mom || {}).state === 'on').length, cap = +ansOf('capital') || 0;
+  const fg = (marketFg() || {}).value, cap = +ansOf('capital') || 0, b = ib.breadth || {};
+  const so = Object.keys(jakobHeld()).map(k => [k, stopOf(k)]).filter(x => x[1] && x[1].dd != null).sort((a, c) => a[1].dd - c[1].dd)[0];
   const kpi = (l, v, n, extra = '') => `<div class="sx-kpi"><span>${l}</span><b class="num">${v}</b>${n ? `<small>${n}</small>` : ''}${extra}</div>`;
   const stamp = S.screen && S.screen.updated ? stampDe(S.screen.updated) : 'heute';
   const lead = has ? `<div class="sx-val num">${eur(jb.value, 0)}</div>
@@ -959,28 +943,27 @@ function stratTop(ib) {
   const status = ck || [st[0], st[1]];
   const kpis = `<div class="sx-kpis">
       ${cap ? kpi('Angelegt', `${eur(jb.cost || 0, 0)}<small> / ${eur(cap, 0)}</small>`, `Startbetrag, ${nf(Math.min(100, (jb.cost || 0) / cap * 100), 0)} %`, `<i class="sx-bar"><i style="width:${Math.min(100, (jb.cost || 0) / cap * 100)}%"></i></i>`) : ''}
+      ${kpi('Im Aufwärtstrend', `${b.trend ?? '–'}<small> / ${b.n ?? '–'}</small>`, b.n ? `${nf(b.trend / b.n * 100, 0)} % der Auswahl` : '')}
+      ${kpi('Stopp-Abstand', so ? `<span class="${so[1].near ? 'neg' : ''}">${pctS(so[1].dd, 0)}</span>` : '–', so ? `${esc(shortName(so[0]))}, Stopp bei −${stopPct() || '–'} %` : 'vom Hoch seit Kauf')}
       ${kpi('Stimmung', `<span class="${fg != null && fg < FEAR ? 'neg' : ''}">${fg ?? '–'}</span>`, fg == null ? '' : fg < FEAR ? 'extreme Angst' : fg < 45 ? 'Angst' : fg <= 55 ? 'neutral' : 'Gier')}
-      ${kpi('Halbleiter', `<span class="${sm.from_high <= -20 ? 'neg' : ''}">${sm.from_high != null ? pctS(sm.from_high, 0) : '–'}</span>`, 'vom Hoch')}
-      ${kpi('Signale', `${on}<small> / ${list.length}</small>`, 'KI-Titel mit Momentum')}
       ${kpi('Nächste Prüfung', meTxt(), 'zum Monatsende')}</div>`;
   const chart = has ? `<div class="sx-charthead"><h3>Wertentwicklung</h3>${seg('jkr', jkRanges(), jkRange())}</div><div class="chart" id="ch-jk"></div><div id="lg-jk"></div>` : '';
   return `<section class="card span12 sx-top"><div class="sx-row"><div><div class="eyebrow">Depot Jakob · Stand ${stamp}</div>${lead}</div>
       <span class="sx-status"><i class="sdot ${status[0]}"></i>${esc(status[1])}</span></div>${kpis}${chart}</section>`;
 }
-// Karte 2: Plan – Betriebsart (z. B. Kaufen in Teilen), Ideal-Depot als Ziel je Titel mit Bestand, daneben die nächsten Schritte
-const VIA = {ausnahme: 'über die Ausnahme', halten: 'im Depot, Regel hält', signal: 'Momentum-Signal'};
+// Karte 2: Plan – Ideal-Depot als Ziel je Titel mit Bestand und Wort deiner Regel, daneben die nächsten Schritte
 function planCard(ib) {
   const jh = jakobHeld(), st = stratState(ib), keys = [...new Set([...ib.items.map(x => x.key), ...Object.keys(jh)])];
-  const xr = ((S.bt || {}).opt || {}).exposure, row0 = xr && xr.slice().sort((a, b) => Math.abs(a.share - ib.share * 100) - Math.abs(b.share - ib.share * 100))[0];
-  const meta = `Ideal-Depot: ${ib.items.length} Aktien · je ${ib.items.length ? eur(ib.items[0].eur, 0) : '–'} · ${nf(ib.share * 100, 0)} % investiert${ib.reserve >= 0.005 ? ' · ' + eur(ib.base * ib.reserve, 0) + ' Reserve' : ''}${row0 ? ' · Rückgang im Backtest ' + pctS(row0.dd, 0) : ''}`;
+  const m = S.bt && S.bt.rule === RULE_V ? btMain(S.bt) : null;
+  const meta = `Ideal-Depot: ${ib.items.length} Titel · je ${ib.items.length ? eur(ib.items[0].eur, 0) : '–'} · ${nf(ib.share * 100, 0)} % investiert${ib.reserve >= 0.005 ? ' · ' + eur(ib.base * ib.reserve, 0) + ' Reserve' : ''}${m ? ` · im Backtest ${pctS(m.cagr, 0)} pro Jahr, Rückgang ${pctS(m.dd, 0)}` : ''}`;
   const rows = keys.map(k => {
     const it = ib.items.find(x => x.key === k), h = jh[k], r = ruleOf(k) || {}, sr = scrRow(k) || {}, show = h && h.via ? h.via[0] : k;
     const v = h ? h.value : 0, tgt = it ? it.eur : 0, fill = tgt ? Math.min(1, v / tgt) : 1;
     const pnl = h && h.cost ? (h.value / h.cost - 1) * 100 : null, day = h && h.dayEur != null && h.value - h.dayEur > 0 ? h.dayEur / (h.value - h.dayEur) * 100 : null;
-    const sub = [sr.theme, it ? VIA[it.via] : 'nicht mehr im Ideal-Depot'].filter(Boolean).join(' · ');
-    return `<button class="sx-prow" data-act="open" data-key="${esc(show)}">${fitBadge(fitOf(scrRow(k)))}${logo(show)}
-      <span class="sx-pn"><b>${esc(shortName(k))}</b><small class="d">${esc(sub)}</small><small class="m">${r.word ? `<span class="rw ${r.cls}">${r.word}</span> · ` : ''}${h ? `<span class="${sign(day)}">${pctS(day, 1)}</span> heute` : esc(it ? VIA[it.via] : '')}</small></span>
-      <span class="sx-pw">${r.word ? `<span class="chip ${r.cls}">${r.word}</span>` : ''}</span>
+    const sub = [sr.market ? 'Länder-ETF' : sr.sector, it ? `Rang ${it.rank}` : sr.rank ? `Rang ${sr.rank}` : sr.member === false ? 'nicht in der Auswahl' : 'kein Aufwärtstrend'].filter(Boolean).join(' · ');
+    return `<button class="sx-prow" data-act="open" data-key="${esc(show)}">${rsBadge(sr.rs != null ? sr : null)}${logo(show)}
+      <span class="sx-pn"><b>${esc(shortName(k))}</b><small class="d">${esc(sub)}</small><small class="m">${r.word ? `<span class="rw ${r.cls}">${r.word}</span> · ` : ''}${h ? `<span class="${sign(day)}">${pctS(day, 1)}</span> heute` : esc(sub)}</small></span>
+      <span class="sx-pw">${r.word ? `<span class="chip ${r.cls}" title="${esc((r.why || []).join(' · '))}">${r.word}</span>` : ''}</span>
       <span class="sx-pc num ${sign(day)}">${h ? pctS(day, 1) : '–'}</span><span class="sx-pc num ${sign(pnl)}">${h ? pctS(pnl, 1) : '–'}</span>
       <span class="sx-pv num"><b>${h ? eur(v, 0) : 'offen'}</b><small class="d">${tgt ? 'Ziel ' + eur(tgt, 0) : 'kein Ziel'}</small><small class="m">${h ? `<span class="${sign(pnl)}">${pctS(pnl, 1)}</span> seit Kauf` : tgt ? 'Ziel ' + eur(tgt, 0) : ''}</small><i class="sx-bar${it ? '' : ' off'}"><i style="width:${fill * 100}%"></i></i></span></button>`;
   }).join('');
@@ -991,88 +974,85 @@ function planCard(ib) {
   return `<section class="card span12 sx-plan"><div class="sx-cols"><div class="sx-main">
       <div class="head"><div><h2>Plan</h2><p class="sub">${esc(meta)}</p></div><span class="sx-mode"><i class="sdot ${st[0]}"></i>${esc(st[1])}</span></div>
       <p class="sx-lead">${esc(st[2])}</p>${alloc}
-      ${ib.items.length || keys.length ? `<div class="sx-th"><span>Titel</span><span>Deine Regel</span><span class="r">Heute</span><span class="r">Seit Kauf</span><span class="r">Bestand / Ziel</span></div><div class="sx-plist">${rows}</div>`
-        : '<p class="empty">Gerade leer: kein KI-Titel mit Signal und keine Ausnahme. Das Geld bleibt Reserve.</p>'}</div>
+      ${keys.length ? `<div class="sx-th"><span>Titel</span><span>Deine Regel</span><span class="r">Heute</span><span class="r">Seit Kauf</span><span class="r">Bestand / Ziel</span></div><div class="sx-plist">${rows}</div>`
+        : '<p class="empty">Gerade leer: kein Titel im Aufwärtstrend vorn. Das Geld bleibt Reserve.</p>'}</div>
     <div class="sx-side"><h3>Nächste Schritte</h3><ol class="steps">${steps.map((x, i) => `<li><span class="sn">${i + 1}</span><div><div class="sh2"><b>${x[0]}</b>${x[1] ? `<span>${x[1]}</span>` : ''}</div>${x[2]}</div></li>`).join('')}</ol></div></div></section>`;
 }
 // Karte 3: Lage – Prüfungen links, Hinweise rechts. Hinweise nach Art: Info, Deine Regel, Warnung, Handeln
 function evLevel(e) {
-  const held = !!jakobHeld()[e.key];
-  if ((e.type === 'cut' && held) || (e.type === 'rule' && /Verkaufen/.test(e.text))) return ['act', 'Handeln'];
-  if (e.type === 'rule' || e.type === 'monat' || e.type === 'fear' || e.type === 'sector') return ['rule', 'Deine Regel'];
-  if (e.type === 'cut' || e.type === 'momoff') return ['warn', 'Warnung'];
+  if (e.type === 'stop' || (e.type === 'rule' && /Verkaufen/.test(e.text))) return ['act', 'Handeln'];
+  if (['rule', 'monat', 'neu', 'ideal'].includes(e.type)) return ['rule', 'Deine Regel'];
+  if (e.type === 'istop') return ['warn', 'Warnung'];
   return ['info', 'Info'];
 }
 function lageCard(ib) {
-  const has = Object.keys(jakobHeld()).length, ck = has ? stratChecks(ib) : null, ev = ((S.screen || {}).events || []).slice(0, 12);
-  const evRow = e => { const [cls, lbl] = evLevel(e), own = /^(fg|depot|sector):/.test(e.key);
+  const has = Object.keys(jakobHeld()).length, ck = has ? stratChecks(ib) : null, sc = S.screen || {}, ev = (sc.rule === RULE_V ? sc.events || [] : []).slice(0, 12);
+  const evRow = e => { const [cls, lbl] = evLevel(e), own = /^(fg|depot|ideal):/.test(e.key);
     return `<${own ? 'div' : `button data-act="${D(e.key).hist ? 'open' : 'scx'}" data-key="${esc(e.key)}"`} class="sx-ev"><div class="sx-evh"><span class="sx-lvl ${cls}">${lbl}</span>${own ? `<b>${esc(e.symbol)}</b>` : tag(e.key)}<span class="sx-evd">${dateDe(e.day)}${e.important ? ' · Push' : ''}</span></div><p>${esc(e.text)}</p></${own ? 'div' : 'button'}>`; };
-  const checks = ck ? `<div class="rules">${ck.chk.map(([s2, t, x]) => `<div class="rule">${stIcon(s2)}<div><b>${esc(t)}</b><div class="x">${esc(x)}</div></div></div>`).join('')}</div>`
-    : '<p class="empty">Sobald Käufe im Depot Jakob stehen, prüft die App hier Schätzungen, Ausnahme, Ideal-Depot und Momentum.</p>';
+  const checks = ck ? ruleRows(ck.chk.map(([state, title, text]) => ({state, title, text})))
+    : '<p class="empty">Sobald Käufe im Depot Jakob stehen, prüft die App hier Stopp, Aufwärtstrend und Rang.</p>';
   return `<section class="card span12 sx-lage"><div class="sx-cols"><div class="sx-main"><h3>Hat sich Grundlegendes geändert?</h3>${checks}
-      <p class="hint">Rechnet alle 15 Minuten mit aktuellen Kursen neu. Tagesschwankungen allein ändern nach deinen Regeln nichts.</p></div>
+      <p class="hint">Rechnet alle 15 Minuten mit aktuellen Kursen neu. Gehandelt wird zum Monatsende, nur der Stopp gilt sofort.</p></div>
     <div class="sx-side"><h3>Hinweise</h3>${ev.length ? `<div class="sx-evs">${ev.slice(0, 6).map(evRow).join('')}</div>` : '<p class="empty">Noch keine Hinweise.</p>'}
       <p class="hint">Die letzten Meldungen, Push markiert. Keine Anlageberatung.</p></div></div></section>`;
 }
 // Reiter der Strategie: Name und darunter, was dort steht
 function stratNav(v, open) {
-  const meta = {Heute: 'Lage und Plan', Regeln: 'Kauf und Verkauf erklärt', Kandidaten: `${((S.screen || {}).list || []).length} Titel im Filter`, Backtest: '10 Jahre, deine Regeln', Profil: open ? `${open} ${open === 1 ? 'Frage' : 'Fragen'} offen` : 'Antworten und Regeln'};
+  const b = (S.screen || {}).breadth || {};
+  const meta = {Heute: 'Lage und Plan', Regeln: 'Kauf und Verkauf erklärt', Kandidaten: b.trend ? `${b.trend} im Aufwärtstrend` : 'die stärksten Titel', Backtest: '10 Jahre, mit deiner Vorlage', Profil: open ? `${open} ${open === 1 ? 'Frage' : 'Fragen'} offen` : 'Antworten und Regeln'};
   return `<nav class="sx-tabs" role="tablist">${SV.map(x => `<button role="tab" aria-selected="${x === v}" data-act="sv" data-v="${x}" class="${x === v ? 'on' : ''}"><b>${x}</b><small>${esc(meta[x])}</small></button>`).join('')}</nav>`;
 }
 /* ---------------------------------------------------------------- Reiter „Regeln“ (Jakobs Wunsch vom 25.11.2026)
-   So funktioniert deine Strategie: Ablauf (zum Monatsende je Titel, an jedem Tag sofort, die vier Prüfungen des Signals)
-   und ein Beispiel mit echten Kursen, wann deine Regeln gekauft und verkauft hätten (ruleSim in app.js, Diagramm #ch-rule). */
+   So funktioniert deine Strategie: Ablauf (an jedem Tag der Stopp, zum Monatsende Trend und Rang) und ein Beispiel mit echten
+   Kursen, wann das Ideal-Depot gekauft und verkauft hat (ruleSim in app.js, Diagramm #ch-rule). */
 function ruleFlowCard(key) {
-  const ib = idealBook() || {}, ex = ib.ex || {}, m = key ? momOf(key) || (scrRow(key) || {}).mom : null, ck = (m || {}).checks || null;
+  const ib = idealBook() || {n: 7}, r = key ? scrRow(key) : null, so = key && jakobHeld()[key] ? stopOf(key) : null, stop = stopPct();
   const out = (cls, w, t) => `<span class="rf-out ${cls}"><b>${w}</b>${t ? `<small>${t}</small>` : ''}</span>`;
   const step = (n, q, sub, yes, live) => `<li class="rf-step"><span class="rf-n">${n}</span><div class="rf-q"><b>${q}</b>${sub ? `<small>${sub}</small>` : ''}${live ? `<em>${live}</em>` : ''}</div>
     <div class="rf-yes"><span class="rf-lbl">ja</span><div class="rf-outs">${yes}</div></div></li>`;
   const no = '<li class="rf-no" aria-hidden="true"><span>nein</span></li>';
-  const sx = (S.screen || {}).sectors || {}, sOn = sectorsOn(), strongS = (sx.list || []).filter(x => x.strong).map(x => x.name);
   let k = 0;
   const nx = () => ++k;
+  const b = (S.screen || {}).breadth || {};
   const ladder = `<ol class="rf-ladder">
-    ${step(nx(), 'Gewinnschätzung um 10 % oder mehr gesenkt?', 'in 90 Tagen; gilt sofort, an jedem Tag', out('bad', 'Verkaufen', 'sofort') + out('', 'Nicht kaufen', ''))}${no}
-    ${sOn ? step(nx(), 'Aus einem anderen Sektor, der nicht mehr stark ist?', `Sektor-ETF ohne Momentum-Signal oder weniger als ${sx.min || 15} Punkte vor dem S&P 500 in 12 Monaten`, out('bad', 'Verkaufen', 'zum Monatsende') + out('', 'Nicht kaufen', ''),
-      `Heute stark: ${strongS.length ? esc(strongS.join(', ')) : 'kein anderer Sektor'}`) + no : ''}
-    ${step(nx(), 'Momentum-Signal an?', 'alle vier Prüfungen erfüllt', out('blue', 'Halten', 'im Depot') + out('good', 'Kaufen', 'wenn ein Platz frei ist, beste Passung zuerst'))}${no}
-    ${step(nx(), 'Greift eine Ausnahme?', 'extreme Angst unter 25 oder Halbleiter 20 % unter dem Hoch', out('blue', 'Halten', 'im Depot') + out('good', 'Kaufen in Teilen', 'beste Passung, Schätzungen intakt'),
-      `Heute: ${ex.on ? 'ja, ' + esc(ex.text) : 'nein'}`)}${no}
-    ${step(nx(), 'Mit Signal gekauft und Signal lässt nur nach?', 'Kurs unter der 50-, aber über der 200-Tage-Linie', out('blue', 'Halten', ''))}${no}
-    <li class="rf-step end"><span class="rf-n">${nx()}</span><div class="rf-q"><b>Sonst</b><small>kein Signal, keine Ausnahme</small></div><div class="rf-yes"><span class="rf-lbl"></span><div class="rf-outs">${out('bad', 'Verkaufen', 'zum Monatsende') + out('', 'Warten', 'nicht im Depot')}</div></div></li></ol>`;
-  const daily = [['Ausnahme beginnt', 'extreme Angst oder Halbleiter-Crash', out('good', 'Kaufen in Teilen', '')],
-    ['Schätzung deutlich gesenkt', 'um 10 % oder mehr in 90 Tagen', out('bad', 'Verkaufen', '')],
-    ['Rücksetzer im Aufwärtstrend', '−8 % in 5 Tagen, über der 200-Tage-Linie, Schätzungen halten', out('teal', 'Nachkaufen', '')],
+    ${stop ? step(nx(), `${stop} % unter dem Hoch seit Kauf?`, 'Schlusskurs; gilt sofort, an jedem Tag', out('bad', 'Verkaufen', 'sofort') + out('', 'Platz frei', 'bis zum Monatsende')) + no : ''}
+    ${step(nx(), 'Aufwärtstrend gebrochen?', 'Kurs unter der 200-Tage-Linie oder 50-Tage-Linie unter der 200-Tage-Linie', out('bad', 'Verkaufen', 'zum Monatsende') + out('', 'Nicht kaufen', ''), b.n ? `Heute im Aufwärtstrend: ${b.trend} von ${b.n}` : '')}${no}
+    ${step(nx(), `Unter den ${ib.n} stärksten?`, 'Rangfolge nach relativer Stärke unter allen Titeln im Aufwärtstrend', out('blue', 'Halten', 'Gewicht läuft weiter') + out('good', 'Kaufen', 'gleicher Betrag je Titel'))}${no}
+    <li class="rf-step end"><span class="rf-n">${nx()}</span><div class="rf-q"><b>Sonst</b><small>im Trend, aber nicht vorn genug</small></div><div class="rf-yes"><span class="rf-lbl"></span><div class="rf-outs">${out('bad', 'Verkaufen', 'zum Monatsende') + out('', 'Warten', 'nicht im Depot')}</div></div></li></ol>`;
+  const daily = [...(stop ? [['Stopp erreicht', `Schlusskurs ${stop} % unter dem Hoch seit Kauf`, out('bad', 'Verkaufen', '')]] : []),
+    ['Ende Dezember', 'alle Titel zurück auf gleiches Gewicht', out('blue', 'Gleich gewichten', 'einmal im Jahr')],
     ['Sonst', 'Kursschwankungen allein zählen nicht', out('', 'Nichts tun', 'bis ' + meTxt())]];
-  const CK = [['trend', 'Kurs über der 50-Tage-Linie, diese über der 200-Tage-Linie'], ['rising', '200-Tage-Linie steigt gegen vor einem Monat'],
-    ['high', 'höchstens 15 % unter dem Hoch der letzten 12 Monate'], ['rel', 'in 6 Monaten stärker als der S&P 500']];
-  const checks = `<ul class="rf-ck">${CK.map(([k, t]) => `<li>${ck ? stIcon(ck[k] ? 'ok' : 'bad') : stIcon('open')}<span>${t}</span></li>`).join('')}</ul>
-    ${ck ? `<p class="small muted" style="margin:6px 0 0">Haken und Kreuze: ${esc(shortName(key))} heute. Signal ${m.state === 'on' ? 'an' : m.state === 'fade' ? 'lässt nach' : m.state === 'down' ? 'aus, Kurs unter der 200-Tage-Linie' : 'aus'}.</p>` : ''}`;
-  return `<section class="card span12 rf"><div class="head"><div><h2>So entscheiden deine Regeln</h2><p class="sub">Depot Jakob · gleich gewichtet, ${(ib.n || 7)} Plätze · nach dem Backtest über 10 Jahre</p></div></div>
+  const CK = r ? [[r.p200 > 0, 'Kurs über der 200-Tage-Linie', pctS(r.p200, 0)], [r.p50 < r.p200, '50-Tage-Linie über der 200-Tage-Linie', ''],
+    [!!(r.rank && r.rank <= ib.n), `Unter den ${ib.n} stärksten im Aufwärtstrend`, r.rank ? `Rang ${r.rank}` : 'kein Rang'], ...(so && so.stop ? [[!so.hit, 'Stopp nicht erreicht', `${pctS(so.dd, 0)} zum Hoch seit Kauf`]] : [])] : [];
+  const checks = r ? `<ul class="rf-ck">${CK.map(([ok, t, x]) => `<li>${stIcon(ok ? 'ok' : 'bad')}<span>${t}${x ? ` <em class="muted">${x}</em>` : ''}</span></li>`).join('')}</ul>
+    <p class="small muted" style="margin:6px 0 0">${esc(shortName(key))} heute: Stärke ${r.rs} von 99.</p>` : '<p class="small muted">Wähle unten einen Titel.</p>';
+  const parts = r ? [['3 Monate', r.r3, 40], ['6 Monate', r.r6, 20], ['9 Monate', r.r9, 20], ['12 Monate', r.r12, 20]] : [];
+  const formula = r ? `<div class="fbars wide" style="margin-top:8px">${parts.map(([l, v, w]) => `<div class="fb"><span>${l} · ${w} %</span><i><b style="width:${Math.max(0, Math.min(100, Math.abs(v || 0) / Math.max(10, ...parts.map(p => Math.abs(p[1] || 0))) * 100))}%${v < 0 ? ';background:var(--down)' : ''}"></b></i><em class="num">${pctS(v, 0)}</em></div>`).join('')}</div>` : '';
+  return `<section class="card span12 rf"><div class="head"><div><h2>So entscheiden deine Regeln</h2><p class="sub">Depot Jakob · Wachstums-Momentum · ${ib.n} Plätze, gleich gewichtet</p></div></div>
     <div class="sx-cols"><div class="sx-main"><h3>Zum Monatsende, für jeden Titel</h3><p class="rf-hint">Von oben nach unten prüfen. Die erste Frage mit „ja“ entscheidet. Nächste Prüfung: ${meTxt()}</p>${ladder}</div>
       <div class="sx-side"><h3>An jedem Tag sofort</h3><div class="rf-daily">${daily.map(([t, s, o]) => `<div class="rf-d"><div><b>${t}</b><small>${s}</small></div>${o}</div>`).join('')}</div>
-        <h3 style="margin-top:22px">Momentum-Signal: vier Prüfungen</h3>${checks}
-        <p class="rf-hint" style="margin-top:14px">Für das ganze Depot: Ein Titel wird erst ersetzt, wenn ein anderer mindestens 2 von 100 Punkten besser passt. Liegen Halbleiter unter ihrer 200-Tage-Linie und greift keine Ausnahme, ist nur die Hälfte investiert.${sOn ? ` Kandidaten sind die KI-Titel und die großen Titel starker Sektoren (Sektor-ETF mit Momentum-Signal und mindestens ${sx.min || 15} Punkte vor dem S&P 500 in 12 Monaten).` : ''}</p></div></div></section>`;
+        <h3 style="margin-top:22px">Prüfungen${r ? ': ' + esc(shortName(key)) : ''}</h3>${checks}
+        <h3 style="margin-top:22px">Stärke: so wird gerechnet</h3><p class="rf-hint" style="margin:0">Rendite mit Dividenden, gewichtet wie bei IBD. Daraus der Rang unter allen ${b.n || 'rund 530'} Titeln: 99 heißt stärker als 99 % der Auswahl.</p>${formula}
+        <p class="rf-hint" style="margin-top:14px">Auswahl: alle Aktien aus S&P 500 und Nasdaq-100, dazu 18 Länder-ETFs der Schwellenländer. Aus deiner Quality-Growth-Vorlage übernommen: ${ib.n} Titel und Gleichgewichtung nur einmal im Jahr. Nicht übernommen, weil es im Backtest viel Rendite kostete: ihre Filter auf Wachstum, Qualität und Bewertung, Punkte statt Kursstärke und das Warten auf Rücksetzer. Keine Ausnahmen bei Angst oder Crash, kein Marktfilter.</p></div></div></section>`;
 }
-const RS_Y = {'1J': 1, '2J': 2, '3J': 3};
-const ruleKeys = () => { const ib = idealBook() || {items: []}; return [...new Set([...Object.keys(jakobHeld()), ...ib.items.map(x => x.key)])].filter(k => (D(k).hist || {}).d); };
+const ruleKeys = () => { const ib = idealBook() || {items: [], model: {}}; return [...new Set([...Object.keys(jakobHeld()), ...ib.items.map(x => x.key), ...((ib.model || {}).model || []).map(x => x.key)])].filter(k => (D(k).hist || {}).d); };
 function ruleExCard(key) {
   if (!key) return '';
-  const yrs = RS_Y[S.rsy] ? S.rsy : '2J', sim = S._rsim = ruleSim(key, RS_Y[yrs]), ks = ruleKeys();
+  const sim = S._rsim = ruleSim(key), ks = ruleKeys();
   const pick = `<div class="seg rf-pick">${ks.map(k => `<button data-act="rsk" data-v="${esc(k)}" class="${k === key ? 'on' : ''}">${esc(shortName(k))}</button>`).join('')}</div>`;
-  if (!sim) return card('Am Beispiel', 'Wann deine Regeln gekauft und verkauft hätten', pick + '<p class="empty" style="margin-top:12px">Für diesen Titel gibt es noch zu wenig Kursverlauf.</p>', '', 'span12');
-  const cur = showCur(key), buys = sim.trades.filter(t => t.t === 'buy').length, sells = sim.trades.length - buys;
+  if (!sim) return card('Am Beispiel', 'Wann das Ideal-Depot gekauft und verkauft hat', pick + '<p class="empty" style="margin-top:12px">Für diesen Titel gibt es noch zu wenig Kursverlauf.</p>', '', 'span12');
+  const cur = showCur(key), buys = sim.trades.filter(t => t.t === 'buy').length, sells = sim.trades.length - buys, from = dateDe(dayIso(sim.d[0]));
   const sw = (cls, t) => `<span><i class="rf-sw ${cls}"></i>${t}</span>`;
-  const leg = `<div class="legend rf-leg">${sw('on', 'Momentum-Signal an')}${sw('ex', 'Ausnahme greift')}${sw('px', 'Kurs')}${sw('m50', '50-Tage-Linie')}${sw('m200', '200-Tage-Linie')}${sw('buy', 'Kauf')}${sw('sell', 'Verkauf')}${sw('hd', 'Im Depot')}</div>`;
+  const leg = `<div class="legend rf-leg">${sw('on', 'Aufwärtstrend')}${sw('px', 'Kurs')}${sw('m50', '50-Tage-Linie')}${sw('m200', '200-Tage-Linie')}${sw('buy', 'Kauf')}${sw('sell', 'Verkauf')}${sw('hd', 'Im Ideal-Depot')}</div>`;
   const kpi = (l, v, n, cls = '') => `<div class="sx-kpi"><span>${l}</span><b class="num ${cls}">${v}</b>${n ? `<small>${n}</small>` : ''}</div>`;
-  const kpis = `<div class="sx-kpis rf-kpis">${kpi('Mit deinen Regeln', pctS(sim.rule, 0), 'nur dieser Titel', sign(sim.rule))}${kpi('Immer gehalten', pctS(sim.hold, 0), 'zum Vergleich', sign(sim.hold))}
-    ${kpi('Im Depot', nf(sim.inv, 0) + ' %', 'der Zeit')}${kpi('Käufe / Verkäufe', `${buys}<small> / ${sells}</small>`, yrs === '1J' ? 'in 1 Jahr' : 'in ' + RS_Y[yrs] + ' Jahren')}</div>`;
+  const kpis = `<div class="sx-kpis rf-kpis">${kpi('Im Ideal-Depot', pctS(sim.rule, 0), 'nur dieser Titel', sign(sim.rule))}${kpi('Immer gehalten', pctS(sim.hold, 0), 'zum Vergleich', sign(sim.hold))}
+    ${kpi('Gehalten', nf(sim.inv, 0) + ' %', 'der Zeit')}${kpi('Käufe / Verkäufe', `${buys}<small> / ${sells}</small>`, 'seit ' + from)}</div>`;
   const tr = sim.trades.slice().reverse().map(t => `<div class="rf-tr"><span class="rf-mk ${t.t}" aria-hidden="true"></span><span class="num rf-trd">${dateDe(dayIso(t.day))}</span><b>${t.t === 'buy' ? 'Kauf' : 'Verkauf'}</b><span class="num rf-trp">${money(t.px, cur)}</span><small>${esc(t.why)}</small></div>`).join('');
-  const now = `${sim.now.held ? 'Nach diesen Regeln heute im Depot' : 'Nach diesen Regeln heute nicht im Depot'}: Signal ${sim.now.st === 'on' ? 'an' : sim.now.st === 'fade' ? 'lässt nach' : sim.now.st === 'down' ? 'aus, Kurs unter der 200-Tage-Linie' : 'aus'}${sim.now.ex ? ', Ausnahme greift (' + sim.now.ex + ')' : ', keine Ausnahme'}.`;
-  return `<section class="card span12 rfx"><div class="head"><div><h2>Am Beispiel: wann gekauft und verkauft wird</h2><p class="sub">${esc(shortName(key))} mit den Kursen von damals, Prüfung zum Monatsende wie oben</p></div>${seg('rsy', Object.keys(RS_Y), yrs)}</div>
+  const now = `${sim.now.held ? 'Heute im Ideal-Depot' : 'Heute nicht im Ideal-Depot'}: ${sim.now.st === 'on' ? 'Aufwärtstrend' : sim.now.st === 'down' ? 'Kurs unter der 200-Tage-Linie' : 'kein Aufwärtstrend'}${sim.now.rank ? `, Rang ${sim.now.rank}` : ''}.`;
+  return `<section class="card span12 rfx"><div class="head"><div><h2>Am Beispiel: wann gekauft und verkauft wird</h2><p class="sub">${esc(shortName(key))} im Ideal-Depot seit ${from}, Prüfung zum Monatsende und Stopp wie oben</p></div></div>
     ${pick}<div class="rf-chart" id="ch-rule"></div>${leg}<p class="rf-now">${esc(now)}</p>${kpis}
-    ${tr ? `<h3 style="margin-top:20px">Käufe und Verkäufe</h3><div class="rf-trs">${tr}</div>` : '<p class="empty" style="margin-top:12px">In diesem Zeitraum hätten deine Regeln hier weder gekauft noch verkauft.</p>'}
-    <p class="hint">Nur zur Erklärung: ein Titel für sich. Im echten Depot entscheidet bei mehreren Kandidaten die Passung, wer einen der Plätze bekommt. Gewinnschätzungen von damals gibt es nicht frei, die Regel „Schätzung gesenkt“ fehlt hier. Angst und Gier liegt nur für das letzte gute Jahr vor. Vergangene Kurse sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p></section>`;
+    ${tr ? `<h3 style="margin-top:20px">Käufe und Verkäufe</h3><div class="rf-trs">${tr}</div>` : '<p class="empty" style="margin-top:12px">In diesem Zeitraum hat das Ideal-Depot diesen Titel weder gekauft noch verkauft.</p>'}
+    <p class="hint">Aus dem Ideal-Depot, das die App Tag für Tag nach der Regel führt (zu Beginn mit den Kursen der letzten Monate nachgerechnet, mit der heutigen Auswahl). Ein Titel bekommt nur einen Platz, wenn er unter den stärksten ist; darum kann er im Aufwärtstrend sein und trotzdem fehlen. Vergangene Kurse sagen nichts Sicheres über die Zukunft. Keine Anlageberatung.</p></section>`;
 }
 function drawRuleChart(el, sim) {
   const W = Math.max(300, el.clientWidth), mob = W < 560, H = mob ? 240 : 290, pl = 4, pr = mob ? 50 : 62, pt = 10, pb = 40;
@@ -1086,7 +1066,7 @@ function drawRuleChart(el, sim) {
   const cur = showCur(sim.key), fmt = v => money(v, cur).replace(/,\d+(?=\s)/, '');
   const step = niceStep((y1 - y0) / 4); let yt = '';
   for (let v = Math.ceil(y0 / step) * step; v <= y1; v += step) yt += `<line class="rf-grid" x1="${pl}" x2="${W - pr}" y1="${sy(v).toFixed(1)}" y2="${sy(v).toFixed(1)}"/><text class="rf-ax" x="${W - pr + 8}" y="${(sy(v) + 4).toFixed(1)}">${fmt(v)}</text>`;
-  const yn = RS_Y[S.rsy] || 2, every = yn === 1 ? 2 : yn >= 3 ? 6 : 3;
+  const every = (X1 - X0) > 500 ? 3 : 2;
   let xt = '', lastM = null, lastX = -1e9;
   for (let i = 0; i < n; i++) { const dt = new Date(sim.d[i] * DAY), m = dt.getUTCMonth(), key = dt.getUTCFullYear() * 12 + m, x = sx(sim.d[i]);
     if (lastM !== null && key !== lastM && m % every === 0 && x - lastX >= 64 && x > 24 && x < W - pr - 18) {   // Beschriftungen nie überlappen
@@ -1096,35 +1076,35 @@ function drawRuleChart(el, sim) {
   const mk = sim.trades.map(t => { const x = sx(t.day), y = sy(t.px), up = t.t === 'buy';
     return `<g class="rf-m ${t.t}"><title>${t.t === 'buy' ? 'Kauf' : 'Verkauf'} am ${dateDe(dayIso(t.day))} zu ${money(t.px, cur)}. ${esc(t.why)}</title><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8"/>
       <path d="${up ? `M${(x - 3.6).toFixed(1)},${(y + 2).toFixed(1)}L${x.toFixed(1)},${(y - 2.8).toFixed(1)}L${(x + 3.6).toFixed(1)},${(y + 2).toFixed(1)}Z` : `M${(x - 3.6).toFixed(1)},${(y - 2).toFixed(1)}L${x.toFixed(1)},${(y + 2.8).toFixed(1)}L${(x + 3.6).toFixed(1)},${(y - 2).toFixed(1)}Z`}"/></g>`; }).join('');
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Kurs mit Phasen des Momentum-Signals und der Ausnahme, Käufe und Verkäufe nach deinen Regeln">
-    ${rect(runs(i => !!sim.ex[i]), 'rf-bex', pt, ph)}${rect(runs(i => sim.st[i] === 'on'), 'rf-bon', pt, ph)}${yt}
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Kurs mit Phasen im Aufwärtstrend, Käufe und Verkäufe des Ideal-Depots">
+    ${rect(runs(i => sim.st[i] === 'on'), 'rf-bon', pt, ph)}${yt}
     <path class="rf-l200" d="${path(sim.m200)}"/><path class="rf-l50" d="${path(sim.m50)}"/><path class="rf-lpx" d="${path(sim.px)}"/>
     <rect class="rf-hb" x="${pl}" y="${hy}" width="${W - pl - pr}" height="6" rx="3"/>${rect(runs(i => sim.held[i]), 'rf-hd', hy, 6)}
     <text class="rf-ax" x="${W - pr + 8}" y="${hy + 6}">Depot</text>${xt}${mk}
     <line class="rf-cross" x1="0" x2="0" y1="${pt}" y2="${pt + ph}" style="display:none"/><rect class="rf-hit" x="${pl}" y="${pt}" width="${W - pl - pr}" height="${ph + 16}"/></svg><div class="rf-tip" hidden></div>`;
   const svg = el.querySelector('svg'), cross = el.querySelector('.rf-cross'), tip = el.querySelector('.rf-tip');
-  const ST = {on: 'Signal an', fade: 'Signal lässt nach', down: 'unter der 200-Tage-Linie', none: 'kein Signal'};
+  const ST = {on: 'Aufwärtstrend', down: 'unter der 200-Tage-Linie', none: 'kein Aufwärtstrend'};
   const move = ev => { const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) * W / r.width, day = X0 + (x - pl) / (W - pl - pr) * (X1 - X0);
     let i = bisect(sim.d, day); i = Math.max(0, Math.min(n - 1, i)); if (i < n - 1 && day - sim.d[i] > sim.d[i + 1] - day) i++;
     const cx = sx(sim.d[i]); cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.style.display = '';
-    tip.hidden = false; tip.innerHTML = `<b>${dateDe(dayIso(sim.d[i]))}</b><span>${money(sim.px[i], cur)}</span><span>${ST[sim.st[i]] || ''}</span>${sim.ex[i] ? `<span class="w">Ausnahme: ${esc(sim.ex[i])}</span>` : ''}<span>${sim.held[i] ? 'im Depot' : 'nicht im Depot'}</span>`;
+    tip.hidden = false; tip.innerHTML = `<b>${dateDe(dayIso(sim.d[i]))}</b><span>${money(sim.px[i], cur)}</span><span>${ST[sim.st[i]] || ''}</span><span>${sim.held[i] ? 'im Ideal-Depot' : 'nicht im Ideal-Depot'}</span>`;
     const left = cx / W * r.width; tip.style.left = Math.min(Math.max(0, left - tip.offsetWidth / 2), r.width - tip.offsetWidth) + 'px'; };
   svg.addEventListener('pointermove', move); svg.addEventListener('pointerdown', move);
   svg.addEventListener('pointerleave', () => { cross.style.display = 'none'; tip.hidden = true; });
 }
-// Erklärung an einer Stelle statt unter jeder Karte
+// Alle Regeln im Wortlaut
 function howCard() {
-  const ib = idealBook() || {}, mdd = +ansOf('max_dd') || 35;
-  const pts = [sectorsOn() ? 'Nur das Depot Jakob. Titel aus dem KI-Umfeld, dazu die großen Titel anderer Sektoren, solange der Sektor stark ist: Sektor-ETF mit Momentum-Signal und in 12 Monaten mindestens 15 Punkte besser als der S&P 500. Hauptdepot und Fenja zählen nicht.'
-      : 'Nur das Depot Jakob, nur Titel aus dem KI-Umfeld (wie im Backtest). Hauptdepot und Fenja zählen nicht.',
-    ...(sectorsOn() ? ['Fällt ein anderer Sektor zurück, verkaufen deine Regeln seine Titel zum Monatsende, auch wenn das Momentum-Signal des Titels noch an ist.'] : []),
-    'Kaufen: Titel mit Momentum-Signal (über 50- und 200-Tage-Linie, nahe am Jahreshoch, stärker als der S&P 500), beste Passung zuerst.',
-    'Toleranz: Ein Titel im Ideal-Depot wird erst ersetzt, wenn ein anderer mindestens 2 von 100 Punkten besser passt. Mit Signal aufgenommen bleibt er, solange das Signal nur nachlässt.',
-    'Ausnahmen: Bei extremer Angst (unter 25) oder Halbleitern 20 % unter dem Hoch wird auch ohne Signal gekauft, in Teilen und nur mit intakten Gewinnschätzungen.',
-    'Marktfilter: Liegen Halbleiter unter ihrer 200-Tage-Linie, ist nur die Hälfte investiert, außer eine Ausnahme greift.',
-    `Verkaufen: ${({signal: 'wenn das Momentum-Signal zum Monatsende aus ist', trend: 'wenn der Kurs unter die 200-Tage-Linie fällt', better: 'wenn es Besseres gibt', thesis: 'wenn die These bricht', stop: 'bei −20 % seit Kauf'})[ansOf('sell') || 'better']}, außer eine Ausnahme greift; sofort bei deutlich gesenkten Schätzungen.`,
-    `Gleich gewichtet, ${ib.n || 7} Plätze, Aktienanteil nach deiner Grenze für Rückgänge (−${mdd} %). Betrag: Startbetrag ${eur(+ansOf('capital') || 5000, 0)} oder Depot Jakob, das Größere.`,
-    'Kaufen und Verkaufen gelten zum Monatsende wie im Backtest, Nachkaufen bei Rücksetzern im Aufwärtstrend sofort.'];
+  const ib = idealBook() || {}, mdd = +ansOf('max_dd') || 35, stop = stopPct();
+  const pts = ['Nur das Depot Jakob. Hauptdepot und Fenja zählen nicht.',
+    'Auswahl: alle Aktien aus S&P 500 und Nasdaq-100 (bei zwei Aktiengattungen nur eine), dazu 18 Länder-ETFs der Schwellenländer als Wachstumsmärkte.',
+    'Stärke wie bei IBD: Rendite mit Dividenden der letzten 3 Monate zu 40 %, der letzten 6, 9 und 12 Monate zu je 20 %.',
+    'Aufwärtstrend wie bei Minervini: Kurs über der 200-Tage-Linie, die 50-Tage-Linie über der 200-Tage-Linie.',
+    `Zum Monatsende: die ${ib.n || 6} stärksten Titel im Aufwärtstrend kaufen bzw. halten. Was nicht mehr dazugehört, wird verkauft. Neue Titel bekommen den gleichen Betrag, die übrigen laufen weiter. Weniger Titel im Trend: der Rest bleibt Reserve.`,
+    'Einmal im Jahr, Ende Dezember: alle Titel zurück auf gleiches Gewicht (aus deiner Quality-Growth-Vorlage; im Backtest besser als jeden Monat).',
+    stop ? `Stopp: Schließt ein Titel ${stop} % unter seinem Hoch seit dem Kauf, wird er sofort verkauft. Der Platz bleibt bis zum Monatsende frei; danach darf der Titel wieder rein, wenn er vorn liegt.` : 'Ohne Stopp (deine Antwort): verkauft wird nur zum Monatsende.',
+    `Aktienanteil nach deiner Grenze für Rückgänge (−${mdd} %): ${nf((ib.share || 1) * 100, 0)} %. Betrag: Startbetrag ${eur(+ansOf('capital') || 5000, 0)} oder Depot Jakob, das Größere.`,
+    'Aus der Quality-Growth-Vorlage nicht übernommen: Filter auf Wachstum, Qualität und Bewertung, Punkte als Rangfolge, Kauf erst nach Rücksetzern, kein Stopp. Im Backtest brachte die Vorlage so 1,6 % pro Jahr.',
+    'Keine Ausnahmen bei Angst oder Crash, kein Marktfilter, keine Grenze je Branche: Das alles kostete im Backtest Rendite.'];
   return `<details class="card fold span12 how"><summary><div><h2>Alle Regeln im Wortlaut</h2><p class="sub">Grundlage: Backtest über 10 Jahre und deine Antworten</p></div><span class="chev"></span></summary>
     <ul class="dots">${pts.map(x => `<li>${esc(x)}</li>`).join('')}</ul><p class="hint">Regelbasierte Auswahl nach deinen eigenen Angaben. Keine Anlageberatung und keine Kaufempfehlung.</p></details>`;
 }
@@ -1132,41 +1112,39 @@ function howCard() {
 function ruleCard(key) {
   const r = ruleOf(key), ib = idealBook();
   if (!r) return '';
-  const held = jakobHeld()[stratKey(key)], it = ib.items.find(x => x.key === stratKey(key)), b = S.bt;
-  const sg = b && Object.fromEntries((b.signals || []).map(x => [x.id, x.h])), st = b && Object.fromEntries((b.strategies || []).map(x => [x.id, x]));
-  const note = !b ? '' : {Kaufen: st.opt && st.ew ? `Im Backtest brachten diese Regeln ${pctS(st.opt.all.cagr, 0)} pro Jahr, alle Titel der Auswahl ${pctS(st.ew.all.cagr, 0)}.` : '',
-    Nachkaufen: sg.dip_up && sg.dip_up['126'] ? `Im Backtest lagen Rücksetzer über der 200-Tage-Linie 6 Monate später ${pctS(sg.dip_up['126'].ex_ew, 1)} vor der Auswahl.` : '',
-    Verkaufen: sg.trend_break && sg.trend_break['252'] ? `Im Backtest lag ein Titel nach einem Trendbruch 12 Monate später ${nf(Math.abs(sg.trend_break['252'].ex_ew), 1)} % hinter der Auswahl.` : ''}[r.word] || '';
-  return card('Deine Regel', 'Depot Jakob', `<div class="ratehead"><span class="chip big ${r.cls}">${r.word}</span><div class="ratemain">${r.eur ? `<div class="ratelabel num">${eur(r.eur, 0)}</div>` : ''}
+  const held = jakobHeld()[stratKey(key)], it = ib.items.find(x => x.key === stratKey(key)), b = S.bt && S.bt.rule === RULE_V ? S.bt : null;
+  const S2 = b ? Object.fromEntries(b.strategies.map(x => [x.id, x])) : {}, m = b ? btMain(b) : null;
+  const note = !b ? '' : r.word === 'Kaufen' || r.word === 'Halten' ? `Im Backtest brachte die Regel ${pctS(m.cagr, 0)} pro Jahr, der S&P 500 ${pctS((S2.SPY || {}).cagr, 0)}.`
+    : r.word === 'Verkaufen' && r.when === 'sofort' && S2.best_free ? `Im Backtest senkte der Stopp den größten Rückgang von ${pctS(S2.best_free.dd, 0)} auf ${pctS(S2.best.dd, 0)}.` : '';
+  return card('Deine Regel', `Depot Jakob${r.when ? ' · ' + (r.when === 'sofort' ? 'sofort' : 'zum Monatsende, ' + r.when) : ''}`, `<div class="ratehead"><span class="chip big ${r.cls}">${r.word}</span><div class="ratemain">${r.eur ? `<div class="ratelabel num">${eur(r.eur, 0)}</div>` : ''}
     <div class="muted small">${held ? 'Im Depot Jakob: ' + eur(held.value, 0) : 'Nicht im Depot Jakob'}${it ? ' · Ziel im Ideal-Depot ' + eur(it.eur, 0) : ''}</div></div></div>
     <ul class="dots" style="margin-top:10px">${r.why.map(x => `<li>${esc(x)}</li>`).join('')}</ul>${note ? `<p class="small muted" style="margin:6px 0 0">${esc(note)}</p>` : ''}
-    <p class="tiny muted" style="margin:8px 0 0">Was deine Regeln sagen (Ideal-Depot, Verkaufsregel, Ausnahmen), keine Empfehlung. Keine Anlageberatung.</p>`);
+    <p class="tiny muted" style="margin:8px 0 0">Was deine Regeln sagen, keine Empfehlung. Keine Anlageberatung.</p>`);
 }
-// Strategie in vier Bereichen (Jakobs Wunsch vom 22.11.2026: übersichtlicher): Heute, Kandidaten, Backtest, Profil
+// Strategie in fünf Bereichen (Jakobs Wunsch vom 22.11.2026: übersichtlicher): Heute, Regeln, Kandidaten, Backtest, Profil
 const SV = ['Heute', 'Regeln', 'Kandidaten', 'Backtest', 'Profil'];
 try { S.sv = localStorage.getItem('depot_sv') || 'Heute'; } catch (e) { S.sv = 'Heute'; }
 function vStrat(c) {
   const pr = prof();
-  if (!pr.answers) return `<div class="grid">${card('Deine Strategie', 'Noch kein Profil', `<p class="body">Beantworte ein paar Fragen. Danach filtert die App Aktien, die zu dir passen könnten, und prüft dein Depot gegen deine Regeln.</p>
+  if (!pr.answers) return `<div class="grid">${card('Deine Strategie', 'Noch kein Profil', `<p class="body">Beantworte ein paar Fragen. Danach rechnet die App dein Ideal-Depot nach Wachstums-Momentum und prüft dein Depot gegen deine Regeln.</p>
     <div class="btnrow"><button class="btn" data-act="startprof">Profil anlegen</button></div>`)}</div>`;
-  if (S.bt === undefined) setTimeout(loadBacktest, 0);   // für den Rückgang im Ideal-Depot und die Detailansicht
+  if (S.bt === undefined) setTimeout(loadBacktest, 0);   // für den Backtest-Hinweis im Plan und in der Detailansicht
   const v = SV.includes(S.sv) ? S.sv : 'Heute', open = QUESTIONS.filter(q => ansOf(q.id) == null).length;
-  const nav = stratNav(v, open);
+  const nav = stratNav(v, open), ib = idealBook();
   let body;
-  if (v === 'Regeln') { const ks = ruleKeys();   // Vorgabe: der Titel, bei dem deine Regeln in 2 Jahren am häufigsten gehandelt hätten
-    if (!ks.includes(S.rsk)) S.rsk = ks.map(k => [k, (ruleSim(k, 2) || {trades: []}).trades.length]).sort((a, b) => b[1] - a[1]).map(x => x[0])[0];
-    const key = S.rsk;
-    body = ruleFlowCard(key) + ruleExCard(key) + howCard(); }
+  if (!ib && v !== 'Profil' && v !== 'Backtest') body = card('Strategie', 'Wachstums-Momentum', '<p class="empty">Das Ideal-Depot nach der neuen Regel kommt mit dem nächsten Tageslauf.</p>', '', 'span12');
+  else if (v === 'Regeln') { const ks = ruleKeys();   // Vorgabe: der Titel, mit dem das Ideal-Depot am meisten gehandelt hat
+    if (!ks.includes(S.rsk)) S.rsk = ks.map(k => [k, (ruleSim(k) || {trades: []}).trades.length]).sort((a, b) => b[1] - a[1]).map(x => x[0])[0];
+    body = ruleFlowCard(S.rsk) + ruleExCard(S.rsk) + howCard(); }
   else if (v === 'Kandidaten') body = candCard();
-  else if (v === 'Backtest') body = btCard();
+  else if (v === 'Backtest') body = modelCard() + btCard();
   else if (v === 'Profil') { const sum = strategySummary();
     body = card('Deine Strategie', `Depot Jakob · ${esc(pr.source || 'Profil')}${pr.updated ? ' · geändert ' + dateDe(pr.updated) : ''}`, `<p class="body strong">${esc(sum.s[1] || '')}</p>
       <p class="body small" style="margin-top:6px">${esc(sum.s[0].replace(/^Depot Jakob: /, ''))} ${esc(sum.s[2] || '')}</p>
       ${sum.t.length ? `<details class="qdone"><summary>Spannungen in deinem Profil (${sum.t.length})</summary><div class="rules">${sum.t.map(t => `<div class="rule">${stIcon('warn')}<div class="x">${esc(t)}</div></div>`).join('')}</div></details>` : ''}
       ${pr.text ? `<details class="qdone"><summary>Dein Profil im Wortlaut</summary><p class="body small">${esc(pr.text)}</p></details>` : ''}`, '', 'span7')
       + questionsCard() + checkCard() + guardCard() + playCard(); }
-  else { const ib = idealBook();
-    body = ib ? stratTop(ib) + planCard(ib) + lageCard(ib) + `<button class="card span12 sx-link" data-act="sv" data-v="Regeln"><div><h2>So funktioniert deine Strategie</h2><p class="sub">Ablauf und Beispiel: wann gekauft, wann verkauft wird</p></div><span class="chev"></span></button>` : card('Heute', 'Depot Jakob', '<p class="empty">Der Filter läuft mit dem nächsten Tageslauf.</p>', '', 'span12'); }
+  else body = stratTop(ib) + planCard(ib) + lageCard(ib) + `<button class="card span12 sx-link" data-act="sv" data-v="Regeln"><div><h2>So funktioniert deine Strategie</h2><p class="sub">Ablauf und Beispiel: wann gekauft, wann verkauft wird</p></div><span class="chev"></span></button>`;
   return `<div class="strat">${nav}<div class="g12">${body}</div>${v === 'Heute' ? '' : '<p class="hint" style="margin-top:14px">Regelbasierte Auswahl nach deinen eigenen Angaben, nur für das Depot Jakob. Keine Anlageberatung.</p>'}</div>`;
 }
 function vInsight(c) {
@@ -1249,45 +1227,43 @@ function profileCard(key) {
   if (en) return card(title, 'Beschreibung von Yahoo, auf Englisch. Die deutsche Fassung kommt mit der nächsten Recherche.', `<p class="body">${esc(en)}</p>`);
   return '';
 }
-// Detailansicht: Passung für dich (Strategie) und Wachstum und Vision (eingepreist gegen erwartet, Plan der Firma laut Recherche)
+// Detailansicht: Wachstum und Vision (eingepreist gegen erwartet, Plan der Firma laut Recherche)
 function fitCard(key, v, ai) {
-  const sr = scrRow(key), f = fitOf(sr), vis = (v || {}).vision || {}, pl = (ai || {}).plan;
-  if (!sr && vis.implied == null && !pl) return '';
-  const w = fitW();
-  const head = sr && prof().answers ? `<div class="ratehead">${fitBadge(f, 'big')}<div class="ratemain"><div class="ratelabel">${f == null ? 'Passt nach deinen Antworten nicht' : `Für dich: ${fitPts(f)} von 10`}</div>
-    <div class="muted small">${esc(sr.theme)} · nach deinen Faktoren und deinem Profil</div></div></div>
-    <div class="cx" style="margin-top:12px"><div><ul class="dots">${(sr.pros || []).map(x => `<li class="pos">${esc(x)}</li>`).join('')}${(sr.cons || []).map(x => `<li class="neg">${esc(x)}</li>`).join('')}</ul></div>
-    <div class="fbars">${Object.keys(w).map(k => `<div class="fb"><span>${FACTOR_DE[k]}</span><i><b style="width:${Math.round((sr.c[k] ?? 0.5) * 100)}%"></b></i><em>${nf(w[k] * 100, 0)} %</em></div>`).join('')}</div></div>` : '';
-  const vz = vis.implied != null ? `<p class="sh">Wachstum und Vision</p><div class="tiles" style="margin:0">${tile('Im Kurs steckt', pctS(vis.implied, 0) + ' pro Jahr', 'Gewinnwachstum, das der Kurs voraussetzt')}${tile('Erwartet', pctS(vis.expected, 0) + ' pro Jahr', esc(vis.source || ''))}
+  const vis = (v || {}).vision || {}, pl = (ai || {}).plan;
+  if (vis.implied == null && !pl) return '';
+  const vz = vis.implied != null ? `<div class="tiles" style="margin:0">${tile('Im Kurs steckt', pctS(vis.implied, 0) + ' pro Jahr', 'Gewinnwachstum, das der Kurs voraussetzt')}${tile('Erwartet', pctS(vis.expected, 0) + ' pro Jahr', esc(vis.source || ''))}
     ${tile('Abstand', pctS(vis.diff, 0), vis.diff >= 3 ? 'weniger eingepreist als erwartet' : vis.diff > -3 ? 'passt zur Erwartung' : 'mehr eingepreist als erwartet', sign(vis.diff))}</div>` : '';
   const pz = pl ? `<div class="rows" style="margin-top:8px">${pl.goal ? `<div class="row"><div class="l"><div class="t">Plan der Firma</div><div class="x">${esc(pl.goal)}</div></div></div>` : ''}
     ${pl.analysts ? `<div class="row"><div class="l"><div class="t">Was Analysten sagen</div><div class="x">${esc(pl.analysts)}</div></div></div>` : ''}
     <div class="row"><div class="l"><div class="t">Realistisch? <span class="chip ${pl.realistic === 'ja' ? 'good' : pl.realistic === 'nein' ? 'bad' : 'warn'}">${esc(pl.realistic || '–')}</span> <span class="chip">${esc({'zu wenig': 'noch nicht voll eingepreist', passend: 'angemessen eingepreist', 'zu viel': 'mehr als eingepreist'}[pl.priced_in] || '')}</span></div>${pl.why ? `<div class="x">${esc(pl.why)}</div>` : ''}</div></div></div>` : '';
-  return card(sr && prof().answers ? 'Passt das zu dir?' : 'Wachstum und Vision', '', head + vz + pz +
+  return card('Wachstum und Vision', '', vz + pz +
     `<p class="tiny muted" style="margin:10px 0 0">Im Kurs steckt: welches Gewinnwachstum pro Jahr nötig ist, damit sich der heutige Kurs in 5 Jahren mit 9 % im Jahr lohnt, wenn die Aktie dann das 20-Fache ihres Gewinns wert ist (Reverse-DCF nach Mauboussin). Vision darf eingepreist sein, wenn sie realistisch ist: Dann zählen hohe Bewertungskennzahlen nur halb. Keine Anlageberatung.</p>`);
 }
-// Detailansicht: Momentum-Signal mit den vier Prüfungen und was deine Regel dazu sagt
+// Detailansicht: Stärke und Aufwärtstrend nach Wachstums-Momentum (Titel der Auswahl, Depot Jakob, Watchlist);
+// sonst das Momentum-Signal (Coins, ETFs außerhalb der Auswahl)
 function momCard(key) {
+  const k = stratKey(key), r = scrRow(k);
+  const row = (ok, t, x) => `<div class="rule">${stIcon(ok ? 'ok' : 'bad')}<div><b>${t}</b>${x ? `<div class="x">${x}</div>` : ''}</div></div>`;
+  if (r && r.rs != null) {
+    const ib = idealBook() || {n: 7}, so = jakobHeld()[k] ? stopOf(k) : null;
+    return card('Wachstums-Momentum', `Stärke ${r.rs} von 99${r.rank ? ` · Rang ${r.rank} im Aufwärtstrend` : ''}${r.member ? '' : ' · nicht in der Auswahl'}`,
+      `<div class="tiles" style="margin:0">${tile('3 Monate', pctS(r.r3, 0), 'zählt 40 %', sign(r.r3))}${tile('6 Monate', pctS(r.r6, 0), 'zählt 20 %', sign(r.r6))}${tile('9 Monate', pctS(r.r9, 0), 'zählt 20 %', sign(r.r9))}${tile('12 Monate', pctS(r.r12, 0), 'zählt 20 %', sign(r.r12))}</div>
+      <div class="rules" style="margin-top:10px">${row(r.p200 > 0, 'Kurs über der 200-Tage-Linie', pctS(r.p200, 0) + ' zur Linie')}${row(r.p50 < r.p200, '50-Tage-Linie über der 200-Tage-Linie', '')}
+      ${row(!!(r.rank && r.rank <= ib.n), `Unter den ${ib.n} stärksten im Aufwärtstrend`, r.rank ? `Rang ${r.rank}` : 'ohne Aufwärtstrend kein Rang')}
+      ${so && so.stop ? row(!so.hit, `Stopp bei −${so.stop} % nicht erreicht`, `${pctS(so.dd, 0)} zum Hoch seit Kauf`) : ''}</div>
+      <p class="tiny muted" style="margin:10px 0 0">Rendite mit Dividenden. Stärke: Rang unter allen Titeln aus S&P 500, Nasdaq-100 und den Länder-ETFs, wie das RS-Rating von IBD. Keine Anlageberatung.</p>`);
+  }
   const m = momOf(key);
   if (!m || !m.checks) return '';
-  const ck = m.checks, bn = isCoin(key) ? 'Bitcoin' : 'S&P 500', ex = buyException(), st = ansOf('style');
+  const ck = m.checks, bn = isCoin(key) ? 'Bitcoin' : 'S&P 500';
   const [cls, head] = {on: ['good', m.since <= 10 ? 'Signal neu an' : 'Signal an'], fade: ['warn', 'Momentum lässt nach'], down: ['bad', 'Kein Momentum: Abwärtstrend'], none: ['', 'Kein Signal']}[m.state] || ['', ''];
-  const row = (ok, t, x) => `<div class="rule">${stIcon(ok ? 'ok' : 'bad')}<div><b>${t}</b><div class="x">${x}</div></div></div>`;
-  const est = !isCoin(key) && !isFund(key) ? estChg(D(key).fund || {}) : null, kfg = (S.daily.crypto_fg || {}).value;
-  const exOn = isCoin(key) ? ansOf('fear') === 'buy' && ansOf('crypto') === 'part' && kfg != null && kfg < FEAR : ex.on;
-  const exText = isCoin(key) ? `extreme Angst bei Krypto (${kfg} von 100)` : ex.text;
-  const rule = !['first', 'only'].includes(st) ? '' : m.state === 'on' ? 'Nach deiner Regel „Momentum zuerst“ passt ein Kauf zum Signal.'
-    : m.state === 'down' ? (exOn ? `Ohne Signal gilt nach deiner Regel: kein Kauf. Gerade greift aber deine Ausnahme (${exText}): Kauf in Teilen möglich${est != null && est <= -5 ? ', doch die Gewinnschätzungen sinken, damit fällt der Titel heraus' : ', solange die Gewinnschätzungen halten'}.` : 'Nach deiner Regel kein Neu- oder Nachkauf, bis das Signal wieder an ist.')
-    : st === 'first' ? 'Nach deiner Regel ist ein Nachkauf im Rücksetzer möglich, solange der Kurs über der 200-Tage-Linie bleibt.' : 'Nach deiner Regel erst mit Signal.';
   return card('Momentum', `${m.met} von 4 erfüllt${m.state === 'on' ? (m.since < 60 ? ' · seit ' + m.since + ' Handelstagen' : ' · seit über 60 Handelstagen') : ''}`,
     `<div style="margin-bottom:10px"><span class="chip ${cls}">${head}</span></div><div class="rules">
     ${row(ck.trend, 'Aufwärtstrend', `Kurs ${pctS(m.ma50, 0)} zur 50-Tage-Linie, ${pctS(m.ma200, 0)} zur 200-Tage-Linie. Nötig: Kurs über der 50, die 50 über der 200`)}
     ${row(ck.rising, '200-Tage-Linie steigt', 'gegenüber vor einem Monat')}
     ${row(ck.high, 'Nahe am Jahreshoch', `${m.from_high ? pctS(m.from_high, 0) + ' zum Hoch der letzten 12 Monate' : 'am Hoch der letzten 12 Monate'}, erlaubt bis −15 %`)}
-    ${row(ck.rel, m.bench ? 'Stärker als ' + bn : 'Kurs im Plus', m.rel6 != null ? `${pctS(m.rel6, 0)} gegenüber ${bn} in 6 Monaten` : `${pctS(m.r6, 0)} in 6 Monaten`)}
-    ${est != null ? `<div class="rule">${stIcon('info')}<div><b>Gewinnschätzung ${pctS(est, 0)} in 3 Monaten</b><div class="x">${est >= 3 ? 'Kurs und Gewinne laufen in dieselbe Richtung.' : est <= -3 ? 'Gewinne werden gesenkt: Momentum ohne steigende Schätzungen ist schwächer.' : 'Schätzungen kaum verändert.'}</div></div></div>` : ''}</div>
-    ${rule ? `<p class="body small" style="margin:10px 0 0">${esc(rule)}</p>` : ''}
-    <p class="tiny muted" style="margin:10px 0 0">Signal an, wenn alle vier zutreffen. Gängige Trendfolge-Regeln, kein Blick in die Zukunft. Keine Anlageberatung.</p>`);
+    ${row(ck.rel, m.bench ? 'Stärker als ' + bn : 'Kurs im Plus', m.rel6 != null ? `${pctS(m.rel6, 0)} gegenüber ${bn} in 6 Monaten` : `${pctS(m.r6, 0)} in 6 Monaten`)}</div>
+    <p class="tiny muted" style="margin:10px 0 0">Signal an, wenn alle vier zutreffen. Gängige Trendfolge-Regel, kein Blick in die Zukunft. Gehört nicht zu deiner Strategie (die gilt für Aktien aus S&P 500 und Nasdaq-100). Keine Anlageberatung.</p>`);
 }
 function vAsset(key) {
   S.sheetKey = key;
@@ -1441,10 +1417,6 @@ document.addEventListener('click', async ev => {
   else if (act === 'sv') { S.sv = v; try { localStorage.setItem('depot_sv', v); } catch (e) { /* egal */ } render(); window.scrollTo(0, 0); }
   else if (act === 'scf') { S.scf = v; S.scAll = false; render(); }
   else if (act === 'btv') { S.btv = v; render(); }
-  else if (act === 'btadopt' && S.bt) { const ch = S.bt.opt.chosen.p, a = Object.assign({}, (S.pf.profile || {}).answers);
-    if (ch.exit === 'signal' || ch.exit === 'trend' || ch.exit === 'better') a.sell = ch.exit;
-    a.regime = ch.regime === 'half' ? 'half' : 'full';
-    S.pf.profile = Object.assign({}, S.pf.profile, {answers: a, updated: new Date().toISOString().slice(0, 10)}); await savePf('Regeln aus dem Backtest übernommen'); }
   else if (act === 'scall') { S.scAll = true; render(); }
   else if (act === 'scx') { S.scx = S.scx === key ? null : key; if (S.tab !== 'strat') { S.tab = 'strat'; S.scf = 'Alle'; S.scAll = true; } render(); }
   else if (act === 'scwatch') { const [k, sy] = key.split(':'); S.pf.watchlist.push({id: uid(), kind: k, symbol: sy, name: nameOf(key)}); await savePf('Auf der Watchlist. Kennzahlen und Recherche kommen mit dem nächsten Tageslauf.'); }

@@ -13,13 +13,16 @@ from . import analytics, screen, sources
 from .common import CLOUD, SourceError, asset_key, empty_portfolio, get_store, http_json, log, now_iso, tracked_assets
 
 BENCH = {"SP500": ("stock", "^GSPC", "S&P 500"), "BTC": ("crypto", "BTC", "Bitcoin"),
-         "SOXX": ("stock", "SOXX", "Halbleiter (SOXX)")}   # Halbleiter: Vergleich im Diagramm Depot Jakob
+         "NDX": ("stock", "QQQ", "Nasdaq-100")}   # Nasdaq-100: Vergleich im Diagramm Depot Jakob (Wachstum)
 
 
 def strategy_assets(store):
-    """Titel des Ideal-Depots Jakob (screen.json vom letzten Tageslauf) zählen mit: Kurse, Verlauf, Logos für die App."""
-    ib = (store.get("screen.json") or {}).get("ideal") or {}
-    return {x["key"]: {"kind": "stock", "symbol": x["key"].split(":", 1)[1], "name": ""} for x in ib.get("items") or [] if x.get("key")}
+    """Titel des Ideal-Depots Jakob (screen.json) zählen mit: die stärksten nach der Regel und die Titel des Modells.
+    Kurse, Verlauf und Logos für die App."""
+    doc = store.get("screen.json") or {}
+    ib = doc.get("ideal") or {}
+    keys = list(doc.get("top") or []) + [x.get("key") for x in ib.get("items") or []] + [x.get("key") for x in ib.get("model") or []]
+    return {k: {"kind": "stock", "symbol": k.split(":", 1)[1], "name": ""} for k in keys if k and k.startswith("stock:")}
 
 
 def us_session(ts):
@@ -191,62 +194,48 @@ def _with_live(h, q, crypto=False):
     return dict(h, d=d, c=c)
 
 
+def _live_bar(q):
+    """(Tag, Kurs) aus einem aktuellen Kurs, Tag nach der Uhr der Börse (wie _with_live)."""
+    if not q or q.get("error") or q.get("stale") or not q.get("price") or not q.get("time"):
+        return None
+    return int((q["time"] + TZ_H.get(q.get("currency"), 0) * 3600) // 86400), q["price"]
+
+
 def refresh_strategy(store, pf, live, state, force=False):
+    """Wachstums-Momentum mit aktuellen Kursen: die stärksten Titel, Ideal-Depot, Depot Jakob und Watchlist bekommen den
+    aktuellen Kurs, die übrigen Titel der Auswahl behalten den letzten Schlusskurs (an ihrem Rang ändert sich untertags
+    kaum etwas). Dazu Angst und Gier am Aktienmarkt."""
     now = time.time()
     if not force and (now - (state.get("strat_at") or 0) < STRAT_EVERY or not _strat_hours(now)):
         return
     base, daily = store.get("screen_base.json"), store.get("daily.json") or {}
-    if not base or not daily.get("assets"):
+    if not base or not base.get("px") or not daily.get("assets"):
         return
     state["strat_at"] = int(now)
-    research = (store.get("analysis.json") or {}).get("assets") or {}
-    quotes, de_map, de_fx = {}, state.setdefault("de_map", {}), {}
+    de_map, de_fx = state.setdefault("de_map", {}), {}
 
-    def quote(sym, name=""):
-        if sym not in quotes:
+    def quote(sym):
+        q = live.get(asset_key("stock", sym))
+        if q is None:
             q = sources.stock_quote(sym)
-            if sym != "SOXX" and _german_ok(sym, q, now):
-                q = german_quote(sym, q, de_map, _german_fx(q["currency"], de_fx), name)
-            quotes[sym] = q
-        return quotes[sym]
-    sp = _with_live(base.get("sp"), quote("^GSPC"))
-    btc = (daily["assets"].get(asset_key("crypto", "BTC")) or {}).get("hist") or (daily.get("bench") or {}).get("BTC")
-    btc = _with_live(btc, live.get(asset_key("crypto", "BTC")) or sources.crypto_quote("BTC"), True)
-    m6 = {"stock": _perf_6m(sp, False), "crypto": _perf_6m(btc, True)}
-
-    def fresh(key, e, h, crypto):
-        tech = analytics.technicals(h["c"], crypto)
-        own, mkt = _perf_6m(h, crypto), m6["crypto" if crypto else "stock"]
-        if tech and own is not None and mkt is not None and key not in ("crypto:BTC", "stock:^GSPC"):
-            tech["rel_6m"] = own - mkt
-        x = dict(e, hist=h, tech=_round(tech))
-        bm = None if key in ("crypto:BTC", "stock:^GSPC") else (btc if crypto else sp)
-        mom = analytics.momentum(h["c"], (bm or {}).get("c"), crypto)
-        if mom:
-            x["mom"] = mom
-        if not crypto and e.get("fund"):
-            x["valuation"] = analytics.stock_valuation(h["c"][-1], tech, e["fund"], e.get("div"), (research.get(key) or {}).get("claude"))
-        return x
-    out = {}
-    for key, e in daily["assets"].items():
-        crypto = key.startswith("crypto:")
-        h = _with_live(e.get("hist"), live.get(key), crypto)
-        out[key] = fresh(key, e, h, crypto) if h and len(h["c"]) >= 20 else e
-    extra = {}
-    for key, e in (base.get("extra") or {}).items():
-        h = _with_live(e.get("hist"), quote(key.split(":", 1)[1], e.get("name")))
-        if h and len(h["c"]) >= 60:
-            extra[key] = fresh(key, e, h, False)
+            if _german_ok(sym, q, now):
+                q = german_quote(sym, q, de_map, _german_fx(q["currency"], de_fx), "")
+        return q
+    members = base.get("members") or {}
+    lv = {}
+    for sym in screen.watch_syms(store.get("screen.json"), pf, members):
+        bar = _live_bar(quote(sym))
+        if bar:
+            lv[sym] = bar
+    extra = {sym: _with_live(h, live.get(asset_key("stock", sym))) for sym, h in screen.extra_hist(pf, daily["assets"], members).items()}
     fg_hist = {}
     for s, (d, c) in (base.get("fg") or {}).items():
-        h = _with_live({"d": d, "c": c}, quote(s))
+        h = _with_live({"d": d, "c": c}, sources.stock_quote(s))
         fg_hist[s] = (h["d"], h["c"])
     mfg = analytics.market_fear_greed(fg_hist) if fg_hist else None
-    soxx = _with_live(base.get("soxx"), quote("SOXX"))
     prev_fg = (store.get("screen.json") or {}).get("fg") or {}
     fg = {"stocks": (mfg or {}).get("value", prev_fg.get("stocks")), "crypto": (daily.get("crypto_fg") or {}).get("value", prev_fg.get("crypto"))}
-    screen.build(store, pf, out, extra, push, (sp or {}).get("c"), fg, semis=screen.semis_stats(soxx) if soxx else None, mfg=mfg,
-                 sectors=base.get("sectors"))     # Stärke der Sektoren vom Tageslauf
+    screen.build(store, pf, base, push, fg, mfg=mfg, extra=extra, live=lv)
 
 
 SPARK_EVERY = 55 * 60   # 7-Tage-Verlauf (Stundenkurse) für die Watchlist am Handy: höchstens stündlich neu
@@ -546,22 +535,15 @@ def run_daily(store):
         m = meta.get(a["symbol"]) if a["kind"] == "crypto" else None
         if m and key in out:
             out[key]["mcap"], out[key]["rank"] = m.get("mcap"), m.get("rank")
-    # Strategie: Stärke der Sektoren (Sektor-ETFs), dann Titel der Auswahl (KI und Halbleiter) und der starken Sektoren,
-    # die nicht ohnehin verfolgt werden
-    sectors = []
+    # Strategie Wachstums-Momentum (Jakobs Wunsch vom 27.11.2026): heutige Mitglieder von S&P 500 und Nasdaq-100 und
+    # Länder-ETFs der Schwellenländer, Kurse mit Dividenden über 2 Jahre
+    base0 = store.get("screen_base.json") or {}
+    members, uni_h = {}, {}
     try:
-        sp_c = (bench.get("SP500") or {}).get("c") or []
-        sec_h = {}
-        for name, etf, syms in screen.SECTORS:
-            h = sources.stock_history(etf, "2y")
-            if h:
-                sec_h[etf] = {"d": h["d"], "c": h["c"]}
-        sectors = screen.sector_strength(sec_h, sp_c)
+        members = screen.index_members(base0.get("members"))
+        uni_h = screen.fetch_universe(screen.universe(members))
     except Exception as e:
-        log("Sektoren: Fehler " + type(e).__name__)
-    more = screen.strong_members(sectors, screen.answers(pf))
-    extra = screen.fetch(out, yf, market_6m, more)
-    update_logos(store, dict(screen.universe_assets(more), **assets), dict(extra, **out), meta)
+        log("Strategie Kurse: Fehler " + type(e).__name__)
     # Angst und Gier am Aktienmarkt: eigene Berechnung (CNN sperrt Skripte), aus Yahoo-Kursen
     fg_hist = {}
     for sym in ("^GSPC", "^VIX", "SPY", "TLT", "HYG", "IEF", "RSP"):
@@ -584,22 +566,22 @@ def run_daily(store):
     if smart:
         smart["updated"] = now_iso()
         store.put("smart.json", smart)
+    logo_more = {}
     try:
-        soxx = sources.stock_history("SOXX", "5y")
-        sp = bench.get("SP500") or {}
-        screen.build(store, pf, out, extra, push, sp.get("c"),
-                     {"stocks": (market_fg or {}).get("value"), "crypto": (crypto_fg or {}).get("value")},
-                     semis=screen.semis_stats(soxx) if soxx else None, mfg=market_fg, sectors=sectors or None)
-        # Grundlage für die Zwischenläufe mit aktuellen Kursen (refresh_strategy): was nicht in daily.json steht
-        store.put("screen_base.json", {
-            "updated": now_iso(),
-            "extra": {k: {x: e.get(x) for x in ("hist", "currency", "name", "fund", "div", "earnings_date")} for k, e in extra.items()},
-            "sp": {"d": sp.get("d", [])[-400:], "c": sp.get("c", [])[-400:]},
-            "soxx": {"d": soxx["d"], "c": soxx["c"]} if soxx else None,
-            "fg": {s: [d, c] for s, (d, c) in fg_hist.items()},
-            "sectors": sectors or None})
+        if members and screen.CAL in uni_h:
+            base = screen.pack(uni_h)
+            F = screen.snapshot(base["px"], screen.universe(members), len(base["days"]) - 1)
+            show = screen.ranked(F)[:40] + screen.watch_syms(store.get("screen.json"), pf, members, 0)
+            base.update(members=members, members_at=datetime.date.today().isoformat(),
+                        info=screen.fund_info(show, yf, out, base0.get("info")),
+                        fg={s: [d, c] for s, (d, c) in fg_hist.items()}, updated=now_iso())
+            doc = screen.build(store, pf, base, push, {"stocks": (market_fg or {}).get("value"), "crypto": (crypto_fg or {}).get("value")},
+                               mfg=market_fg, extra=screen.extra_hist(pf, out, members))
+            store.put("screen_base.json", base)     # Grundlage für die Zwischenläufe mit aktuellen Kursen (refresh_strategy)
+            logo_more = {r["key"]: {"kind": "stock", "symbol": r["symbol"], "name": r.get("name") or ""} for r in doc["list"]}
     except Exception as e:   # der Filter darf den Tageslauf nicht aufhalten
         log("Strategie: Fehler " + type(e).__name__)
+    update_logos(store, dict(logo_more, **assets), dict({k: {"name": v["name"]} for k, v in logo_more.items()}, **out), meta)
     # Branchen der großen Indizes als Vergleich für die Sektoren des Depots (über die ETFs URTH und SPY)
     sector_bench = {}
     for name, sym in SECTOR_BENCH:
