@@ -786,27 +786,28 @@ function markets() {
    Regel aus dem Test bekannter Strategien von Hedgefonds und Wachstums-Investoren (tracker/backtest.py, 26.11.2026) und dem
    Vergleich mit Jakobs Quality-Growth-Vorlage (27.11.2026): Auswahl S&P 500 und Nasdaq-100 (heutige Mitglieder) und 18
    Länder-ETFs der Schwellenländer; relative Stärke wie bei IBD (Rendite 3 Monate zu 40 %, 6, 9 und 12 Monate zu je 20 %); nur
-   Titel im Aufwärtstrend (Kurs über der 200-Tage-Linie, 50-Tage-Linie darüber); zum Monatsende die 6 stärksten, neue Titel
+   Titel im Aufwärtstrend (Kurs über der 200-Tage-Linie, 50-Tage-Linie darüber); zum Monatsende 5 Titel (gehalten bis Rang 7, freie Plätze an die stärksten), neue Titel
    mit gleichem Betrag, danach laufen Gewinner weiter (keine regelmäßige Gleichgewichtung); Obergrenze je Titel zum
    Monatsende (Frage maxpos, Standard 30 %); kein Stopp (Jakobs Wunsch vom 27.11.2026), wahlweise 25 % ab Hoch seit Kauf. Rangfolge und Ideal-Depot (Modell) rechnet tracker/screen.py (screen.json, alle 15 Minuten
    mit aktuellen Kursen). Hier nur Beträge, das Wort je Titel und die Prüfungen für das Depot Jakob; gleiche Regeln in
    tracker/screen.py (rule_words): beide Stellen ändern. Keine Anlageberatung. */
-const RULE_V = 'wm4';
+const RULE_V = 'wm5';
 const STOP_PCT = 25;
+const KEEP_EXTRA = 2;      // gehalten wird bis Rang n + 2 (Jakobs Wahl vom 28.11.2026: 5 Titel, bis Rang 7; wie screen.KEEP_EXTRA)
 // Fragen ans Profil. core = aus Jakobs Grok-Profil vorbelegt; lesson = Leitplanke aus dem FTX-Fall.
 const QUESTIONS = [
   {id: 'risk', core: 1, q: 'Wie viel Risiko willst du eingehen?', o: [['low', 'Niedrig'], ['mid', 'Mittel'], ['high', 'Hoch']]},
   {id: 'horizon', core: 1, q: 'Wie lange willst du anlegen?', o: [['lt2', 'Unter 2 Jahre'], ['2to5', '2 bis 5 Jahre'], ['gt5', 'Über 5 Jahre']]},
-  {id: 'max_dd', core: 1, q: 'Welchen Rückgang des Depots hältst du aus, ohne zu verkaufen?', why: 'Bestimmt den Aktienanteil. Voll investiert fiel die Regel im Backtest um bis zu 52 % (je nach Stichtag bis 57 %).', o: [[15, '−15 %'], [25, '−25 %'], [35, '−35 %'], [50, '−50 %']]},
-  {id: 'stop', q: 'Verkaufen, wenn ein Titel 25 % unter sein Hoch seit dem Kauf fällt?', why: 'Backtest über 10 Jahre: ohne Stopp 34,8 % pro Jahr und −52 % größter Rückgang, mit Stopp 31,8 % und −49 %.', o: [['none', 'Nein, ohne Stopp'], ['t25', 'Ja, mit Stopp']]},
-  {id: 'positions', core: 1, q: 'Wie viele Aktien willst du halten?', why: 'Backtest ohne Stopp, höchstens 30 % je Titel: 4 Titel 37,3 %, 5 Titel 36,2 %, 6 Titel 34,8 %, 7 Titel 34,7 %, 8 Titel 32,6 % pro Jahr. Weniger Titel heißt größere Einzelpositionen.', o: [[4, '4'], [5, '5'], [6, '6'], [7, '7'], [8, '8']]},
+  {id: 'max_dd', core: 1, q: 'Welchen Rückgang des Depots hältst du aus, ohne zu verkaufen?', why: 'Bestimmt den Aktienanteil. Voll investiert fiel die Regel im Backtest um bis zu 55 % (je nach Stichtag bis 59 %).', o: [[15, '−15 %'], [25, '−25 %'], [35, '−35 %'], [50, '−50 %']]},
+  {id: 'stop', q: 'Verkaufen, wenn ein Titel 25 % unter sein Hoch seit dem Kauf fällt?', why: 'Backtest über 10 Jahre: ohne Stopp 40,1 % pro Jahr und −55 % größter Rückgang, mit Stopp 37,0 % und −49 %.', o: [['none', 'Nein, ohne Stopp'], ['t25', 'Ja, mit Stopp']]},
+  {id: 'positions', core: 1, q: 'Wie viele Aktien willst du halten?', why: 'Backtest ohne Stopp, höchstens 30 % je Titel, gehalten bis 2 Ränge dahinter: 4 Titel 37,4 % (je nach Stichtag bis −67 %), 5 Titel 40,1 %, 6 Titel 38,3 %, 7 Titel 34,8 %, 8 Titel 32,4 % pro Jahr. Weniger Titel heißt größere Einzelpositionen.', o: [[4, '4'], [5, '5'], [6, '6'], [7, '7'], [8, '8']]},
   {id: 'min_pos', core: 1, q: 'Wie groß soll eine Position mindestens sein?', o: [[250, '250 €'], [500, '500 €'], [1000, '1.000 €']]},
   {id: 'capital', q: 'Mit wie viel startest du das Depot Jakob?', why: 'Grundlage für die Beträge im Ideal-Depot, bis das Depot größer ist.', o: [[2500, '2.500 €'], [5000, '5.000 €'], [10000, '10.000 €'], [20000, '20.000 €']]},
   {id: 'monthly', q: 'Wie viel legst du jeden Monat neu an?', o: [[0, 'Nichts'], [250, '250 €'], [500, '500 €'], [1000, '1.000 €'], [2000, '2.000 €']]},
   {id: 'rate', q: 'Wohin soll die Monatsrate gehen?', o: [['gap', 'Was am meisten fehlt'], ['split', 'Gleich auf alle']]},
   {id: 'on_loss', core: 1, q: 'Was tust du bei starken Verlusten?', o: [['buy', 'Nachkaufen, wenn die These hält'], ['hold', 'Halten'], ['sell', 'Verkaufen']]},
   {id: 'need', q: 'Brauchst du dieses Geld in den nächsten 2 Jahren für etwas Bestimmtes?', why: 'Fest eingeplantes Geld verträgt keinen Rückgang von 40 %.', o: [['yes', 'Ja, fest eingeplant'], ['maybe', 'Vielleicht'], ['no', 'Nein']]},
-  {id: 'maxpos', q: 'Wie groß darf eine einzelne Aktie höchstens werden?', why: 'Zum Monatsende geprüft: Was darüber liegt, wird verkauft und auf die übrigen Titel verteilt. Backtest mit 6 Titeln: 15 % 28,5 %, 20 % 33,2 %, 25 % 34,6 %, 30 % 34,8 %, 35 % 35,4 %, ohne Grenze 35,5 % pro Jahr (dann über die Hälfte in einem Titel).', o: [[15, '15 %'], [20, '20 %'], [25, '25 %'], [30, '30 %'], [35, '35 %'], ['none', 'Keine Grenze']]},
+  {id: 'maxpos', q: 'Wie groß darf eine einzelne Aktie höchstens werden?', why: 'Zum Monatsende geprüft: Was darüber liegt, wird verkauft und auf die übrigen Titel verteilt. Backtest mit 5 Titeln: 15 % 28,9 %, 20 % 37,6 %, 25 % 39,5 %, 30 % 40,1 %, 35 % 40,4 %, ohne Grenze 40,8 % pro Jahr (dann über die Hälfte in einem Titel).', o: [[15, '15 %'], [20, '20 %'], [25, '25 %'], [30, '30 %'], [35, '35 %'], ['none', 'Keine Grenze']]},
   {id: 'share', q: 'Welcher Teil deines Vermögens steckt in Aktien und Krypto?', why: 'Je größer der Anteil, desto mehr zählt ein Rückgang.', o: [['lt25', 'Unter 25 %'], ['25-50', '25 bis 50 %'], ['50-75', '50 bis 75 %'], ['gt75', 'Über 75 %']]},
   {id: 'lever', lesson: 1, q: 'Nutzt du Hebel, Optionen oder Kredit?', why: 'Lehre aus FTX: Hebel macht aus einem Rückgang einen Totalverlust.', o: [['no', 'Nein'], ['some', 'Manchmal'], ['yes', 'Ja']]},
   {id: 'wallet', lesson: 1, q: 'Wo liegen deine Coins?', why: 'Lehre aus FTX: Auf einer Krypto-Börse sind Coins im Ernstfall weg.', o: [['self', 'Eigene Wallet'], ['broker', 'Beim Broker'], ['exchange', 'Auf einer Krypto-Börse']]},
@@ -899,9 +900,12 @@ function idealBook() {
   const jb = jakobBook(), base = Math.max(+ansOf('capital') || 5000, jb.value || 0);   // Startbetrag, bis das Depot Jakob größer ist
   const n = Math.max(1, Math.min(N, Math.floor(base * share / minp)));
   const model = sc.ideal || {}, stopped = new Set((model.stopped || []).map(e => 'stock:' + e.sym)), inModel = new Set((model.model || []).map(x => x.key));
-  const keys = (sc.ranked || []).filter(k => stratKey(k) === k).slice(0, n), w = share / n;
-  const items = keys.map((key, i) => ({key, rank: i + 1, w, eur: base * w, stopped: stopped.has(key), inModel: inModel.has(key)}));
-  return (S._ideal = {n, N, share, base, items, reserve: 1 - w * items.length, minp, model, breadth: sc.breadth || {}});
+  // Ziel: gehaltene Titel bleiben bis Rang n + 2, die freien Plätze bekommen die stärksten (wie screen.build target)
+  const keep = n + KEEP_EXTRA, held = jakobHeld();
+  const kept = Object.keys(held).filter(k => { const r = scrRow(k); return r && r.member && r.rank && r.rank <= keep; }).sort((a, b) => scrRow(a).rank - scrRow(b).rank);
+  const keys = [...kept, ...(sc.ranked || []).filter(k => stratKey(k) === k && !kept.includes(k)).slice(0, Math.max(0, n - kept.length))].sort((a, b) => ((scrRow(a) || {}).rank || 99) - ((scrRow(b) || {}).rank || 99)), w = share / n;
+  const items = keys.map(key => ({key, rank: (scrRow(key) || {}).rank, w, eur: base * w, stopped: stopped.has(key), inModel: inModel.has(key), kept: kept.includes(key)}));
+  return (S._ideal = {n, N, keep, share, base, items, reserve: 1 - w * items.length, minp, model, breadth: sc.breadth || {}});
 }
 // „Deine Regel“: ein Wort je Aktie für das Depot Jakob. Keine Empfehlung, nur deine Regeln (gleich in tracker/screen.py rule_words).
 const RULE_CLS = {Kaufen: 'good', Nachkaufen: 'teal', Halten: 'blue', Verkaufen: 'bad', Warten: ''};
@@ -923,15 +927,15 @@ function ruleOf(key) {
     if (!sr) return out('Halten', ['Noch keine Daten aus dem Filter'], null);
     if (!sr.member) return out('Verkaufen', ['nicht in der Auswahl der Regel (S&P 500, Nasdaq-100, Europa, China, Hongkong)'], v, me);
     if (!sr.trend) return out('Verkaufen', [`Aufwärtstrend gebrochen: Kurs ${pctS(sr.p200, 0)} zur 200-Tage-Linie${sr.p200 > 0 ? ', 50-Tage-Linie unter der 200-Tage-Linie' : ''}`, `Stärke ${sr.rs} von 99`], v, me);
-    if (!it) return out('Verkaufen', [`nicht mehr unter den ${ib.n} stärksten: ${rankTxt(sr)}`], v, me);
+    if (!it) return out('Verkaufen', [`nicht mehr unter den ${ib.keep} stärksten: ${rankTxt(sr)}`], v, me);
     const stopTxt = so && so.stop ? `${pctS(so.dd, 0)} zum Hoch seit Kauf, Stopp bei −${so.stop} %` : '';
     // Gewinner laufen weiter (keine regelmäßige Gleichgewichtung); nachgekauft wird nur, solange der Startbetrag nicht angelegt ist
     const startOpen = (+ansOf('capital') || 0) - (jakobBook().cost || 0) >= ib.minp, oc = overCap(v, ib);
     if (it.eur - v >= ib.minp && startOpen) return out('Nachkaufen', [`Startbetrag noch nicht angelegt: Ziel ${eur(it.eur, 0)}, im Depot ${eur(v, 0)}`, rankTxt(sr), stopTxt], it.eur - v, me);
-    return out('Halten', [rankTxt(sr), stopTxt, oc >= ib.minp / 2 ? `über deiner Grenze von ${capPct()} %: zum Monatsende etwa ${eur(oc, 0)} verkaufen und auf die übrigen Titel verteilen` : `im Depot ${eur(v, 0)}; Gewinner laufen weiter${capPct() ? ` bis ${capPct()} % je Titel` : ''}`], null);
+    return out('Halten', [rankTxt(sr) + (sr.rank > ib.n ? `, bleibt bis Rang ${ib.keep}` : ''), stopTxt, oc >= ib.minp / 2 ? `über deiner Grenze von ${capPct()} %: zum Monatsende etwa ${eur(oc, 0)} verkaufen und auf die übrigen Titel verteilen` : `im Depot ${eur(v, 0)}; Gewinner laufen weiter${capPct() ? ` bis ${capPct()} % je Titel` : ''}`], null);
   }
   if (it) return out('Kaufen', [rankTxt(sr), it.stopped ? 'im Ideal-Depot in diesem Monat gestoppt: erst zum Monatsende wieder' : ''], it.eur, me);
-  if (sr && sr.member) return out('Warten', [sr.rank && sr.rank <= ib.n * 2 ? `knapp hinter den ${ib.n} stärksten: ${rankTxt(sr)}` : rankTxt(sr)], null);
+  if (sr && sr.member) return out('Warten', [sr.rank && sr.rank <= ib.n * 2 ? `knapp hinter den ${ib.n} stärksten (Plätze belegt oder Rang zu weit hinten): ${rankTxt(sr)}` : rankTxt(sr)], null);
   return (S._rules[key] = null);
 }
 // Monatsrate (Fragen monthly, rate, min_pos): Aktienanteil des Ideal-Depots in die Titel, die am weitesten unter ihrem Ziel
@@ -1017,7 +1021,7 @@ function guardRails(rc) {
   add(top && top.w > mp ? 'warn' : 'ok', 'Kein Einsatz über die Hälfte des Kelly-Maßes', `Auch bei einer guten Wette nie alles auf einen Titel: höchstens ${mp} % je Aktie${top ? `, größte heute ${nf(top.w, 0)} %` : ''}. Sam Bankman-Fried wollte sogar mehr als das volle Kelly-Maß setzen.`);
   const bd = rc.bd, mdd = +a('max_dd') || 35;
   add(!bd ? 'open' : bd.dd < -mdd ? 'bad' : 'ok', 'Totalverlust vermeiden', bd ? `Größter Rückgang dieser Mischung: ${pctS(bd.dd, 0)}, deine Grenze −${mdd} %. Ein Erwartungswert hilft nichts, wenn man vorher aufgeben muss.` : 'Noch kein Verlauf für die Rechnung.');
-  add(stopPct() ? 'ok' : 'warn', 'Verluste begrenzen', stopPct() ? `Der Stopp verkauft jeden Titel, der ${stopPct()} % unter sein Hoch seit Kauf fällt. Im Backtest senkte er den größten Rückgang von −52 auf −49 %.` : 'Ohne Stopp (deine Wahl): im Backtest größter Rückgang −52 %, je nach Stichtag −57 %, statt −49 % mit Stopp. Verkauft wird erst zum Monatsende.');
+  add(stopPct() ? 'ok' : 'warn', 'Verluste begrenzen', stopPct() ? `Der Stopp verkauft jeden Titel, der ${stopPct()} % unter sein Hoch seit Kauf fällt. Im Backtest senkte er den größten Rückgang von −55 auf −49 %.` : 'Ohne Stopp (deine Wahl): im Backtest größter Rückgang −55 %, je nach Stichtag −59 %, statt −49 % mit Stopp. Verkauft wird erst zum Monatsende.');
   if (jakobBook().held.some(p => isCoin(p.key))) add(a('wallet') === 'exchange' ? 'warn' : a('wallet') ? 'ok' : 'open', 'Coins nicht auf der Börse lassen', a('wallet') === 'exchange' ? 'Auf einer Krypto-Börse gehören die Coins im Ernstfall der Börse, wie bei FTX.' : a('wallet') ? 'Gut: nicht auf einer Krypto-Börse.' : 'Frage offen: Wo liegen deine Coins?');
   return g;
 }
@@ -1044,7 +1048,7 @@ function playbook(rc) {
 function strategySummary() {
   const a = id => ansOf(id), L = id => ansLabel(id), ib = idealBook() || {n: 7};
   const s = [`Depot Jakob: Wachstums-Momentum mit Bausteinen aus deiner Quality-Growth-Vorlage, ${ib.n} Aktien ab ${eur(+a('min_pos') || 500, 0)}.`,
-    `Zum Monatsende gekauft werden die ${ib.n} stärksten Aktien aus S&P 500, Nasdaq-100, Europa, China und Hongkong (dazu Länder-ETFs der Schwellenländer), die im Aufwärtstrend sind, jede mit gleichem Betrag; danach laufen Gewinner weiter${capPct() ? `, höchstens ${capPct()} % je Titel` : ''}. ${stopPct() ? `Fällt ein Titel ${stopPct()} % unter sein Hoch seit dem Kauf, wird er sofort verkauft.` : 'Ohne Stopp.'} Horizont ${{lt2: 'unter 2 Jahren', '2to5': '2 bis 5 Jahre', gt5: 'über 5 Jahre'}[a('horizon') || 'lt2']}, Rückgang bis −${+a('max_dd') || 35} % tragbar.${+a('monthly') ? ` Jeden Monat ${eur(+a('monthly'), 0)} neu, ${a('rate') === 'split' ? 'gleich auf alle' : 'dorthin, wo am meisten fehlt'}.` : ''}`,
+    `Zum Monatsende gekauft werden die ${ib.n} stärksten Aktien aus S&P 500, Nasdaq-100, Europa, China und Hongkong (dazu TSMC, SK Hynix und Länder-ETFs der Schwellenländer), die im Aufwärtstrend sind, jede mit gleichem Betrag; danach laufen Gewinner weiter${capPct() ? `, höchstens ${capPct()} % je Titel` : ''}. ${stopPct() ? `Fällt ein Titel ${stopPct()} % unter sein Hoch seit dem Kauf, wird er sofort verkauft.` : 'Ohne Stopp.'} Horizont ${{lt2: 'unter 2 Jahren', '2to5': '2 bis 5 Jahre', gt5: 'über 5 Jahre'}[a('horizon') || 'lt2']}, Rückgang bis −${+a('max_dd') || 35} % tragbar.${+a('monthly') ? ` Jeden Monat ${eur(+a('monthly'), 0)} neu, ${a('rate') === 'split' ? 'gleich auf alle' : 'dorthin, wo am meisten fehlt'}.` : ''}`,
     'Relative Stärke wie bei IBD: Rendite der letzten 3 Monate zählt 40 %, der letzten 6, 9 und 12 Monate je 20 %. Aufwärtstrend wie bei Minervini: Kurs über der 200-Tage-Linie, die 50-Tage-Linie darüber.'];
   const t = [];
   if ((a('horizon') || 'lt2') === 'lt2') t.push('Momentum braucht Geduld: Im Backtest brachte die Regel 2018 −20 % und 2021 nur +1 %. Bei unter 2 Jahren Horizont kann so ein Jahr den Großteil der Zeit ausmachen.');
@@ -1054,7 +1058,7 @@ function strategySummary() {
   if (a('need') === 'yes') t.push('Du brauchst das Geld bald, willst aber −40 % aushalten. Das passt nicht zusammen.');
   const bm = S.bt && S.bt.rule === RULE_V ? (S.bt.strategies || []).find(x => x.id === (stopPct() ? 'best_stop' : 'best')) : null;
   t.push(`Die Regel kauft und verkauft im Backtest ${bm ? 'etwa ' + nf(bm.trades / (S.bt.years || 10), 0) + '-mal' : 'oft'} im Jahr. Gewinne fallen damit fast jedes Jahr an und werden versteuert; der Backtest rechnet ohne Steuern.`);
-  if (a('positions') != null && isNaN(+a('positions'))) t.push(`Deine Antwort „${a('positions')}“ Aktien zählt als ${ib.n}: Im Backtest brachten 6 Titel am meisten. Du kannst 6, 7 oder 8 wählen.`);
+  if (a('positions') != null && isNaN(+a('positions'))) t.push(`Deine Antwort „${a('positions')}“ Aktien zählt als ${ib.n}. Du kannst 4 bis 8 wählen; seit 28.11.2026 gilt 5, gehalten bis Rang 7.`);
   return {s, t};
 }
 

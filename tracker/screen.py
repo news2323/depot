@@ -5,13 +5,14 @@ dem Vergleich mit Jakobs Quality-Growth-Vorlage (27.11.2026: übernommen 6 Titel
 Punkte statt Kursstärke und Kauf erst nach Rücksetzern kosteten viel Rendite) und der Prüfung aller Stellschrauben ohne
 Stopp (27.11.2026 abends, Jakobs Wunsch): keine regelmäßige Gleichgewichtung, Obergrenze 30 % je Titel.
 - Auswahl (Jakobs Wunsch vom 28.11.2026: weltweit; nach dem Backtest gewählt): die heutigen Mitglieder von S&P 500 und
-  Nasdaq-100, dazu die Aktien aus Europa, China und Hongkong im MSCI ACWI (world.py, INCLUDE), und 18 Länder-ETFs der
+  Nasdaq-100, dazu die Aktien aus Europa, China und Hongkong im MSCI ACWI (world.py, INCLUDE), TSMC und SK Hynix (PICK) und 18 Länder-ETFs der
   Schwellenländer. Rangfolge in Dollar umgerechnet.
 - Relative Stärke wie bei IBD (CAN SLIM): Rendite der letzten 3 Monate zu 40 %, der letzten 6, 9 und 12 Monate zu je 20 %,
   mit Dividenden.
 - Aufwärtstrend wie bei Minervini: Kurs über der 200-Tage-Linie, 50-Tage-Linie über der 200-Tage-Linie.
-- Zum Monatsende die 6 stärksten Titel im Aufwärtstrend; was nicht mehr dazugehört, wird getauscht. Neue Titel bekommen ein
-  gleiches Gewicht (Depot ÷ 6), die übrigen laufen weiter (keine regelmäßige Gleichgewichtung).
+- Zum Monatsende 5 Titel (Jakobs Wahl vom 28.11.2026): Ein gehaltener Titel bleibt, solange er im Aufwärtstrend unter den
+  7 stärksten ist (KEEP_EXTRA); freie Plätze bekommen die stärksten, die noch fehlen. Neue Titel bekommen ein gleiches
+  Gewicht (Depot ÷ 5), die übrigen laufen weiter (keine regelmäßige Gleichgewichtung).
 - Obergrenze je Titel (Frage „maxpos“, Standard 30 %): Liegt ein Titel zum Monatsende darüber, wird der Überschuss verkauft
   und auf die Titel darunter verteilt (enforce_cap).
 - Kein Stopp (Jakobs Wunsch vom 27.11.2026). Wahlweise Nachlauf-Stopp 25 % ab Hoch seit Kauf (Frage „stop“): Dann wird ein
@@ -32,8 +33,9 @@ import time
 from . import sources, world
 from .common import SourceError, asset_key, http_json, log, now_iso
 
-RULE_V = "wm4"           # Version der Regel; ändert sie sich, wird das Ideal-Depot neu nachgerechnet
-N_POS = 6                # im Backtest besser als 7 oder 8 (Frage positions)
+RULE_V = "wm5"           # Version der Regel; ändert sie sich, wird das Ideal-Depot neu nachgerechnet
+N_POS = 5                # Jakobs Wahl vom 28.11.2026 nach dem Backtest (Frage positions; vorher 6)
+KEEP_EXTRA = 2           # gehalten wird bis Rang n + 2 (bei 5 Titeln bis Rang 7), gekauft die stärksten bis n Titel
 CAP_PCT = 30             # Obergrenze je Titel zum Monatsende (Frage maxpos); 15 % kostete im Backtest gut 5 Punkte pro Jahr
 STOP_PCT = 25            # Nachlauf-Stopp ab Hoch seit Kauf
 COST = 0.001             # Kosten je Kauf und Verkauf im Modell (wie im Backtest)
@@ -64,7 +66,7 @@ def answers(pf):
 
 def n_slots(ans):
     """Zahl der Titel: Antwort positions (4 bis 8). Alte Antworten als Spanne („6-8“) nehmen die kleinste Zahl ab 6
-    (Jakobs Vorgabe: so viele wie bisher; im Backtest brachten weniger Titel mehr, bei größeren Einzelpositionen)."""
+    (Jakobs Vorgabe vom 27.11.2026; seit 28.11.2026 gilt seine Antwort 5)."""
     v = ans.get("positions")
     try:
         return max(1, int(v))
@@ -430,15 +432,16 @@ def advance(state, cal, px, uni, n, stop, today=None, cap=None):
                         st["stopped"].append(ev)
                         st["stops"].append(ev)
         if me:
-            top = ranked(snapshot(px, uni, k))[:n]
-            keep = [it for it in st["items"] if it["sym"] in top]
-            out = [it for it in st["items"] if it["sym"] not in top]
+            rk = ranked(snapshot(px, uni, k))
+            top, hold = rk[:n], set(rk[:n + KEEP_EXTRA])
+            keep = [it for it in st["items"] if it["sym"] in hold]
+            out = [it for it in st["items"] if it["sym"] not in hold]
             for it in out:
                 st["cash"] += it["v"] * (1 - COST)
             w = (st["cash"] + sum(it["v"] for it in keep)) / n      # keine regelmäßige Gleichgewichtung: Gewinner laufen weiter
             have = {it["sym"] for it in keep}
             new = []
-            for s in top:
+            for s in [x for x in rk if x not in have][:max(0, n - len(keep))]:
                 p = price(s, k)
                 amt = min(st["cash"], w)
                 if s in have or not p or amt <= 0.1 * w:
@@ -511,8 +514,9 @@ def last_weekday_of_month(d):
 
 def rule_words(rows, held, top, stopped):
     """Wort je Aktie für das Depot Jakob, ohne Beträge (gleiche Rechnung wie ruleOf in web/app.js): Verkaufen sofort beim
-    Stopp; zum Monatsende, wenn ein Titel nicht mehr zu den stärksten im Aufwärtstrend gehört; Halten, solange er dazugehört;
-    Kaufen zum Monatsende, was dazukommt (auch ein Titel, den der Stopp im Ideal-Depot in diesem Monat verkauft hat)."""
+    Stopp; zum Monatsende, wenn ein Titel nicht mehr zu den stärksten im Aufwärtstrend gehört (bis Rang n + 2); Halten,
+    solange er dazugehört; Kaufen zum Monatsende, was dazukommt (auch ein Titel, den der Stopp im Ideal-Depot in diesem
+    Monat verkauft hat). top = Ziel für das Depot Jakob (target in build)."""
     out = {}
     for k in set(held) | set(top):
         r = rows.get(k)
@@ -538,7 +542,7 @@ def rule_words(rows, held, top, stopped):
 
 # ----------------------------------------------------------------- Hinweise aufs Handy
 WHY = {"stop": "Kurs %d %% unter dem Hoch seit Kauf" % STOP_PCT, "auswahl": "nicht in der Auswahl (S&P 500, Nasdaq-100, Europa, China)",
-       "trend": "Aufwärtstrend gebrochen", "rang": "nicht mehr unter den stärksten im Aufwärtstrend",
+       "trend": "Aufwärtstrend gebrochen", "rang": "nicht mehr unter den %d stärksten im Aufwärtstrend" % (N_POS + KEEP_EXTRA),
        "top": "neu unter den stärksten im Aufwärtstrend", "wieder": "im Ideal-Depot gestoppt, zum Monatsende wieder unter den stärksten"}
 WT = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
 
@@ -561,7 +565,7 @@ def events(prev, words, names, st, first, today):
     by = lambda w: [k for k, x in words.items() if x[0] == w]
     if first:
         parts = ["%s: %s" % (w, nm(by(w))) for w in ("Verkaufen", "Kaufen", "Halten") if by(w)]
-        head = "Regel angepasst: Auswahl um große Aktien aus Europa, China und Hongkong erweitert" if str((prev or {}).get("rule") or "").startswith("wm") \
+        head = "Regel angepasst: 5 Titel, gehalten bis Rang 7; TSMC und SK Hynix gehören zur Auswahl" if str((prev or {}).get("rule") or "").startswith("wm") \
             else "Wachstums-Momentum ersetzt deine bisherigen Regeln"
         add("depot:jakob", "Depot Jakob", "neu", "%s. Zum Monatsende (%s): %s" % (head, me_txt, "; ".join(parts) if parts else "nichts zu tun"))
         return out
@@ -718,7 +722,10 @@ def build(store, pf, base, push, fg=None, mfg=None, extra=None, live=None, today
             r["since"] = held[key]
         rows[key] = r
     stopped = {asset_key("stock", e["sym"]) for e in st["stopped"]}
-    words = rule_words(rows, held, [asset_key("stock", s) for s in top], stopped)
+    # Ziel für das Depot Jakob: gehaltene Titel bis Rang n + 2 bleiben, die freien Plätze bekommen die stärksten
+    kept = [k for k in held if rank.get(k.split(":", 1)[1], 999) <= n + KEEP_EXTRA and (rows.get(k) or {}).get("member")]
+    target = kept + [k for k in (asset_key("stock", s) for s in R) if k not in kept][:max(0, n - len(kept))]
+    words = rule_words(rows, held, target, stopped)
     names = {k: SHORT.get(r["symbol"]) or short_name(r.get("name")) or r["symbol"] for k, r in rows.items()}
     first = prev.get("rule") != RULE_V
     day = datetime.date.today()
@@ -727,7 +734,8 @@ def build(store, pf, base, push, fg=None, mfg=None, extra=None, live=None, today
     evs = (new + ([] if first else [e for e in prev.get("events") or [] if e["day"] >= keep]))[:80]
     doc = {"updated": now_iso(), "rule": RULE_V, "n": n, "stop": stop, "cap": cap, "asof": _iso(cal[-1]),
            "list": sorted(rows.values(), key=lambda r: (r.get("rank") or 999, -(r.get("rs") or 0))),
-           "ranked": [asset_key("stock", s) for s in R[:25]], "top": [asset_key("stock", s) for s in top],
+           "ranked": [asset_key("stock", s) for s in R[:25]], "top": [asset_key("stock", s) for s in top], "target": target,
+           "keep_rank": n + KEEP_EXTRA,
            "ideal": {"items": [{"key": asset_key("stock", s), "rank": i + 1} for i, s in enumerate(top)],
                      "model": [dict(it, key=asset_key("stock", it["sym"])) for it in st["items"]],
                      "asof": st["asof"], "cash": round(st["cash"], 5), "stopped": st["stopped"], "log": st["log"], "stops": st["stops"],

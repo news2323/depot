@@ -6,7 +6,7 @@ Handelbar über deutsche Broker sind Industrieländer und Hongkong; aus Schwelle
 Indien, Brasilien, Mexiko …) nur Firmen mit einer Notiz in New York (ADR, Tabelle ADR); China A-Aktien, Saudi-Arabien,
 Golfstaaten und Russland nie (yahoo_symbol, parse: so rechnet auch der Backtest „weltweit“).
 
-Die Strategie nimmt davon nur INCLUDE (Backtest 28.11.2026, 10 Jahre, 6 Stichtage, Regel der App): S&P 500 und Nasdaq-100
+Die Strategie nimmt davon INCLUDE und PICK (TSMC, SK Hynix; Backtest 28.11.2026, 10 Jahre, 6 Stichtage, Regel der App): S&P 500 und Nasdaq-100
 33,0 % pro Jahr (Rückgang −48 %), dazu Europa, China und Hongkong 34,8 % (−52 %, beide Hälften besser), ganzer ACWI nur
 30,8 % (−64 %); einzeln dazu: Europa 36,4 %, China/Hongkong 33,8 %, US-Mittelwerte 35,5 % (erste Hälfte schlechter),
 Kanada/Australien 31,8 %, Japan 28,9 %, Schwellenländer über New York 28,5 %.
@@ -34,7 +34,8 @@ HOME = {"Canada", "United Kingdom", "Ireland", "France", "Germany", "Netherlands
         "New Zealand", "Hong Kong", "Singapore", "China", "Macau"}
 NO_HOME = {"shanghai", "shenzhen"}     # China A-Aktien: über deutsche Broker nicht handelbar
 # Schwellenländer: Heimatkürzel -> Notiz in New York
-ADR = {("Taiwan", "2330"): "TSM", ("Taiwan", "2303"): "UMC", ("Taiwan", "3711"): "ASX", ("Taiwan", "2412"): "CHT",
+ADR = {("Korea (South)", "000660"): "000660.KS",      # SK Hynix: keine Notiz in New York, Heimatbörse (PICK)
+       ("Taiwan", "2330"): "TSM", ("Taiwan", "2303"): "UMC", ("Taiwan", "3711"): "ASX", ("Taiwan", "2412"): "CHT",
        ("Korea (South)", "105560"): "KB", ("Korea (South)", "055550"): "SHG", ("Korea (South)", "005490"): "PKX",
        ("Korea (South)", "015760"): "KEP", ("Korea (South)", "017670"): "SKM", ("Korea (South)", "030200"): "KT",
        ("India", "INFY"): "INFY", ("India", "HDFCBANK"): "HDB", ("India", "ICICIBANK"): "IBN", ("India", "WIPRO"): "WIT",
@@ -53,6 +54,7 @@ ADR = {("Taiwan", "2330"): "TSM", ("Taiwan", "2303"): "UMC", ("Taiwan", "3711"):
 EUROPE = {"United Kingdom", "Ireland", "France", "Germany", "Netherlands", "Belgium", "Luxembourg", "Austria", "Switzerland",
           "Italy", "Spain", "Portugal", "Denmark", "Sweden", "Norway", "Finland"}
 INCLUDE = EUROPE | {"China", "Hong Kong", "Macau"}     # zusätzlich zu S&P 500 und Nasdaq-100
+PICK = {"TSM", "000660.KS"}     # TSMC und SK Hynix trotz Schwellenland (Jakobs Wunsch vom 28.11.2026), solange im MSCI ACWI
 COUNTRY_DE = {"United States": "USA", "Canada": "Kanada", "United Kingdom": "Großbritannien", "Ireland": "Irland",
               "France": "Frankreich", "Germany": "Deutschland", "Netherlands": "Niederlande", "Belgium": "Belgien",
               "Luxembourg": "Luxemburg", "Austria": "Österreich", "Switzerland": "Schweiz", "Italy": "Italien", "Spain": "Spanien",
@@ -128,4 +130,4 @@ def acwi(include=INCLUDE):
     allm = parse(txt)
     if len(allm) < 1000:
         return {}
-    return {s: v for s, v in allm.items() if include is None or v[0] in include}
+    return {s: v for s, v in allm.items() if include is None or v[0] in include or s in PICK}
